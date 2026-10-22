@@ -64,8 +64,10 @@ jobs:
           ./gradlew assembleRelease --console=plain
           apk=app/build/outputs/apk/release/app-release.apk
           apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
-          "$apksigner" verify --print-certs "$apk" | grep -qx "Signer #1 certificate SHA-256 digest: $CERT_SHA256" \
-            || { echo "$apk isn't signed with the release key"; exit 1; }
+          # Newer build-tools name the signer differently ("Signer #1", "Signer (minSdkVersion=…)"): match the digest.
+          certs=$("$apksigner" verify --print-certs "$apk" 2>&1) || { echo "$certs"; exit 1; }
+          grep -qE "certificate SHA-256 digest: $CERT_SHA256\s*$" <<< "$certs" \
+            || { echo "$apk isn't signed with the release key:"; grep -i "signer" <<< "$certs"; exit 1; }
           mkdir -p ../dist
           cp "$apk" "../dist/tv-agent-android-$v.apk"
 
