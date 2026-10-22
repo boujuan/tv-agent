@@ -1,7 +1,8 @@
 """How each decision path does on what the rules don't catch, and how long it takes. Nothing is sent to the TV.
 
 Sentences: eval/hard.jsonl (40 English + 40 Spanish: indirect phrasings, titles described instead of named,
-non-commands) and, with --sample N, N rows per category of eval/commands.jsonl.
+non-commands; the rules and the LLM's prompt were tuned on it), eval/hard_holdout.jsonl (20 + 20 more that nothing
+was tuned on: --hard eval/hard_holdout.jsonl) and, with --sample N, N rows per category of eval/commands.jsonl.
 
 Paths:
   rules          clean-up, fixed phrases and patterns only
@@ -50,13 +51,16 @@ def judge(action: A.Action, expect: dict) -> tuple[bool, bool]:
             have = norm(got.get(key.removesuffix("_any")) or "")
             if not any(norm(w) in have for w in want):
                 return True, False
+        elif isinstance(want, str) and isinstance(got.get(key), str):
+            if want.lower().strip() != got[key].lower().strip():
+                return True, False
         elif got.get(key) != want:
             return True, False
     return True, True
 
 
-def rows(sample: int) -> list[dict]:
-    out = [json.loads(line) | {"set": "hard"} for line in (EVAL / "hard.jsonl").read_text().splitlines() if line]
+def rows(sample: int, hard: Path) -> list[dict]:
+    out = [json.loads(line) | {"set": "hard"} for line in hard.read_text().splitlines() if line]
     if sample:
         by_cat: dict[str, list[dict]] = {}
         for line in (EVAL / "commands.jsonl").read_text().splitlines():
@@ -75,6 +79,8 @@ async def main():
     p.add_argument("--sample", type=int, default=0)
     p.add_argument("--paths", default=",".join(PATHS))
     p.add_argument("--out")
+    p.add_argument("--hard", default=str(EVAL / "hard.jsonl"),
+                   help="the hard sentences (eval/hard_holdout.jsonl: 40 more nothing was tuned on)")
     args = p.parse_args()
     paths = args.paths.split(",")
     cfg = config.load()
@@ -104,7 +110,7 @@ async def main():
         return await llm.decide(text, await agent.llm_context(text)) or A.Unclear(heard=text)
 
     results = []
-    data = rows(args.sample)
+    data = rows(args.sample, Path(args.hard))
     for i, r in enumerate(data, 1):
         res = {"text": r["text"], "lang": r["lang"], "set": r["set"], "expect": r["expect"]}
         for path in paths:

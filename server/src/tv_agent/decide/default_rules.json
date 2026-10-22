@@ -116,12 +116,12 @@
         "note": "Spanish: inicio"
       },
       {
-        "from": "^(?:pon |ve al |pasa al )?(?:el )?(?:siguiente|pr[oó]ximo) (?:cap[ií]tulo|episodio)$|^el siguiente$|^siguiente$|^(?:pon(?:me)? )?el que viene$|^(?:pon(?:me)? )?el pr[oó]ximo$",
+        "from": "^(?:pon(?:me)? |ve al |pasa al )?(?:el )?(?:siguiente|pr[oó]ximo) (?:cap[ií]tulo|episodio)$|^el siguiente$|^siguiente$|^(?:pon(?:me)? )?el que viene$|^(?:pon(?:me)? )?el pr[oó]ximo$",
         "to": "next episode",
         "note": "Spanish: siguiente capítulo"
       },
       {
-        "from": "^(?:pon |ve al |vuelve al )?(?:el )?(?:cap[ií]tulo|episodio) anterior$|^el anterior$|^anterior$",
+        "from": "^(?:pon(?:me)? |ve al |vuelve al )?(?:el )?(?:cap[ií]tulo|episodio) anterior$|^el anterior$|^anterior$",
         "to": "previous episode",
         "note": "Spanish: capítulo anterior"
       },
@@ -994,7 +994,7 @@
         "type": "tracks",
         "audio": "{lang|language!}"
       },
-      "match": "^(?:(?:play|put|switch|change|watch)(?: it)?|audio|sound)\\s+(?:in|to|into)\\s+(?P<lang>(?:simplified |traditional )?[a-zà-ÿ]+(?: (?:simplified|traditional))?)$"
+      "match": "^(?:(?:play|put|switch|change|watch)(?: it)?|audio|sound)\\s+(?:in|to|into)\\s+(?P<lang>(?:its |the )?original(?: language| version| audio)?|(?:simplified |traditional )?[a-zà-ÿ]+(?: (?:simplified|traditional))?)$"
     },
     {
       "id": "what_did_they_say",

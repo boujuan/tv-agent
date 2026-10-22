@@ -156,8 +156,9 @@ op read "op://Personal/<item>/credential" | .venv/bin/tv-agent setup openrouter 
 
 The keys are checked with the service, never shown, and kept in `secrets.toml` (the panel's Settings can set them
 too); `hosted_d1` and `llm_fallback` (on by default) say whether they're used. With an OpenRouter key, the LLM
-(`llm_model`, Gemini 3.5 Flash-Lite) decides what the rules don't, before d1 (`llm_first`: on unusual phrasings it
-was right 80-90% of the time against d1's 40-70%, at about d1's ~0.85 s; see the research doc); d1 then only
+(`llm_model`, Gemini 3.5 Flash-Lite) decides what the rules don't, before d1 (`llm_first`: on 40 fresh hard commands
+the whole path was right 95% of the time in English and in Spanish, against 70% / 60% with the local d1, at ~0.8 s;
+[research §2.8](../docs/research-2026-10-22.md)); d1 then only
 decides when the LLM can't be reached, and Liquid's hosted d1 only when the local one doesn't answer either. What
 goes to them: the LLM gets what you said, what's playing, the app names and up to 10 of your library's titles
 (fastest provider; `llm_private` for zero-data-retention ones only); Liquid gets what you said and the options

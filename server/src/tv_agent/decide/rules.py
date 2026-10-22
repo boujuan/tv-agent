@@ -162,6 +162,7 @@ NOT_A_TITLE = re.compile(r"^(?:it|this|that|something|anything|again|the movie|t
                          r"(?:the )?(?:next|previous|last|prior) (?:episode|one|part)|"
                          r"(?:a |some |any )?(?:game|games|music|song|songs|videos?|movies?|films?|shows?|series))$"
                          r"|^(?:this|that) (?:episode|movie|film|show|series)\b"          # "start this episode over"
+                         r"|^(?:it|this|that) (?:in|with|again|from|back|for|on)\b"        # "play it in its original…"
                          r"|^(?:the |los |las |el |la )?(?:subtitles|subs|captions|subt[ií]tulos)\b")
 # A title described rather than named ("that Nolan film about the atomic bomb", "la de los atracadores"): the models
 # (the LLM knows titles) decide those, not a title search for the description.
@@ -212,7 +213,7 @@ LANGUAGE_NAMES = {"english": "eng", "spanish": "spa", "castilian": "spa", "caste
 
 def _language(v, _):
     t = v.strip().lower()
-    if t in ("original", "the original"):
+    if re.fullmatch(r"(?:its |the )?original(?: language| version| audio)?", t):
         return "original"
     return LANGUAGE_NAMES.get(re.sub(r"^the ", "", t))
 

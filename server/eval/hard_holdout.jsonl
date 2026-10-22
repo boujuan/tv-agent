@@ -1,0 +1,40 @@
+{"lang": "en", "text": "throw on the next episode would you", "expect": {"type": "next_episode", "offset": 1}}
+{"lang": "en", "text": "could you crank it up a notch", "expect": {"type": "volume", "op": "up"}}
+{"lang": "en", "text": "too noisy, bring it down", "expect": {"type": "volume", "op": "down"}}
+{"lang": "en", "text": "kill the sound", "expect": {"type": "volume", "op": "mute"}}
+{"lang": "en", "text": "I've had enough, shut it off after this chapter", "expect": {"type": "timer", "then": "off", "minutes": null}}
+{"lang": "en", "text": "zip back fifteen seconds", "expect": {"type": "transport", "op": "back", "seconds": 15}}
+{"lang": "en", "text": "go to the very beginning of this", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}}
+{"lang": "en", "text": "what were they saying just now", "expect": {"type": "replay"}}
+{"lang": "en", "text": "get rid of the opening credits", "expect": {"type": "skip", "what": "intro"}}
+{"lang": "en", "text": "the film where leonardo dicaprio dreams inside dreams", "expect": {"type": "play_title", "title_any": ["inception", "origen"]}}
+{"lang": "en", "text": "that heist show from spain with the red jumpsuits", "expect": {"type": "play_title", "title_any": ["casa de papel", "money heist"]}}
+{"lang": "en", "text": "list the stuff I was watching", "expect": {"type": "show_list", "list": "recent"}}
+{"lang": "en", "text": "anything fresh on my shows", "expect": {"type": "show_list", "list": "new"}}
+{"lang": "en", "text": "choose number five", "expect": {"type": "pick", "number": 5}}
+{"lang": "en", "text": "turn the captions on in spanish", "expect": {"type": "tracks", "subtitles": "spa"}}
+{"lang": "en", "text": "play it in its original language", "expect": {"type": "tracks", "audio": "original"}}
+{"lang": "en", "text": "remind me what I can say", "expect": {"type": "help"}}
+{"lang": "en", "text": "pull up youtube", "expect": {"type": "open_app", "app": "tizentube"}}
+{"lang": "en", "text": "stop the video and go back to the home screen", "expect": {"type": "home"}}
+{"lang": "en", "text": "can you tell me a joke", "expect": {"type": "none"}}
+{"lang": "es", "text": "ponme el siguiente capítulo porfa", "expect": {"type": "next_episode", "offset": 1}}
+{"lang": "es", "text": "súbele un poco", "expect": {"type": "volume", "op": "up"}}
+{"lang": "es", "text": "bájale que molesta", "expect": {"type": "volume", "op": "down"}}
+{"lang": "es", "text": "quítale el sonido", "expect": {"type": "volume", "op": "mute"}}
+{"lang": "es", "text": "cuando termine este apaga la tele", "expect": {"type": "timer", "then": "off", "minutes": null}}
+{"lang": "es", "text": "retrocede quince segundos", "expect": {"type": "transport", "op": "back", "seconds": 15}}
+{"lang": "es", "text": "vuelve al principio del capítulo", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}}
+{"lang": "es", "text": "¿qué ha dicho el tío?", "expect": {"type": "replay"}}
+{"lang": "es", "text": "quita la intro", "expect": {"type": "skip", "what": "intro"}}
+{"lang": "es", "text": "la peli de DiCaprio de los sueños dentro de sueños", "expect": {"type": "play_title", "title_any": ["inception", "origen"]}}
+{"lang": "es", "text": "la serie española del atraco con monos rojos", "expect": {"type": "play_title", "title_any": ["casa de papel", "money heist"]}}
+{"lang": "es", "text": "enséñame lo que estaba viendo", "expect": {"type": "show_list", "list": "recent"}}
+{"lang": "es", "text": "¿hay algo nuevo de mis series?", "expect": {"type": "show_list", "list": "new"}}
+{"lang": "es", "text": "elige el quinto", "expect": {"type": "pick", "number": 5}}
+{"lang": "es", "text": "pon los subtítulos en español", "expect": {"type": "tracks", "subtitles": "spa"}}
+{"lang": "es", "text": "ponlo en el idioma original", "expect": {"type": "tracks", "audio": "original"}}
+{"lang": "es", "text": "¿qué cosas te puedo pedir?", "expect": {"type": "help"}}
+{"lang": "es", "text": "ponme youtube", "expect": {"type": "open_app", "app": "tizentube"}}
+{"lang": "es", "text": "para el vídeo y vuelve a la pantalla de inicio", "expect": {"type": "home"}}
+{"lang": "es", "text": "cuéntame un chiste", "expect": {"type": "none"}}
