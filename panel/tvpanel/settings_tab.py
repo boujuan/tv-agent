@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
                                QMessageBox, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
 from .common import AMBER, GREEN, RED, TV_AGENT, Say, agent_config, api, card, dim, load_cfg, set_autostart
+from .phones import Phones
 
 AUDIO = [("English", "eng"), ("Spanish", "spa"), ("French", "fre"), ("Italian", "ita"), ("German", "ger"),
          ("Portuguese", "por"), ("Japanese", "jpn"), ("Korean", "kor"), ("Chinese", "chi")]
@@ -196,6 +197,9 @@ class Settings(QScrollArea):
         f3.addRow("", self.log)
         f3.addRow("TV addresses", self.hosts)
         outer.addWidget(other)
+
+        self.phones = Phones(panel)                 # its own API calls, applied at once (not the window's Save)
+        outer.addWidget(self.phones)
 
         self.show_advanced = QCheckBox("Show advanced settings (addresses, ports, Kodi login, pairing)")
         outer.addWidget(self.show_advanced)

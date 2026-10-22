@@ -9,6 +9,7 @@ arch=(any)
 url="https://github.com/boujuan/tv-agent"
 license=(MIT)
 depends=(python pyside6 python-psutil pipewire systemd tv-agent)
+optdepends=('qrencode: the QR code that pairs a phone')
 source=("$pkgname-$pkgver.tar.gz::$url/releases/download/panel-v$pkgver/tv-agent-panel-$pkgver.tar.gz")
 sha256sums=('SKIP')
 

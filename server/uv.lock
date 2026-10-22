@@ -644,6 +644,7 @@ version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "adb-shell" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "numpy" },
@@ -668,6 +669,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "adb-shell", specifier = "==0.4.4" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.3,<3" },

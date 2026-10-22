@@ -208,6 +208,7 @@ the daemon refuses to start otherwise). For services across logouts: `loginctl e
 | Run a command on the TV | `tv-agent tv shell dumpsys media_session` |
 | Re-pair the TV app (new token or address) | `tv-agent tv pair` |
 | Let Claude Code drive the TV | `claude mcp add --scope user tv-agent -- $PWD/.venv/bin/tv-agent-mcp` (12 tools, no shell) |
+| Use it from my phone | The [TV Agent phone app](https://github.com/boujuan/tv-agent-phone); pair it in the panel's Settings › Phones |
 | Stop it for a while | `systemctl --user stop tv-agent llama-d1` (the mic button then says "Agent offline") |
 | Fix a command it got wrong | Say "that's wrong" right after; then in the panel's Activity tab right-click it, "Teach the right action…" (or `tv-agent review` for the list, with an LLM's guess) |
 
@@ -240,6 +241,23 @@ Localhost (127.0.0.1:8766), for the panel, the CLI and the MCP server, same toke
 | `GET /v1/now-playing/link`; `POST /v1/tv/play-link` `{"url"}` | the stream the agent plays; play any http(s) link |
 | `GET /v1/tv/packages` | the TV app, Kodi and Just Player on the TV: installed, version, enabled; the app's APK SHA-256 |
 | `GET /v1/about` | this agent's version, Python, start time and the models it uses |
+| `GET /v1/now-playing` | the title, episode (name, poster), position, Kodi's audio and subtitle tracks, intro/recap/credits |
+| `POST /v1/now-playing/track` `{"audio": i}` / `{"subtitle": i \| null}` | one of Kodi's tracks by its index |
+| `POST /v1/remote/key` `{"key", "long"}`; `POST /v1/remote/text` `{"text"}` | a key (d-pad, OK, numbers…, `remote.KEYS`); typing into the TV's focused field (ASCII) |
+| `GET /v1/tv/volume`; `GET /v1/apps` | the TV's volume; the apps the agent may open |
+| `GET /v1/lists?list=recent\|new\|movies`; `POST /v1/lists/pick` `{"list", "imdb", "video"}` | the numbered lists voice shows on the TV, returned instead; play one (it's also what "number 2" picks from) |
+| `GET /v1/activity?limit=&before=`; `POST /v1/activity/mark` `{"t", "wrong", "heard"}`; `GET /v1/recording?name=` | the history, newest first, a page at a time; mark one wrong; a kept recording (WAV) |
+| `GET/POST /v1/settings` | the Settings tab's playback and language settings (`remote.SETTINGS`), checked, saved and live |
+| `GET /v1/clients`; `POST /v1/clients/pairing`, `GET` it, `/pairing/cancel`; `POST /v1/clients/revoke\|rename` `{"id"}` | paired phones (localhost only): list, pair (a one-time code and the QR code's link), revoke |
+
+Phones, paired from the panel (Settings › Phones), on this computer's LAN address (and `phone_hosts`, e.g. a
+Tailscale address), for the [TV Agent phone app](https://github.com/boujuan/tv-agent-phone):
+
+| | |
+|---|---|
+| `POST /v1/pair` `{"code", "name"}` (port 8768, HTTPS) | the panel's one-time code → this phone's own token, the agent's name and version, the stream port |
+| the endpoints above, with that token (port 8768, HTTPS) | all but the stream link, the rules editor (`POST /v1/rules`, reset, reload, eval) and the client list; `GET /v1/clients/me` and `POST /v1/clients/me/forget` instead |
+| port 8769, TLS | the TV app's audio stream protocol (`server.py`), with the phone's token in the first line |
 
 ## Security
 
@@ -248,6 +266,17 @@ Localhost (127.0.0.1:8766), for the panel, the CLI and the MCP server, same toke
   refused; one utterance at a time. The local API (127.0.0.1) needs the token too.
 - **The token** reaches the TV app by pairing (`tv-agent tv pair`, an ADB broadcast only the shell may send); it
   is never built into the APK. Rotate: `tv-agent setup token --rotate`, then `tv-agent tv pair`.
+- **Phones** (`clients.py`) never get the agent token: each pairs with a one-time code from the panel (8
+  characters, 40 bits, 5 minutes, one use, closed after 5 wrong tries; `/v1/pair` answers 10 tries a minute) and
+  gets its own token, of which only the SHA-256 is kept (`clients.json`, mode 600), checked in constant time,
+  revoked at once from the panel. Their listeners speak TLS with this computer's own certificate
+  (`phone-tls.crt`/`.key`, EC P-256, made on first start, key mode 600), whose SHA-256 the QR code carries and the
+  app pins: it never sends its token to anything else on a network (another Wi-Fi with the same addresses). Typed
+  in instead, the app shows the fingerprint to compare with the panel's. A phone reaches only the listed endpoints
+  (`clients.PHONE_ROUTES`), with bodies up to 64 KB (audio 400 KB); never the stream link, the rules editor, the
+  list of phones or any secret; its settings are the panel's playback and language ones, not addresses or ports.
+  Its tokens open nothing on the TV's listener or the local API. `phones = false` turns the listeners off.
+  New certificate: delete both files, restart, pair the phones again.
 - **Stremio auth key**: full access to your Stremio account, obtained with Stremio's own link login (no password
   typed anywhere). Your addons' URLs carry your debrid key and stay in memory only. Logs keep only hostnames of any
   URL and mask known secrets (`redact.py`).
@@ -276,6 +305,7 @@ rm -rf ~/.config/tv-agent ~/.local/share/tv-agent ~/.local/opt/llama.cpp ~/.loca
 | Path | What it is |
 |---|---|
 | `src/tv_agent/server.py` | The daemon: LAN listener for the TV app, localhost API, background execution |
+| `src/tv_agent/clients.py`, `remote.py` | Paired phones (pairing, tokens, their TLS listeners); the API the phone app adds (now playing, remote, lists, activity, settings) |
 | `src/tv_agent/cli.py`, `install.py` | The `tv-agent` command; user services, TV app install and pairing |
 | `src/tv_agent/stt.py` | Speech-to-text (Parakeet via sherpa-onnx, or hosted through OpenRouter); recordings |
 | `src/tv_agent/tv/status.py` | The TV's status, network, speed test and ADB diagnosis for the panel |

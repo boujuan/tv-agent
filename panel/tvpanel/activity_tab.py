@@ -20,7 +20,8 @@ from PySide6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QHBoxLayout, QHea
 from .common import (AMBER, BLUE, GREEN, GREY, RED, LevelBar, agent_activity, agent_stt, api, card, dim,
                      journal_history, offer_to_delete_recordings)
 
-SOURCES = {"tv": "📺 Remote", "laptop": "💻 Laptop mic", "text": "⌨ Typed", "mcp": "🤖 Claude", "unknown": "·"}
+SOURCES = {"tv": "📺 Remote", "laptop": "💻 Laptop mic", "phone": "📱 Phone", "text": "⌨ Typed", "mcp": "🤖 Claude",
+           "unknown": "·"}
 FIELDS = ["t", "source", "heard", "type", "via", "rule", "confidence", "ok", "say", "ms"]
 
 
@@ -355,7 +356,7 @@ class Activity(QWidget):
                     f"<td align=right>&nbsp;{f(percentile(values, 0.95))}</td>"
                     f"<td align=right style='color:gray'>&nbsp;{len(values)}</td></tr>")
 
-        spoken = [e for e in rows if e.get("source") in ("tv", "laptop")]
+        spoken = [e for e in rows if e.get("source") in ("tv", "laptop", "phone")]
         out = [line("After your last word", [e.get("after_speech_ms") for e in spoken]),
                line("Speech to text, this laptop", [e.get("stt_ms") for e in spoken if e.get("stt") == "local"]),
                line("Speech to text, hosted", [e.get("stt_ms") for e in spoken if e.get("stt") not in (None, "local")])]

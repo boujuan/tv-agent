@@ -17,6 +17,9 @@ CONFIG_DIR = Path(os.environ.get("TV_AGENT_CONFIG", Path.home() / ".config/tv-ag
 DATA_DIR = Path.home() / ".local/share/tv-agent"
 CONFIG_FILE = CONFIG_DIR / "config.toml"
 SECRETS_FILE = CONFIG_DIR / "secrets.toml"
+CLIENTS_FILE = CONFIG_DIR / "clients.json"       # paired phones: names and their tokens' SHA-256 (clients.py)
+TLS_CERT = CONFIG_DIR / "phone-tls.crt"          # the phones' listeners' certificate, pinned by the phone app
+TLS_KEY = CONFIG_DIR / "phone-tls.key"
 
 SECRET_NAMES = ("agent_token", "stremio_auth_key", "kodi_password", "liquid_api_key", "openrouter_api_key")
 OPTIONAL_SECRETS = ("liquid_api_key", "openrouter_api_key")     # only for the cloud steps
@@ -37,6 +40,10 @@ class Config:
     lan_port: int = 8765
     local_port: int = 8766
     stream_port: int = 8767                 # the TV app's live audio (LAN, like lan_port)
+    phones: bool = True                     # paired phones' listeners (clients.py): HTTPS API and live audio
+    phone_port: int = 8768
+    phone_stream_port: int = 8769
+    phone_hosts: list[str] = field(default_factory=list)   # more addresses for them besides lan_host (e.g. Tailscale)
     d1_url: str = "http://127.0.0.1:8091"
     d1_model: Path = DATA_DIR / "models/d1-3B/d1-3B-Q4_K_M.gguf"
     llama_server: str = ""                  # llama.cpp's llama-server; empty: on PATH or under ~/.local/opt
@@ -87,11 +94,13 @@ def _private(path: Path, mode: int) -> bool:
 
 
 def check_permissions():
-    """Raise if the config folder or the secrets file is readable by anyone else."""
+    """Raise if the config folder, the secrets file, the paired phones or their listeners' key is readable by
+    anyone else."""
     if CONFIG_DIR.exists() and not _private(CONFIG_DIR, 0o700):
         raise SystemExit(f"{CONFIG_DIR} must be private: chmod 700 {CONFIG_DIR}")
-    if SECRETS_FILE.exists() and not _private(SECRETS_FILE, 0o600):
-        raise SystemExit(f"{SECRETS_FILE} must be private: chmod 600 {SECRETS_FILE}")
+    for path in (SECRETS_FILE, CLIENTS_FILE, TLS_KEY):
+        if path.exists() and not _private(path, 0o600):
+            raise SystemExit(f"{path} must be private: chmod 600 {path}")
 
 
 def load() -> Config:

@@ -11,7 +11,7 @@ arch=(x86_64)
 url="https://github.com/boujuan/tv-agent"
 license=(MIT)
 depends=(python python-fastapi uvicorn python-httpx python-numpy python-pydantic python-rapidfuzz yt-dlp
-         python-adb-shell python-sherpa-onnx llama.cpp-vulkan ffmpeg avahi)
+         python-cryptography python-adb-shell python-sherpa-onnx llama.cpp-vulkan ffmpeg avahi)
 optdepends=('python-mcp: MCP server for Claude Code (tv-agent-mcp)')
 makedepends=(python-build python-installer python-hatchling)
 source=("$url/releases/download/server-v$pkgver/tv_agent-$pkgver.tar.gz")

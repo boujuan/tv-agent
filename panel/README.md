@@ -12,6 +12,7 @@ distribution, follows the desktop theme), no network listener of its own, ~125 M
 ```
 
 Needs Python 3 with PySide6 (Qt 6, including QtNetwork) and psutil, `pw-record` (PipeWire) for the microphone,
+`qrencode` for the QR code that pairs a phone (optional: the code can be typed instead),
 `systemctl --user` for the services, and the tv-agent server running on this computer (it reads
 `~/.config/tv-agent/` and talks to `127.0.0.1:8766`). It uses the installed `tv_agent` Python package if there is
 one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--tray` starts hidden).
@@ -61,6 +62,9 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
   Twitch favourites, history on/off, TV addresses, and advanced addresses, ports, the Kodi login and pairing the TV
   app again (Save restarts the agent; what's playing carries on); and the panel's own behaviour: close to tray, open hidden in the
   tray, details on hover, notifications, start at login. Panel settings live in `~/.config/tv-agent/panel.conf`.
+  **Phones:** the phones paired with the agent ([TV Agent phone app](https://github.com/boujuan/tv-agent-phone)),
+  when each was last seen and from where, rename and revoke (at once); **Pair a phone…** shows a QR code and a
+  one-time code (5 minutes) with the certificate fingerprint the app shows when the code is typed in.
 
 ## Files
 
@@ -70,6 +74,7 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
 | `tvpanel/app.py` | Window, tray icon, single instance, resource sampling |
 | `tvpanel/overview.py`, `activity_tab.py`, `commands_tab.py`, `decisions.py`, `settings_tab.py` | The five tabs |
 | `tvpanel/tv_card.py`, `speech_tab.py`, `about.py` | Overview's TV card; Decisions › Speech to text; About |
+| `tvpanel/phones.py` | Settings › Phones: paired phones, pairing with a QR code |
 | `tvpanel/mic.py` | The computer's microphone (`pw-record`, end-of-speech detection) |
 | `tvpanel/common.py` | systemd, the agent's API, small widgets, preferences |
 | `tv-agent-panel.desktop.in`, `install.sh`, `tv-agent.svg` | Desktop entry template, installer, icon |

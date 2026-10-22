@@ -17,6 +17,7 @@ classifiers = [
 ]
 dependencies = [
     "adb-shell==0.4.4",
+    "cryptography",          # the phones' listeners' certificate (clients.py); adb-shell needs it too
     "fastapi",
     "httpx",
     "numpy",
