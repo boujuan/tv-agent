@@ -42,7 +42,8 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
   duplicates), **Erase**; double-click a line to see in Decisions what happened, as recorded (how it was decided,
   then how its title was found and how it started, step by step), or right-click it to decide it again now; with
   **Keep recordings** on, right-click a
-  spoken command (🔊) to play it or transcribe it again with another model. **Response times**: a chart of the
+  spoken command (🔊) to play it, transcribe it again with another model, or **Add to voice tests…** (what it
+  should do and the words said, for `server/scripts/bench_voice.py`). **Response times**: a chart of the
   last commands (speech-to-text, deciding, waiting for your pause; doing it) with typical and slowest times by
   step, model and action, and the cloud cost. History lives in `~/.local/share/tv-agent/activity.jsonl`, recordings
   in `recordings/` beside it (mode 600; nothing is written with "Keep a history" off).

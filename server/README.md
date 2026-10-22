@@ -116,7 +116,7 @@ the language of every command and can't be limited: on 30 real commands from a S
 with a Spanish hint and the vocabulary wrote none wrong, ~0.26 s and ~$0.0002 a command (docs/research §2.12). The
 local model then isn't loaded (~1 GB less memory). `keep_recordings = true` keeps each spoken command's audio (the
 last 300, in `~/.local/share/tv-agent/recordings/`, mode 600) for the panel's Activity tab to play or transcribe
-again.
+again, and for [voice tests](#voice-tests).
 
 ## How it decides
 
@@ -237,12 +237,45 @@ the daemon refuses to start otherwise). For services across logouts: `loginctl e
 | Run one action | `tv-agent do '{"type":"volume","op":"set","amount":15}'` |
 | See the streams it would choose from, best first | `tv-agent streams "the bear" --season 3 --episode 2` (resolution, quality, HDR, languages, bitrate, cached; never links) |
 | Check after changing the rules | `tv-agent eval`, `tv-agent eval --file eval/commands.jsonl --split test`, `uv run pytest` |
+| Check a change against what you actually said | `.venv/bin/python scripts/bench_voice.py --compare before.json` ([voice tests](#voice-tests)) |
 | Run a command on the TV | `tv-agent tv shell dumpsys media_session` |
 | Re-pair the TV app (new token; a new address is paired by itself) | `tv-agent tv pair` |
 | Let Claude Code drive the TV | `claude mcp add --scope user tv-agent -- $PWD/.venv/bin/tv-agent-mcp` (12 tools, no shell) |
 | Use it from my phone | The [TV Agent phone app](https://github.com/boujuan/tv-agent-phone); pair it in the panel's Settings › Phones |
 | Stop it for a while | `systemctl --user stop tv-agent llama-d1` (the mic button then says "Agent offline") |
 | Fix a command it got wrong | Say "that's wrong" right after; then in the panel's Activity tab right-click it, "Teach the right action…" (or `tv-agent review` for the list, with an LLM's guess) |
+
+## Voice tests
+
+With **Keep recordings** on (the panel's Activity tab), each spoken command's audio stays with its history entry.
+`scripts/bench_voice.py` replays the ones you've labelled through speech to text and the decision steps, set up as
+the running agent has them (rules, taught sentences, steps on and off, models), and judges each against its label.
+Nothing is sent to the TV; the LLM and hosted models are called, and cost, as in use (`--off llm,d1`: rules only).
+
+```bash
+.venv/bin/python scripts/bench_voice.py --seed --save before.json   # label new recordings, run, keep the results
+# … change the rules, a model, the code …
+.venv/bin/python scripts/bench_voice.py --compare before.json       # regressions and fixes (exit 1 on a regression)
+.venv/bin/python scripts/bench_voice.py --stt local,parakeet-v2,mistralai/voxtral-mini-transcribe-3-0,heard,text
+```
+
+- **Labels** live in `~/.local/share/tv-agent/voice-tests/labels.jsonl` (mode 600, never in the repo), one per
+  recording, its audio hard-linked beside it so the agent keeping only its last 300 recordings, or erasing the
+  history, doesn't take it. Removing a test: its line and its `.wav`.
+- `--seed` labels each recording not labelled yet with the action it got, when it worked and wasn't marked "that's
+  wrong", or with what you taught it in the Activity tab; it says how many it left out and why (not understood,
+  didn't work, marked wrong but not taught). In the panel, right-click a spoken command, **Add to voice tests…**:
+  that also asks for the words said, so the transcripts are judged too.
+- A label: `{"recording": "…wav", "expect": {…}, "exact": true, "text": "what was said"}`. `expect` is as in
+  `eval/*.jsonl`; with `exact` every field it doesn't name must be at its default (film or series and a guessed
+  title count only when named). Edit one by hand to loosen it (`"exact": false`, `"title_any"`) or correct it.
+- Per recording: ✓ right, ~ right kind of action, ✗ wrong; the transcript, ✓/✗ against `text` (case, punctuation,
+  accents and "three" / "3" don't count); the timings. Per speech model: how many right, word error rate, p50/p95
+  of speech to text and deciding, which steps decided, cost. `--stt heard` decides on what the agent heard back
+  then (the decision steps alone), `text` on the words said (what perfect hearing would get).
+- `--save` / `--compare` with a bare file name keep the run with the voice tests (its transcripts are yours);
+  `--compare` lists regressions, fixes, changed transcripts and what changed in the setup (commit, models, steps).
+  Also `--no-learned` (without the taught sentences), `--failures` (only what's wrong).
 
 ## HTTP API
 
@@ -357,6 +390,7 @@ rm -rf ~/.config/tv-agent ~/.local/share/tv-agent ~/.local/opt/llama.cpp ~/.loca
 | `src/tv_agent/config.py`, `redact.py`, `state.py`, `activity.py` | Settings and secrets, log redaction, memory between commands, the history file |
 | `src/tv_agent/mcp_server.py` | MCP tools for Claude Code (`tv-agent-mcp`) |
 | `systemd/` | User services for a packaged install (`tv-agent setup services` writes them for a checkout) |
-| `scripts/` | `fetch-models.sh`, Phase 0 benchmarks |
+| `src/tv_agent/voicetests.py` | Voice tests: labels for kept recordings, seeded from the history; comparing runs |
+| `scripts/` | `fetch-models.sh`; `bench_voice.py` (your voice tests), `bench_fallbacks.py` (decision paths and models on `eval/`), Phase 0 benchmarks |
 | `eval/` | `utterances.jsonl` (107 labelled sentences, the panel's tests), `commands.jsonl` (654, made by `build_commands.py`: every action, titles made of command words, numbers in every form, fillers, mishearings, non-commands) |
 | `tests/` | Offline unit tests |

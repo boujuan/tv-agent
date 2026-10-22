@@ -17,8 +17,8 @@ from PySide6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QHBoxLayout, QHea
                                QLineEdit, QMenu, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem, QToolTip,
                                QVBoxLayout, QWidget)
 
-from .common import (AMBER, BLUE, GREEN, GREY, RED, LevelBar, agent_activity, agent_stt, api, card, dim,
-                     journal_history, offer_to_delete_recordings)
+from .common import (AMBER, BLUE, GREEN, GREY, RED, LevelBar, agent_activity, agent_stt, agent_voicetests, api,
+                     card, dim, journal_history, offer_to_delete_recordings)
 
 SOURCES = {"tv": "📺 Remote", "laptop": "💻 Laptop mic", "phone": "📱 Phone", "text": "⌨ Typed", "mcp": "🤖 Claude",
            "unknown": "·"}
@@ -415,6 +415,9 @@ class Activity(QWidget):
                 a = QAction(label, sub)
                 a.triggered.connect(lambda _=False, w=where, mo=model, la=label: self.transcribe_again(e, w, mo, la))
                 sub.addAction(a)
+            test = QAction("Add to voice tests…", m)
+            test.triggered.connect(lambda: self.add_voice_test(e))
+            m.addAction(test)
         m.addSeparator()
         for a in (teach, wrong) + ((forget,) if e.get("taught") else ()):
             m.addAction(a)
@@ -437,6 +440,39 @@ class Activity(QWidget):
 
         self.panel.bg.run(lambda: api("/v1/transcribe", {"recording": e["recording"], "where": where, "model": model},
                                       timeout=60), done)
+
+    def add_voice_test(self, e: dict):
+        """This recording and what it should do (what it did, or was taught) as a voice test for
+        scripts/bench_voice.py, with the words said, checked here (voicetests.py)."""
+        try:
+            label, why = agent_voicetests.label(e, agent_voicetests.learned(), asked=True)
+            had = any(x["recording"] == e["recording"] for x in agent_voicetests.load())
+        except (OSError, ValueError) as err:
+            QMessageBox.warning(self, "TV Agent", f"Voice tests: {err}")
+            return
+        if label is None:
+            QMessageBox.information(self, "TV Agent", f"Not added: {why}.")
+            return
+        said, ok = QInputDialog.getText(self, "Add to voice tests",
+                                        f"It should do: {agent_voicetests.describe(label['expect'])}"
+                                        + (" (this replaces its voice test)" if had else "")
+                                        + (" (if it should have done something, cancel and teach it that first)"
+                                           if label["expect"]["type"] == "none" else "") +
+                                        "\n\nWhat was said, word for word (the transcripts are judged against it;"
+                                        " correct it if it was misheard, empty: not judged):",
+                                        QLineEdit.EchoMode.Normal, e.get("heard", ""))
+        if not ok:
+            return
+        if said.strip():
+            label["text"] = said.strip()
+        try:
+            agent_voicetests.add(label)
+        except (OSError, ValueError) as err:
+            QMessageBox.warning(self, "TV Agent", f"Not added: {err}")
+            return
+        self.reply.setText(f"<span style='color:{GREEN}'>Voice test {'updated' if had else 'added'}: "
+                           f"{html.escape(agent_voicetests.describe(label['expect']))}</span> <span style='color:gray'>"
+                           "(scripts/bench_voice.py)</span>")
 
     def teach(self, e: dict):
         """“When I say this, do what that command does”: the agent decides the command typed here, and once you
@@ -521,9 +557,12 @@ class Activity(QWidget):
 
     def erase(self):
         kept = len(agent_stt.recordings())
+        tests = len(list(agent_voicetests.DIR.glob("*.wav"))) if agent_voicetests.DIR.is_dir() else 0
         if QMessageBox.question(self, "TV Agent", f"Delete all {len(self.rows)} commands from the history"
                                 + (f" and the {kept} recordings kept" if kept else "") + "?\n"
-                                "(Export first if you want a copy.)") != QMessageBox.StandardButton.Yes:
+                                "(Export first if you want a copy."
+                                + (f" The {tests} voice tests keep their own audio, in {agent_voicetests.DIR}."
+                                   if tests else "") + ")") != QMessageBox.StandardButton.Yes:
             return
         agent_activity.erase()
         agent_stt.delete_recordings()

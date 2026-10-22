@@ -4,6 +4,25 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
+## server — unreleased
+
+### Added
+- Voice tests: `scripts/bench_voice.py` replays the commands you said to the TV (kept with `keep_recordings`)
+  through speech to text and the decision steps, set up as the running agent has them, and judges each against
+  what it should have done: action right, transcript right and word error rate, timings and cost per speech model
+  (`--stt local,parakeet-v2,<OpenRouter model>,heard,text`). `--save` a run and `--compare` a later one to see
+  regressions and fixes (exit 1 on a regression). Nothing is sent to the TV.
+- `--seed` labels the kept recordings from the history: the action decided when it worked and wasn't marked
+  "that's wrong", or what you taught it. Labels live in `~/.local/share/tv-agent/voice-tests/labels.jsonl`, never
+  in the repo, editable by hand, each recording hard-linked beside them so it outlives the agent's last-300
+  rotation and erasing the history (`voicetests.py`).
+
+## panel — unreleased
+
+### Added
+- Activity tab: right-click a spoken command, **Add to voice tests…**: what it should do (what it did, or was
+  taught) and the words said, checked by you. Erasing the history says that voice tests keep their own audio.
+
 ## server 0.9.0 — 2026-10-24
 
 ### Added
