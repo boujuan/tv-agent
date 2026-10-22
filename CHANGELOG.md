@@ -11,8 +11,8 @@ com.boujuan.tvagent`), then `tv-agent tv install tv-agent-android-<version>.apk`
 
 ### Added
 - A numbered list on the TV for "what was I watching?", "what's new?" and "new films", with posters: say "number
-  2", or pick with OK or a number key. It stays visible behind the listening pill and closes when playback starts,
-  on BACK, or after 90 s (`ChoicesActivity`, opened over adb only).
+  2", or pick with OK or a number key. It stays visible while you speak (the pill opens beside it, bottom-right)
+  and closes when playback starts, on BACK, or after 90 s (`ChoicesActivity`, opened over adb only).
 - Streams the remote's microphone to tv-agent while you speak (TCP, `stream_port`, sent at pairing) and shows
   what it has understood so far; tv-agent decides during your pause and tells the app to stop. Falls back to
   sending the recording at the end when the stream isn't available (an older agent, a dropped connection).

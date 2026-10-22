@@ -41,6 +41,8 @@ import java.util.concurrent.Executors;
  */
 public class ChoicesActivity extends Activity {
     private static final long IDLE_CLOSE_MS = 90_000;
+    /** A list is on screen: the pill then opens bottom-right, beside it instead of over it. */
+    static volatile boolean showing;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final ExecutorService net = Executors.newFixedThreadPool(3);
@@ -53,7 +55,11 @@ public class ChoicesActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         buildUi();
-        if (!show(getIntent())) finish();
+        if (!show(getIntent())) {
+            finish();
+            return;
+        }
+        showing = true;
     }
 
     @Override
@@ -71,6 +77,7 @@ public class ChoicesActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        showing = false;
         ui.removeCallbacks(idleClose);
         net.shutdownNow();
     }
@@ -125,7 +132,7 @@ public class ChoicesActivity extends Activity {
         panel.addView(title);
         panel.addView(rows);
         panel.addView(hint);
-        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(520), FrameLayout.LayoutParams.WRAP_CONTENT,
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(500), FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.START | Gravity.CENTER_VERTICAL);
         lp.leftMargin = dp(48);
         root.addView(panel, lp);

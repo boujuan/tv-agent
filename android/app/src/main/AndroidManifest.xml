@@ -20,7 +20,7 @@
             android:exported="true"
             android:excludeFromRecents="true"
             android:launchMode="singleTask"
-            android:taskAffinity=""
+            android:taskAffinity="com.boujuan.tvagent.overlay"
             android:noHistory="true"
             android:theme="@style/Listen">
             <intent-filter>
@@ -30,13 +30,14 @@
         </activity>
 
         <!-- A numbered list from tv-agent ("what was I watching?"): "number 2" or OK picks. Opened over adb only,
-             like the screens below. -->
+             like the screens below. It shares the pill's task, so the pill opens on top of it and the list stays
+             visible behind it while you say a number (in separate tasks Android stops the list). -->
         <activity
             android:name=".ChoicesActivity"
             android:exported="true"
             android:excludeFromRecents="true"
             android:launchMode="singleTask"
-            android:taskAffinity=""
+            android:taskAffinity="com.boujuan.tvagent.overlay"
             android:permission="android.permission.DUMP"
             android:theme="@style/Choices" />
 

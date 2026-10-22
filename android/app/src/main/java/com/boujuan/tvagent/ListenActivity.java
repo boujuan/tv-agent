@@ -162,11 +162,14 @@ public class ListenActivity extends Activity {
         LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(dp(TRACK_DP), dp(4));
         tl.topMargin = dp(10);
         pill.addView(track, tl);
-        pill.setMinimumWidth(dp(420));
+        // Over a list (ChoicesActivity), the pill goes bottom-right so the numbers stay in view.
+        boolean besideList = ChoicesActivity.showing;
+        pill.setMinimumWidth(dp(besideList ? 360 : 420));
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+                Gravity.BOTTOM | (besideList ? Gravity.END : Gravity.CENTER_HORIZONTAL));
         lp.bottomMargin = dp(48);
+        lp.rightMargin = besideList ? dp(48) : 0;
         root.addView(pill, lp);
         setContentView(root);
     }
