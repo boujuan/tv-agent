@@ -217,7 +217,8 @@ async def _eval(verbose: bool, file: str | None, split: str | None) -> int:
         print(f"warning: {err}; scoring the defaults")
     async with httpx.AsyncClient() as http:
         path = Path(file) if file else evaluate.EVAL_FILE
-        res = await evaluate.run(Router(D1(http, cfg.d1_url), rules), path, split)
+        d1 = D1(http, cfg.d1_url, cfg.secret("liquid_api_key"), cfg.hosted_d1_model, cfg.d1_where)   # as configured
+        res = await evaluate.run(Router(d1, rules), path, split)
     for r in res["results"]:
         if verbose or not r["ok"]:
             print(f"{'ok ' if r['ok'] else 'BAD'} {r['text']!r:52} -> {r['via']:7} {r['rule'][:18]:18} "
@@ -242,7 +243,8 @@ async def _say(text: str, dry_run: bool) -> int:
     from .decide.router import Router
     agent = _agent(dry_run)
     try:
-        d = await Router(agent.d1, agent.rules).decide(text)
+        d = await Router(agent.d1, agent.rules, agent.llm, agent.llm_context, agent.cfg.decide_steps,
+                         agent.cfg.decide_off).decide(text)
         out = await agent.execute(d.action)
         print(json.dumps({"heard": text, "via": d.via, "rule": d.rule, "confidence": round(d.confidence, 2),
                           "action": d.action.model_dump(), "ok": out.ok, "say": out.say}, ensure_ascii=False))
@@ -294,7 +296,17 @@ def _doctor() -> int:
     cfg = config.load()
     agent = Agent(cfg)
     check("ADB", lambda: f"{agent.adb.run(['getprop', 'ro.product.model']).strip()} at {agent.adb.host}")
-    check("d1-3B", lambda: httpx.get(f"{cfg.d1_url}/v1/models", timeout=3).json()["data"][0]["id"])
+    steps = " → ".join(s + (" (off)" if s in cfg.decide_off else "") for s in cfg.decide_steps)
+    print(f"ok    decision steps: {steps}; d1 {cfg.d1_where}; LLM {cfg.llm_model}")
+    if "d1" in cfg.decide_off or cfg.d1_where == "hosted":
+        print("ok    local d1-3B: not used by the decision steps")
+    else:
+        check("local d1-3B", lambda: httpx.get(f"{cfg.d1_url}/v1/models", timeout=3).json()["data"][0]["id"])
+    if "d1" not in cfg.decide_off and cfg.d1_where != "local" and not cfg.secret("liquid_api_key"):
+        ok = False
+        print(f"FAIL  hosted d1: d1_where is {cfg.d1_where} but there's no Liquid key (tv-agent setup liquid)")
+    if "llm" not in cfg.decide_off and not cfg.secret("openrouter_api_key"):
+        print("ok    LLM step: no OpenRouter key, so it's skipped (optional: tv-agent setup openrouter)")
     def speech():
         if not stt.installed(cfg.stt_model):
             raise RuntimeError(f"{cfg.stt_model} isn't downloaded (tv-agent setup stt {cfg.stt_model})")

@@ -11,7 +11,7 @@ from .cinemeta import norm
 ARTICLE = re.compile(r"^(?:the|a|an|el|la|los|las|un|una) ")
 
 
-def _bare(name: str) -> str:
+def bare(name: str) -> str:
     """'The Office' -> 'office', 'Fundación' -> 'fundacion': what's left to compare."""
     return ARTICLE.sub("", norm(name))
 
@@ -20,10 +20,10 @@ SOUNDS = [(r"ph", "f"), (r"th", "t"), (r"ck|q|c(?=[aou ]|$)", "k"), (r"c", "s"),
           (r"[aeiouwhy]", ""), (r"(.)\1+", r"\1")]
 
 
-def _sounds(name: str) -> str:
+def sounds(name: str) -> str:
     """A rough sound-alike key, so speech-to-text's spelling of a title still finds it: 'the bare' and 'The Bear'
     both give 'br'."""
-    key = _bare(name)
+    key = bare(name)
     for rx, to in SOUNDS:
         key = re.sub(rx, to, key)
     return key.replace(" ", "")
@@ -58,16 +58,16 @@ class Library:
                  and (kind is None or i.get("type") == kind) and (not i.get("removed") or i.get("temp"))]
         if not items:
             return None
-        said = _bare(title)
-        for names in ([_bare(i.get("name", "")) for i in items],
-                      [_bare(re.split(r":| - ", i.get("name", ""))[0]) for i in items]):
+        said = bare(title)
+        for names in ([bare(i.get("name", "")) for i in items],
+                      [bare(re.split(r":| - ", i.get("name", ""))[0]) for i in items]):
             hit = process.extractOne(said, names, scorer=fuzz.ratio, score_cutoff=cutoff)
             if hit:
                 return items[hit[2]]
         # Spelled differently but said the same ("the bare" is your "The Bear"): one item only, and close enough.
-        key = _sounds(title)
-        alike = [i for i in items if len(key) >= 2 and _sounds(i.get("name", "")) == key
-                 and fuzz.ratio(said, _bare(i.get("name", ""))) >= 60]
+        key = sounds(title)
+        alike = [i for i in items if len(key) >= 2 and sounds(i.get("name", "")) == key
+                 and fuzz.ratio(said, bare(i.get("name", ""))) >= 60]
         return alike[0] if len(alike) == 1 else None
 
     async def continue_watching(self) -> list[dict]:

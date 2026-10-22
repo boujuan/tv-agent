@@ -195,8 +195,10 @@ class Panel(QMainWindow):
     # ---- services ----
 
     def all_services(self, verb: str):
-        from .common import set_badge, systemctl
+        from .common import local_d1_needed, set_badge, systemctl
         order = ["tv-agent", "llama-d1"] if verb == "stop" else ["llama-d1", "tv-agent"]
+        if verb == "start" and not local_d1_needed():
+            order = ["tv-agent"]             # the decision steps don't use this laptop's d1 (Decisions tab)
         for unit in order:
             set_badge(self.overview.cards[unit].state, "Stopping…" if verb == "stop" else "Starting…", AMBER)
         self.bg.run(lambda: [systemctl(verb, f"{u}.service") for u in order], lambda *_: self.refresh_units())
@@ -251,9 +253,7 @@ class Panel(QMainWindow):
     def update_tooltip(self):
         if not self.tray:
             return
-        cards = self.overview.cards
-        on = [c.active for c in cards.values()]
-        head = "Voice control is on" if all(on) else "Voice control is partly on" if any(on) else "Voice control is off"
+        head = self.overview.headline.text() or "Voice control"           # worked out by the Overview tab
         lines = [f"TV Agent · {head}"]
         if self.prefs.get("tray_details"):
             st = self.state or {}

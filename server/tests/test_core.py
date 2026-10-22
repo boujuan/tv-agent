@@ -368,7 +368,8 @@ def test_kodi_gets_addon_subtitles_only_for_missing_languages():
     ("pause", 0, True), ("next episode", 0, True), ("go home", 0, True), ("mute", 0, True),
     ("play", 0, False), ("play", 1, False), ("play", 2, True),                  # "play …" may go on
     ("play the bear", 1, False), ("play the bear", 2, True),                    # a title alone waits for "season 3"
-    ("play the bear season 3 episode 2", 0, True), ("go to season 4 episode 2", 0, True),
+    ("play the bear season 3 episode 2", 0, False), ("play the bear season 3 episode 2", 1, True),   # "… and …"
+    ("go to season 4 episode 2", 0, False), ("go to season 4 episode 2", 1, True),
     ("volume twenty", 0, False), ("volume twenty", 1, True), ("volume fifteen", 0, True),
     ("lofi on youtube", 1, False), ("skip 30 seconds", 0, True), ("continue the bear", 1, True),
 ])
@@ -685,7 +686,7 @@ def test_auto_skip_jumps_a_sure_intro_as_it_comes_and_leaves_the_rest():
     from tv_agent import skips as K
     from tv_agent.agent import Agent
 
-    def watch(segments, start_ms):
+    def watch(segments, start_ms, auto=True, also=None):
         clock = {"t": 0.0, "base": start_ms}
         seeks = []
 
@@ -709,8 +710,9 @@ def test_auto_skip_jumps_a_sure_intro_as_it_comes_and_leaves_the_rest():
             pass
         np = NowPlaying("tt1", "series", "tt1:2:3", "X")
         me = types.SimpleNamespace(state=types.SimpleNamespace(now_playing=np), _kodi_player=player, segments=segs,
-                                   kodi=types.SimpleNamespace(position=position, seek_to=seek_to), notify=notify)
-        asyncio.run(Agent._skip_watch(me, np, sleep=sleep))
+                                   kodi=types.SimpleNamespace(position=position, seek_to=seek_to), notify=notify,
+                                   cfg=types.SimpleNamespace(auto_skip=auto))
+        asyncio.run(Agent._skip_watch(me, np, sleep=sleep, also=also))
         return seeks
 
     sure = K.Segment("intro", 216_000, 233_000, "TheIntroDB", sure=True)
@@ -718,6 +720,9 @@ def test_auto_skip_jumps_a_sure_intro_as_it_comes_and_leaves_the_rest():
     assert watch([sure], 200_000) == [233_000]          # skipped once, as it came
     assert watch([unsure], 200_000) == []                # not sure: only when asked
     assert watch([sure], 400_000) == []                  # resumed after it
+    # "play it and skip the intro": that intro, sure or not, even with auto skip off
+    assert watch([unsure], 30_000, auto=False, also="intro") == [233_000]
+    assert watch([sure], 30_000, auto=False) == []
 
 
 def test_speech_model_download_is_checked_and_unpacked(tmp_path, monkeypatch):
@@ -814,14 +819,14 @@ def test_the_llm_only_sees_what_rules_and_d1_left_undecided():
     async def context(text):
         return {"candidates": []}
 
-    for llm_first in (True, False):
+    for steps in (router.STEPS, ("phrases", "patterns", "d1", "llm")):     # the LLM before d1, and after
         llm = Llm()
-        r = router.Router(D1(), RULES, llm, context, llm_first)
+        r = router.Router(D1(), RULES, llm, context, steps)
         assert asyncio.run(r.decide("pause")).via == "phrase" and not llm.asked          # rules first
         d = asyncio.run(r.decide("could you freeze the picture for me"))
         assert d.via == "llm" and d.action.op == "pause" and d.trace[-1]["stage"] == "llm"
         assert llm.asked[0][0] == "could you freeze the picture for me"
-    unreachable = router.Router(D1(), RULES, Llm(reached=False), context, True)
+    unreachable = router.Router(D1(), RULES, Llm(reached=False), context)
     d = asyncio.run(unreachable.decide("could you freeze the picture for me"))
     assert d.via == "d1" and [s["stage"] for s in d.trace][-2:] == ["llm", "model"]    # d1 when the LLM is out
 
@@ -899,8 +904,243 @@ def test_a_start_whose_links_fail_leaves_what_plays_alone():
     assert not out.ok and "didn't answer" in out.say and replaced == []      # the old session wasn't touched
 
 
-def test_every_example_in_the_command_list_is_understood():
-    from tv_agent.commands import COMMANDS
-    missed = [text for _, rows in COMMANDS for en, es, _ in rows for text in en + es
-              if (got := rule_action(text)) is None or got.type == "none"]
-    assert not missed, missed
+def test_every_command_in_the_list_is_understood_in_english_and_spanish():
+    """Each pattern of commands.py, expanded and filled in, gets its action from the rules alone (no model)."""
+    import asyncio
+    from tv_agent.commands import SECTIONS, expand
+
+    class NoD1:
+        async def choice(self, *args):
+            raise router.httpx.ConnectError("off")
+
+    rules = R.build(R.defaults_raw(), "defaults")
+    rules.fallback_intent = "none"
+    r = router.Router(NoD1(), rules)
+    wrong = []
+    for section in SECTIONS:
+        for c in section.commands:
+            for lang in ("en", "es"):
+                for text in expand(c.say(lang), lang):
+                    got = asyncio.run(r.decide(text)).action
+                    if got.type != c.type:
+                        wrong.append((text, c.type, got.type))
+    assert not wrong, wrong
+
+
+
+
+@pytest.mark.parametrize("text,expect", [
+    ("Subtitles of", A.Tracks(subtitles="off")),                  # misheard "off" at the end of a switch
+    ("Sops off.", A.Tracks(subtitles="off")),
+    ("Subtitles all.", A.Tracks(subtitles="toggle")),             # on or off unclear: switched over
+    ("subtitles", A.Tracks(subtitles="toggle")),
+    ("Turn the subtitles on.", A.Tracks(subtitles="on")),         # any switch, either word order
+    ("turn the binge mode off", A.Binge(on=False)),
+    ("Beach mode Oh.", A.Binge(on=True)),
+    ("Pinch Mode On", A.Binge(on=True)),
+    ("auto skip of", A.AutoSkip(on=False)),
+    ("put severance on", A.PlayTitle(title="severance")),
+    ("Turn down the volume to the minimum.", A.Volume(op="set", amount=1)),
+    ("volume to the max", A.Volume(op="set", amount=100)),
+    ("What am I watching right now?", A.Info()),
+    ("¿qué estoy viendo?", A.Info()),
+    ("where am I in severance", A.Info(title="severance")),
+    ("What is the last episode of Cebruns that I watched?", A.Info(title="cebruns")),
+    ("skip thirty seconds", A.Transport(op="forward", seconds=30)),
+    ("skip purpose all", None),                                   # "skip" + no duration: not a jump
+    ("skip a bit", A.Transport(op="forward", seconds=30)), ("skip thirty", A.Transport(op="forward", seconds=30)),
+    ("skip it", A.Transport(op="forward")),
+    ("turn the sound back on", A.Volume(op="unmute")),            # the word-order swap leaves "back" alone
+    ("put youtube on", None),                                     # not a YouTube search for "put"
+    ("marca esto como visto", A.LibraryEdit(op="watched")),       # "esto": what's on, not a title
+    ("añade esto a mi lista", A.LibraryEdit(op="add")),
+])
+def test_misheard_switches_and_new_commands(text, expect):
+    assert rule_action(text) == expect
+
+
+def _router(**kw):
+    class NoD1:
+        where = "local"
+
+        async def choice(self, *args):
+            raise router.httpx.ConnectError("off")
+    rules = R.build(R.defaults_raw(), "defaults")
+    rules.fallback_intent = "none"
+    return router.Router(NoD1(), rules, **kw)
+
+
+@pytest.mark.parametrize("text,steps", [
+    ("go to the second episode of sevence and go to the middle of it", ["play_title", "transport"]),
+    ("turn the volume down and play the bear", ["volume", "play_title"]),
+    ("pon la casa de papel y salta la intro", ["play_title", "skip"]),
+    ("play pride and prejudice", None),                           # a title with "and" stays one title
+    ("play tom and jerry", None),
+    ("pon romeo y julieta", None),
+    ("skip the intro and the recap", None),                       # a bare name isn't a title to play
+    ("pon el volumen al treinta y cinco", None),                  # numbers: one command (volume 35)
+    ("ve al minuto treinta y cinco", None),
+    ("skip to an hour and a half", None),
+    ("pausa y luego", None),                                      # the offline guess isn't a second command
+    ("salta la intro y pon friends", ["skip", "play_title"]),     # "pon" is a play verb once cleaned up
+])
+def test_two_commands_in_one_sentence(text, steps):
+    import asyncio
+    d = asyncio.run(_router().decide(text))
+    if steps is None:
+        assert d.action.type != "sequence", d.action
+    else:
+        assert d.action.type == "sequence" and [s.type for s in d.action.steps] == steps
+
+
+def test_help_is_shown_in_the_language_it_was_asked_in():
+    import asyncio
+    r = _router()
+    assert asyncio.run(r.decide("what can you do")).action == A.Help(lang="en")
+    assert asyncio.run(r.decide("¿Qué puedes hacer?")).action == A.Help(lang="es")
+    assert asyncio.run(r.decide("ayuda")).action == A.Help(lang="es")
+
+
+def test_steps_follow_their_order_and_can_be_switched_off():
+    import asyncio
+
+    class Llm:
+        model = "test/model"
+
+        def __init__(self):
+            self.asked = []
+
+        async def answer(self, said, context):
+            self.asked.append(said)
+            return True, A.Transport(op="stop")
+
+    llm = Llm()
+    r = _router(llm=llm)
+    assert asyncio.run(r.decide("pause")).via == "phrase" and not llm.asked
+    r.steps = ["llm", "phrases", "patterns", "d1"]                 # the LLM first: it decides everything
+    assert asyncio.run(r.decide("pause")).action == A.Transport(op="stop") and llm.asked == ["pause"]
+    r.steps, r.off = list(router.STEPS), {"phrases", "patterns"}
+    d = asyncio.run(r.decide("skip the intro"))
+    assert d.via == "llm" and [t["stage"] for t in d.trace[1:3]] == ["phrase", "pattern"]
+    assert d.trace[1].get("off") and d.trace[2].get("off")
+    r.off = {"phrases", "patterns", "llm", "d1"}                   # nothing on: nothing understood
+    assert asyncio.run(r.decide("pause")).action.type == "none"
+
+
+def test_old_settings_keep_their_meaning(tmp_path, monkeypatch):
+    from tv_agent import config
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.toml")
+    monkeypatch.setattr(config, "SECRETS_FILE", tmp_path / "secrets.toml")
+    tmp_path.chmod(0o700)
+    (tmp_path / "config.toml").write_text("llm_fallback = false\nllm_first = false\nhosted_d1 = false\n")
+    cfg = config.load()
+    assert cfg.decide_off == ["llm"] and cfg.decide_steps == ["phrases", "patterns", "d1", "llm"]
+    assert cfg.d1_where == "local"
+    (tmp_path / "config.toml").write_text('decide_steps = ["d1"]\nd1_where = "hosted"\nllm_first = true\n')
+    cfg = config.load()
+    assert cfg.decide_steps == ["d1", "phrases", "patterns", "llm"] and cfg.d1_where == "hosted"
+    (tmp_path / "config.toml").write_text('decide_off = ["rules"]\n')
+    with pytest.raises(SystemExit):
+        config.load()
+
+
+def test_d1_asks_local_or_hosted_in_the_chosen_order():
+    import asyncio
+    import httpx
+    from tv_agent.decide.d1 import D1, HOSTED
+
+    class Http:
+        def __init__(self, down=()):
+            self.calls, self.down = [], down
+
+        async def post(self, url, json=None, timeout=None, headers=None):
+            where = "hosted" if url == HOSTED else "local"
+            self.calls.append(where)
+            if where in self.down:
+                raise httpx.ConnectError(f"{where} down")
+            return httpx.Response(200, request=httpx.Request("POST", url), json={"answers": {"q": {
+                "choice": "pause", "confidence": 0.9, "probabilities": {"pause": 0.95, "none": 0.05}}}})
+
+    def ask(where, key="k", down=()):
+        http = Http(down)
+        d1 = D1(http, "http://127.0.0.1:8091", hosted_key=key, where=where)
+        asyncio.run(d1.choice("x", "?", {"pause": "p", "none": "n"}))
+        return http.calls, d1.last_source
+
+    assert ask("hosted-first") == (["hosted"], "hosted")
+    assert ask("hosted-first", down=("hosted",)) == (["hosted", "local"], "local")
+    assert ask("local-first", down=("local",)) == (["local", "hosted"], "hosted")
+    assert ask("local") == (["local"], "local")
+    with pytest.raises(httpx.TransportError):                      # hosted only, no key: nothing to ask
+        ask("hosted", key=None)
+
+
+def test_llm_requests_adapt_to_what_a_model_takes():
+    import asyncio
+    import httpx
+    from tv_agent.decide.llm import Llm
+
+    sent = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        sent.append((body.get("temperature"), (body.get("reasoning") or {}).get("effort")))
+        if "temperature" in body:
+            return httpx.Response(404, json={"error": {"message": "No endpoints found that can handle the requested "
+                                                                  "parameters."}})
+        if (body.get("reasoning") or {}).get("effort") == "none":
+            return httpx.Response(400, json={"error": {"message": "Reasoning is mandatory for this endpoint"}})
+        return httpx.Response(200, json={"choices": [{"message": {"content": '{"action": "pause"}'}}], "usage": {}})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            llm = Llm(http, "k", "some/model", RULES, "none")
+            first = await llm.ask("pause", {})
+            again = await llm.ask("pause", {})
+            return first, again
+
+    first, again = asyncio.run(run())
+    assert first == again == {"action": "pause"}
+    assert sent == [(0, "none"), (None, "none"), (None, "minimal"), (None, "minimal")]    # learned, then remembered
+
+
+def test_two_commands_run_one_after_the_other():
+    import asyncio
+    import types
+    from tv_agent.agent import Agent, Outcome
+
+    done = []
+
+    async def execute(a):
+        done.append(a.type)
+        return Outcome(True, a.type)
+
+    async def until_playing():
+        done.append("wait")
+
+    a = types.SimpleNamespace(execute=execute, _until_playing=until_playing)
+    seq = A.Sequence(steps=[A.PlayTitle(title="severance", episode=2), A.Transport(op="seek_to", percent=50)])
+    out = asyncio.run(Agent._sequence(a, seq))
+    assert done == ["play_title", "wait", "transport"] and out.ok and out.say == "play_title · transport"
+
+
+def test_subtitles_switch_over_from_what_kodi_shows():
+    import asyncio
+    import types
+    from tv_agent.agent import Agent
+
+    set_to = []
+
+    async def player():
+        return 1
+
+    async def tracks(pid):
+        return {"subtitleenabled": True, "subtitles": [], "audiostreams": []}
+
+    async def set_subtitle(pid, index):
+        set_to.append(index)
+
+    a = types.SimpleNamespace(_kodi_player=player, kodi=types.SimpleNamespace(tracks=tracks, set_subtitle=set_subtitle))
+    out = asyncio.run(Agent._tracks(a, A.Tracks(subtitles="toggle")))
+    assert set_to == [None] and out.say == "Subtitles off"

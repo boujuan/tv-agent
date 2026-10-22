@@ -20,11 +20,14 @@ Localhost (127.0.0.1:8766), for the panel, the CLI and the MCP server, same toke
     POST /v1/action {action}    GET /v1/state    GET /v1/stats
     GET  /v1/rules              POST /v1/rules {rules}  (checked, saved, live)   POST /v1/rules/reset|reload
     POST /v1/eval [{"rules"}]   score the labelled sentences, optionally with rules not saved yet
+    GET  /v1/pipeline           the decision steps (order, on/off, which d1, the LLM's model) and what's available
+    POST /v1/pipeline {…}       change them: saved in config.toml and live at once
 """
 import asyncio
 import hmac
 import json
 import logging
+import re
 import time
 
 import uvicorn
@@ -35,10 +38,12 @@ from pydantic import ValidationError
 from . import actions as A
 from . import activity
 from .agent import Agent
+from . import config as config_mod
 from .config import Config, lan_address
 from .decide import evaluate, learned
 from .decide import rules as R
-from .decide.router import Decision, Router, normalize
+from .decide.d1 import WHERE
+from .decide.router import STEPS, Decision, Router, normalize
 from .languages import name as language_name
 from .listen_stream import StreamSession
 from .stt import Stt
@@ -53,8 +58,8 @@ def describe(a: A.Action) -> str:
     """What the TV pill shows right after you stop talking."""
     match a:
         case A.PlayTitle():
-            ep = f" S{a.season}" if a.season is not None else ""
-            ep += f"E{a.episode}" if a.episode is not None else ""
+            ep = (f"S{a.season}" if a.season is not None else "") + (f"E{a.episode}" if a.episode is not None else "")
+            ep = f" {ep}" if ep else ""
             if a.title is None:
                 parts = ([f"season {a.season}"] if a.season is not None else []) + \
                         ([f"episode {a.episode}"] if a.episode is not None else [])
@@ -76,6 +81,10 @@ def describe(a: A.Action) -> str:
             return f"Opening {a.app.title()}"
         case A.Home():
             return "Home"
+        case A.Transport() if a.op == "seek_to" and a.percent == 50:
+            return "To the middle"
+        case A.Transport() if a.op == "seek_to" and (a.seconds or 0) == 0 and a.percent is None:
+            return "From the start"
         case A.Transport():
             return a.op.replace("_", " ").capitalize()
         case A.Volume():
@@ -92,7 +101,7 @@ def describe(a: A.Action) -> str:
             if a.audio:
                 parts.append("Original audio" if a.audio == "original" else f"{language_name(a.audio)} audio")
             if a.subtitles:
-                on_off = {"on": "Subtitles on", "off": "Subtitles off"}
+                on_off = {"on": "Subtitles on", "off": "Subtitles off", "toggle": "Subtitles"}
                 parts.append(on_off.get(a.subtitles) or f"{language_name(a.subtitles)} subtitles")
             return ", ".join(parts)
         case A.Replay():
@@ -108,7 +117,11 @@ def describe(a: A.Action) -> str:
         case A.Wrong():
             return "Noted"
         case A.Help():
-            return "What you can say…"
+            return "Lo que puedes decir…" if a.lang == "es" else "What you can say…"
+        case A.Info():
+            return f"{a.title.title()}…" if a.title else "What's on…"
+        case A.Sequence():
+            return " · ".join(describe(x) for x in a.steps)
         case A.LibraryEdit():
             what = a.title.title() if a.title else "this"
             return {"add": f"Adding {what} to your library", "remove": f"Removing {what} from your library",
@@ -121,7 +134,8 @@ class Service:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.agent = Agent(cfg)
-        self.router = Router(self.agent.d1, self.agent.rules, self.agent.llm, self.agent.llm_context, cfg.llm_first)
+        self.router = Router(self.agent.d1, self.agent.rules, self.agent.llm, self.agent.llm_context, cfg.decide_steps,
+                             cfg.decide_off)
         self._learned_mtime = 0.0
         self._learn(self.agent.rules)
         self.stt: Stt | None = None
@@ -196,13 +210,13 @@ class Service:
         """Execute in the background so the pill can close; the result arrives on the TV as a toast."""
         out = await self.execute(d, heard, source)
         if d.action.type in ("play_title", "continue_watching", "next_episode", "youtube", "twitch", "pick",
-                             "library", "skip", "wrong") or not out.ok:
+                             "library", "skip", "wrong", "info", "sequence") or not out.ok:
             await self.agent.notify(out.say)
 
     def start(self, d: Decision, heard: str, source: str):
-        if d.action.type not in ("volume", "binge", "timer", "auto_skip"):
+        if d.action.type not in ("volume", "binge", "timer", "auto_skip", "info", "help"):
             # A new request replaces one still starting something (a stream search, a binge start); a volume or
-            # mode change on the way doesn't.
+            # mode change, a question or the help on the way doesn't.
             for task in (self._running, self.agent._end_task):
                 if task and not task.done():
                     task.cancel()
@@ -491,6 +505,70 @@ def local_app(svc: Service) -> FastAPI:
     async def reload_rules(request: Request):
         svc.check(request, lan=False)
         return rules_reply(R.load)
+
+    def pipeline() -> dict:
+        c, d1 = svc.cfg, svc.agent.d1
+        return {"steps": svc.router.steps, "off": sorted(svc.router.off), "d1_where": d1.where,
+                "hosted_d1_model": d1.hosted_model, "llm_model": c.llm_model, "llm_reasoning": c.llm_reasoning,
+                "llm_private": c.llm_private, "fallback": svc.agent.rules.fallback_intent,
+                "keys": {"liquid": bool(c.secret("liquid_api_key")), "openrouter": bool(c.secret("openrouter_api_key"))},
+                "counts": svc.agent.rules.counts, "learned": len(learned.load())}
+
+    @app.get("/v1/pipeline")
+    async def get_pipeline(request: Request):
+        svc.check(request, lan=False)
+        return pipeline()
+
+    @app.post("/v1/pipeline")
+    async def set_pipeline(request: Request):
+        """The Decisions tab's steps: order, on/off, which d1, the LLM's model. Saved and used at once."""
+        svc.check(request, lan=False)
+        body = await request.json()
+        new = {}
+        if "steps" in body:
+            steps = [str(x) for x in body["steps"]]
+            if sorted(steps) != sorted(STEPS):
+                raise HTTPException(422, f"steps: {', '.join(STEPS)}, each once")
+            new["decide_steps"] = steps
+        if "off" in body:
+            off = sorted({str(x) for x in body["off"]})
+            if not set(off) <= set(STEPS):
+                raise HTTPException(422, f"off: some of {', '.join(STEPS)}")
+            new["decide_off"] = off
+        if "d1_where" in body:
+            if body["d1_where"] not in WHERE:
+                raise HTTPException(422, f"d1_where: {', '.join(WHERE)}")
+            new["d1_where"] = body["d1_where"]
+        if "hosted_d1_model" in body:
+            if body["hosted_d1_model"] not in ("d1", "d1-ultra"):
+                raise HTTPException(422, "hosted_d1_model: d1 or d1-ultra")
+            new["hosted_d1_model"] = body["hosted_d1_model"]
+        if "llm_model" in body:
+            model = str(body["llm_model"]).strip()
+            if not re.fullmatch(r"[\w.~:/-]{3,100}", model):
+                raise HTTPException(422, "llm_model: an OpenRouter model id")
+            new["llm_model"] = model
+        if "llm_reasoning" in body:
+            if body["llm_reasoning"] not in ("", "none", "minimal", "low", "medium", "high"):
+                raise HTTPException(422, "llm_reasoning: none, minimal, low, medium, high or \"\"")
+            new["llm_reasoning"] = body["llm_reasoning"]
+        if "llm_private" in body:
+            new["llm_private"] = bool(body["llm_private"])
+        if new and config_mod.written(config_mod.LEGACY):      # the settings these replaced: their meaning kept
+            for key in ("decide_steps", "decide_off", "d1_where"):
+                new.setdefault(key, getattr(svc.cfg, key))
+        for key, value in new.items():
+            config_mod.set_value(svc.cfg, key, value)
+        if new:
+            config_mod.unset(config_mod.LEGACY)
+        svc.router.steps, svc.router.off = list(svc.cfg.decide_steps), set(svc.cfg.decide_off)
+        svc.agent.d1.where, svc.agent.d1.hosted_model = svc.cfg.d1_where, svc.cfg.hosted_d1_model
+        if svc.agent.llm:
+            llm = svc.agent.llm
+            llm.model, llm.reasoning, llm.private = svc.cfg.llm_model, svc.cfg.llm_reasoning, svc.cfg.llm_private
+        if new:
+            log.info("decision steps: %s", ", ".join(f"{k} = {v}" for k, v in new.items()))
+        return pipeline()
 
     @app.post("/v1/eval")
     async def run_eval(request: Request):

@@ -150,7 +150,7 @@ def rank(streams: list[Stream], max_height: int, max_mbps: float, runtime_min: i
             s.why_dropped = "cam/ts"
         elif s.height > max_height:
             s.why_dropped = f"{s.height}p > {max_height}p"
-        elif rate and rate > max_mbps:
+        elif max_mbps and rate and rate > max_mbps:     # 0: no limit
             s.why_dropped = f"{rate:.0f} Mbit/s"
         dv_remux = ("DV" in s.visual and "remux" in s.quality.lower()) or bool(DV_REMUX.search(text))
         s.score = (s.aio_score if s.aio_score is not None else 100.0 - s.order) + (20 if s.cached else 0)

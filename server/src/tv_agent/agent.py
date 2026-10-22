@@ -6,18 +6,17 @@ import os
 import re
 import time
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 import httpx
 from rapidfuzz import fuzz
 
 from . import __version__, activity, languages, skips, twitch, youtube
-from .actions import (Action, AutoSkip, Binge, ContinueWatching, Help, Home, LibraryEdit, NextEpisode, OpenApp,
-                      OpenInStremio,
-                      Pick, PlayTitle, Replay, ShowList, Skip, Timer, Tracks, Transport, Twitch, Unclear, Volume,
-                      Wrong, YouTube)
-from .commands import COMMANDS
+from .actions import (Action, AutoSkip, Binge, ContinueWatching, Help, Home, Info, LibraryEdit, NextEpisode, OpenApp,
+                      OpenInStremio, Pick, PlayTitle, Replay, Sequence, ShowList, Skip, Timer, Tracks, Transport,
+                      Twitch, Unclear, Volume, Wrong, YouTube)
+from .commands import LEGEND, SECTIONS, TV_HINT
 from .config import CONFIG_DIR, Config, set_value
 from .decide import rules as rules_mod
 from .decide.d1 import D1
@@ -36,6 +35,7 @@ log = logging.getLogger(__name__)
 SAY_RECEIVER = "com.boujuan.tvagent/.SayReceiver"
 CHOICES = "com.boujuan.tvagent/.ChoicesActivity"
 LIST_SIZE = 6                # rows that fit the TV app's list
+STARTS = {"play_title", "continue_watching", "next_episode", "pick"}     # actions that start playback
 LIST_TTL = 300              # "number 2" refers to a list shown in the last 5 minutes
 STREAMS_TTL = 1800          # an addon's answer for a video is reused for 30 minutes (links resolve when played)
 NOW_PLAYING_FILE = CONFIG_DIR / "now-playing.json"
@@ -120,14 +120,13 @@ class Agent:
         self.account = Account(self.http, key) if key else None
         self.library = Library(self.account)
         self.kodi = Kodi(self.http, self.adb, cfg.kodi_port, cfg.kodi_user, cfg.secret("kodi_password"))
-        self.d1 = D1(self.http, cfg.d1_url, cfg.secret("liquid_api_key") if cfg.hosted_d1 else None,
-                     cfg.hosted_d1_model)
+        self.d1 = D1(self.http, cfg.d1_url, cfg.secret("liquid_api_key"), cfg.hosted_d1_model, cfg.d1_where)
         self.rules, self.rules_error = rules_mod.load_safe()
         if self.rules_error:
             log.error("rules: %s; using the defaults", self.rules_error)
         key = cfg.secret("openrouter_api_key")
-        self.llm = (Llm(self.http, key, cfg.llm_model, self.rules, cfg.llm_reasoning, cfg.llm_private)
-                    if key and cfg.llm_fallback else None)
+        # Made whenever there's a key: whether it's used is the Decisions tab's on/off (cfg.decide_off), live
+        self.llm = Llm(self.http, key, cfg.llm_model, self.rules, cfg.llm_reasoning, cfg.llm_private) if key else None
         self._addons: list[Addon] = []
         self._addons_at = 0.0
         self._progress: asyncio.Task | None = None
@@ -178,6 +177,10 @@ class Agent:
                                               timeout=4))
         except Exception as e:
             log.debug("notify failed: %s", e)
+
+    def llm_on(self) -> Llm | None:
+        """The LLM, when there's a key and its step is on (the Decisions tab)."""
+        return self.llm if self.llm is not None and "llm" not in self.cfg.decide_off else None
 
     async def execute(self, action: Action) -> Outcome:
         handler = getattr(self, "_" + action.type.replace("none", "unclear"))
@@ -356,13 +359,13 @@ class Agent:
                 fixes += 1
 
     async def find_title(self, title: str, kind: str | None, season: int | None = None,
-                         utterance: str | None = None) -> cinemeta.Meta | None:
+                         utterance: str | None = None, with_addons: bool = True) -> cinemeta.Meta | None:
         """Candidates of both kinds from Cinemeta and your metadata addons (search.py); d1 picks one unless a
         candidate clearly wins on its own."""
         if kind is None and season is not None:
             kind = "series"   # "the bear season 3" is the 2022 series, not the 1989 film
         try:
-            addons = await self.addons()
+            addons = await self.addons() if with_addons else []
         except Exception as e:
             log.info("addons unavailable for the title search (%s); Cinemeta only", type(e).__name__)
             addons = []
@@ -382,6 +385,8 @@ class Agent:
         # papel" is Money Heist) plus the best name matches. Those top hits go first, since d1 leans to the first.
         firsts = [h for h in hits if h[1].rank == 0 or h[1].extra_rank == 0]
         top = (firsts + [h for h in hits if h not in firsts])[:self.rules.title_candidates]
+        if "d1" in self.cfg.decide_off:
+            return top[0][1]
         try:
             pick = await self.d1.choice(utterance or f"play {title}", self.rules.title_question,
                                         {f"c{i}": m.label for i, (_, m) in enumerate(top)})
@@ -405,14 +410,44 @@ class Agent:
         return dict(await asyncio.gather(*(one(m) for m in metas)))
 
     async def resolve(self, title: str, kind: str | None, season: int | None) -> tuple[str, str, str] | None:
-        """(imdb id, type, name): your library first (what you watch), then Cinemeta."""
+        """(imdb id, type, name): your library first (what you watch), then Cinemeta. A name the search doesn't find
+        exactly also goes to the LLM, meanwhile, for the real titles it sounds like ("ceberance": Severance); the
+        closest-sounding one that the library or the search has is used."""
         if kind is None and season is not None:
             kind = "series"
         item = await self.library.find(title, kind)
         if item:
             return item["_id"], item["type"], item.get("name", title)
-        m = await self.find_title(title, kind, season)
+        fix = asyncio.create_task(self._sounds_like(title)) if self.llm_on() else None
+        try:
+            m = await self.find_title(title, kind, season)
+            if m and title_search.said_exactly(title, m) or fix is None:
+                return (m.id, m.type, m.name) if m else None
+            candidates = await fix
+        finally:
+            if fix and not fix.done():
+                fix.cancel()
+        for name in candidates:
+            if m and title_search.said_exactly(name, m):
+                return m.id, m.type, m.name                  # the search had found it
+            log.info("title %r: sounds like %r (LLM)", title, name)
+            if item := await self.library.find(name, kind):
+                return item["_id"], item["type"], item.get("name", name)
+            better = await self.find_title(name, kind, season, with_addons=False)     # a real title: Cinemeta has it
+            if better and title_search.said_exactly(name, better):
+                return better.id, better.type, better.name
         return (m.id, m.type, m.name) if m else None
+
+    async def _sounds_like(self, heard: str) -> list[str]:
+        """The LLM's real titles for a misheard one, kept when they sound like it, closest first."""
+        key = library_mod.sounds(heard)
+        names = {i.get("name", "") for i in await self.library.items() if i.get("type") in ("movie", "series")}
+        names = sorted(names - {""}, key=lambda n: -fuzz.ratio(library_mod.sounds(n), key))[:10]
+        scored = [(fuzz.ratio(library_mod.sounds(t), key), t) for t in await self.llm.titles(heard, f"play {heard}",
+                                                                                            names)]
+        said = library_mod.bare(heard)
+        return [t for score, t in sorted(scored, key=lambda x: -x[0])          # stable: the LLM's order on a tie
+                if score >= 65 and library_mod.bare(t) != said][:2]
 
     async def episode_id(self, m: cinemeta.Meta, season: int | None, episode: int | None) -> str | None:
         """tt…:S:E for a series when a season (and maybe episode) was said, checked against Cinemeta's list."""
@@ -847,6 +882,12 @@ class Agent:
 
     async def _tracks(self, a: Tracks) -> Outcome:
         pid = await self._kodi_player()
+        if a.subtitles == "toggle":           # "subtitles": off if they're on, else on
+            if pid is not None:
+                on = bool((await self.kodi.tracks(pid)).get("subtitleenabled"))
+            else:
+                on = await self._just_status() is not None and await self.tv(justplayer.captions_on)
+            a = a.model_copy(update={"subtitles": "off" if on else "on"})
         if pid is None:
             if await self._just_status() is not None and a.subtitles and not a.audio:
                 on = a.subtitles != "off"
@@ -1078,16 +1119,102 @@ class Agent:
         return True
 
     async def _help(self, a: Help) -> Outcome:
-        """"What can you do?": every command, by topic, on the TV (commands.py), English and Spanish."""
+        """"What can you do?": every command, by section, on the TV (commands.py), in the language it was asked in."""
+        lang = a.lang or "en"
         items = []
-        for topic, rows in COMMANDS:
-            items.append({"label": topic, "header": True})
-            for en, es, does in rows:
-                items.append({"label": " · ".join(f"“{x}”" for x in en),
-                              "detail": " · ".join([f"“{x}”" for x in es] + ([does] if does else []))})
-        if not await self._screen({"title": "What you can say", "mode": "help", "items": items}):
+        for section in SECTIONS:
+            items.append({"label": section.name(lang), "header": True})
+            for c in section.commands:
+                items.append({"label": c.say(lang), "detail": c.does(lang)})
+        title = "Lo que puedes decir" if lang == "es" else "What you can say"
+        if not await self._screen({"title": title, "mode": "help", "items": items, "legend": LEGEND[lang],
+                                   "hint": TV_HINT[lang]}):
             return Outcome(False, "Update the TV app to see the list (android/build-and-install.sh)")
-        return Outcome(True, "What you can say")
+        return Outcome(True, title)
+
+    async def _info(self, a: Info) -> Outcome:
+        """"What am I watching?": what's playing and when it ends. "Where am I in Severance?": your last episode of
+        it and how far in, from your Stremio library."""
+        if a.title:
+            found = await self.resolve(a.title, None, None)
+            if not found:
+                return Outcome(False, f"Couldn't find “{a.title}”")
+            imdb, kind, name = found
+            st = ((await self.library.get(imdb)) or {}).get("state") or {}
+            if not st.get("video_id") and not st.get("timeOffset"):
+                return Outcome(True, f"You haven't watched {name}")
+            label = name
+            if m := re.match(r"^tt\d+:(\d+):(\d+)$", st.get("video_id") or ""):
+                label += f" · S{m.group(1)}E{m.group(2)}"
+            off, total = st.get("timeOffset") or 0, st.get("duration") or 0
+            how = ("finished" if total and off >= progress.WATCHED_AT * total else
+                   f"{_clock(off)} of {_clock(total)}" if off and total else f"at {_clock(off)}" if off else "not started")
+            when = ""
+            if st.get("lastWatched"):
+                try:
+                    when = " · " + _ago(datetime.fromisoformat(st["lastWatched"].replace("Z", "+00:00")),
+                                        datetime.now(timezone.utc))
+                except ValueError:
+                    pass
+            return Outcome(True, f"{label}: {how}{when}")
+        np = self.state.now_playing
+        pid = await self._kodi_player()
+        if pid is not None:
+            pos, total, _ = await self.kodi.position(pid)
+            if np:
+                label = np.name + (f" · S{np.video_id.split(':')[1]}E{np.video_id.split(':')[2]}"
+                                   if np.kind == "series" and np.video_id.count(":") == 2 else "")
+            else:
+                label = (await self.kodi.info("VideoPlayer.Title")).get("VideoPlayer.Title") or "Kodi"
+            if not total:
+                return Outcome(True, label)
+            ends = (datetime.now() + timedelta(milliseconds=total - pos)).strftime("%H:%M")
+            return Outcome(True, f"{label} · {_clock(pos)} of {_clock(total)} · ends at {ends}")
+        if np and (st := await self._just_status()) is not None:
+            return Outcome(True, f"{np.name} · {_clock(st[1])}" + (f" of {_clock(np.runtime_ms)}" if np.runtime_ms else ""))
+        return Outcome(True, "Nothing's playing")
+
+    async def _sequence(self, a: Sequence) -> Outcome:
+        """Two commands said together, one after the other. After one that starts something, the next waits until
+        it plays (a jump or a subtitle change needs the player), and "skip the intro" waits for the intro."""
+        said = []
+        for i, step in enumerate(a.steps):
+            started = i and a.steps[i - 1].type in STARTS
+            if started:
+                await self._until_playing()
+            if started and step.type == "skip" and step.what != "credits":
+                out = await self._skip_when_it_comes(step.what)
+            else:
+                out = await self.execute(step)
+            said.append(out.say)
+            if not out.ok:
+                return Outcome(False, " · ".join(said))
+        return Outcome(True, " · ".join(said))
+
+    async def _skip_when_it_comes(self, what: str) -> Outcome:
+        """The intro or recap of what just started, skipped as it comes (it may be minutes in, or already past)."""
+        pid, np = await self._kodi_player(), self.state.now_playing
+        if pid is None or np is None or np.player != "kodi":
+            return Outcome(False, "Skipping works in Kodi, for what the agent started")
+        pos, total, _ = await self.kodi.position(pid)
+        found = [seg for seg in await self.segments(np, total) if seg.kind == what]
+        if not found:
+            return Outcome(False, f"No {what} timestamps for this episode")
+        if all(pos >= seg.end_ms - 3_000 for seg in found):
+            return Outcome(True, f"Already past the {what}")
+        self._start_skip_watch(np, also=what)
+        return Outcome(True, f"Skipping the {what} when it comes")
+
+    async def _until_playing(self, wait_s: float = 20.0):
+        loop = asyncio.get_running_loop()
+        until = loop.time() + wait_s
+        while loop.time() < until:
+            if (pid := await self._kodi_player()) is not None and (await self.kodi.position(pid))[1] > 0:
+                await asyncio.sleep(1.5)        # past Kodi's own jump to where you stopped
+                return
+            if await self._just_status() is not None:
+                return
+            await asyncio.sleep(0.5)
 
     async def _recent_items(self) -> list[ListItem]:
         out = []
@@ -1245,20 +1372,22 @@ class Agent:
         return Outcome(True, "Auto skip on: intros and recaps go by themselves when their timestamps are sure"
                        if a.on else "Auto skip off")
 
-    def _start_skip_watch(self, np: NowPlaying):
+    def _start_skip_watch(self, np: NowPlaying, also: str | None = None):
         if self._skip_task and not self._skip_task.done():
             self._skip_task.cancel()
-        self._skip_task = asyncio.create_task(self._skip_watch(np))
+        self._skip_task = asyncio.create_task(self._skip_watch(np, also=also))
 
-    async def _skip_watch(self, np: NowPlaying, sleep=asyncio.sleep):
-        """auto_skip: the episode's intro and recap skipped as they come, when their timestamps are sure."""
+    async def _skip_watch(self, np: NowPlaying, sleep=asyncio.sleep, also: str | None = None):
+        """auto_skip: the episode's intro and recap skipped as they come, when their timestamps are sure. `also`:
+        that part too, sure or not, because it was asked for ("play The Bear and skip the intro")."""
         try:
             await sleep(4)                               # the file is open and moving
             if (pid := await self._kodi_player()) is None:
                 return
             _, total, _ = await self.kodi.position(pid)
-            todo = sorted((s for s in await self.segments(np, total) if s.sure and s.kind in ("intro", "recap")),
-                          key=lambda s: s.start_ms)
+            auto = ("intro", "recap") if self.cfg.auto_skip else ()
+            todo = sorted((s for s in await self.segments(np, total)
+                           if (s.sure and s.kind in auto) or s.kind == also), key=lambda s: s.start_ms)
             for seg in todo:
                 while True:
                     if self.state.now_playing is not np or (pid := await self._kodi_player()) is None:
@@ -1424,6 +1553,8 @@ class Agent:
                 return await self._next_episode(NextEpisode(offset=1 if a.op == "next" else -1))
             else:
                 await self.kodi.seek_to(pid, 0)
+            if a.op == "seek_to":
+                return Outcome(True, f"To {a.percent}%" if a.percent is not None else f"To {_clock((a.seconds or 0) * 1000)}")
             return Outcome(True, a.op.replace("_", " ").capitalize())
         if (st := await self._just_status()) is not None:
             return await self._just_transport(a, st)

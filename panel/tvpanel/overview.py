@@ -4,8 +4,8 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QCheckBox, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMessageBox,
                                QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from .common import (AMBER, BLUE, GREEN, GREY, ICON, ICON_SIZE, PURPLE, RED, SERVICES, card, dim, human, metric,
-                     set_badge, systemctl, uptime)
+from .common import (AMBER, BLUE, GREEN, GREY, ICON, ICON_SIZE, PURPLE, RED, SERVICES, card, dim, human,
+                     local_d1_needed, metric, set_badge, systemctl, uptime)
 
 
 class ServiceCard(QFrame):
@@ -184,7 +184,8 @@ class Overview(QWidget):
         self.panel.all_services(verb)
 
     def show_headline(self):
-        states = [c.active for c in self.cards.values()]
+        # the local d1 counts only when the decision steps use it (Decisions tab)
+        states = [c.active for unit, c in self.cards.items() if unit != "llama-d1" or local_d1_needed()]
         self.headline.setText("Voice control is on" if all(states) else
                               "Voice control is partly on" if any(states) else "Voice control is off")
         self.stop_all.setEnabled(any(states))

@@ -15,14 +15,16 @@ playback and progress sync. Also the `tv-agent` command line and the MCP server.
 | YouTube, Twitch | "lofi hip hop on YouTube", "search YouTube for paella", "Ibai on Twitch" | Top YouTube result in TizenTube; Twitch live stream |
 | Apps | "open Prime Video", "go back to YouTube", "open Movistar", "go home" | |
 | Playback | "pause", "resume", "skip forward thirty seconds", "go back ten seconds", "go to twelve minutes", "go to the middle", "back to the beginning", "stop" | Kodi: exact, over its API. Just Player: media keys for skips, reopening the link at the time for jumps. Other apps: media keys only |
-| Volume | "volume twenty", "louder", "turn it down a bit", "mute", "unmute" | TV volume 0-100 |
+| Volume | "volume twenty", "volume to the max", "louder", "turn it down a bit", "mute", "unmute" | TV volume 0-100 |
 | Binge mode | "binge mode on", "turn off binge mode" | On (default): when an episode ends the next one starts, already found and checked 20 s into the episode. After a film or a season's last episode: Home |
 | Sleep timer | "stop after this episode", "turn the TV off after this one", "stop in 30 minutes", "turn off in an hour", "cancel the sleep timer" | Stops (then Home) or puts the TV to sleep; "after this one" wins over binge mode |
-| Subtitles, audio | "subtitles on", "subtitles off", "Spanish subtitles", "original audio", "audio in English" | Kodi: the file's own track, else your subtitle addons for that release |
+| Subtitles, audio | "subtitles on", "subtitles off", "subtitles" (switches them over), "Spanish subtitles", "original audio", "audio in English" | Kodi: the file's own track, else your subtitle addons for that release |
 | Missed a line | "what did they say?", "say that again" | Back 10 s, subtitles on for a moment |
 | Intro, recap, credits | "skip the intro", "skip the recap", "skip the credits"; "auto skip on" / "off" | Jumps to the end of the part you're in, from TheIntroDB / IntroDB timestamps (or a chapter named "Opening"); credits: the next episode in binge mode. Auto skip (off by default, `auto_skip`) skips intros and recaps by themselves when their timestamps are sure |
 | Lists | "what was I watching?", "what's new?", "new films", then "number 2" / "the second one" | A numbered list on the TV (posters); the remote's OK or number keys pick too |
-| Help | "what can you do?", "help" | Every command, by topic, English and Spanish, on the TV (also the panel's Commands tab) |
+| What's on | "what am I watching?", "where am I in Severance?" | The title, how far in and when it ends; your last episode of a title and how far in |
+| Two at once | "play Severance episode 2 and go to the middle", "turn it down and put on The Bear" | One after the other; the second waits until playback starts |
+| Help | "what can you do?", "help" | Every command as a pattern with its ‹placeholders›, by section, on the TV in the language you asked in (also the panel's Commands tab) |
 | Newest episode | "play the latest episode of The Bear" | The newest episode out |
 | Your library | "add this to my library", "remove Friends from my library", "mark this as watched", "mark The Bear season 3 as watched", "mark it as unwatched" | Written to your Stremio library, with Stremio's own per-episode watched marks |
 
@@ -84,20 +86,30 @@ All of this is data in `~/.config/tv-agent/rules.json` (or `src/tv_agent/decide/
 save your own), editable in the panel's **Decisions** tab and used at once, without a restart:
 
 1. **Clean-up:** fillers at the start ("hey tv", "um", "okay", "can you"), words removed anywhere ("please"),
-   politeness at the end ("thanks"), and fixes for common mishearings ("got to" → "go to", "un pause" → "unpause").
-2. **Fixed phrases** (instant): an exact sentence → its action ("pause", "next episode").
-3. **Pattern rules** (instant), tried in order: a regular expression with named parts → an action template whose
-   fields are filled by converters (`seconds`, `time`, `number`, `amount`, `title`, `play`, `episode_here`, `app`…).
-   A converter marked `!` makes the rule not match when its part can't be converted, so the next rule gets a try.
-   The last two catch "play / put on / watch / start + a title" and a title said with a season or episode, so the
-   commonest commands never wait for the model, and titles made of command words ("Up", "Stop Making Sense") play.
-4. **d1-3B** (Liquid AI's decision model, ~0.65 s) chooses among the intents by their descriptions; unless it's
-   0.65 sure and its answer is twice as likely as the next, the answer is "Didn't get that". d1 sees only the descriptions, never the intent
-   names, so each one says what it does with examples; there is one intent per action (pause, resume, seek to,
-   previous episode, set volume…), so nothing has to be squeezed into a near miss. Built-in intents pull titles and
-   numbers out with code; your own intents do a fixed action or fill one from the whole sentence. d1 also picks
-   between candidate titles when a name is ambiguous.
-5. **Apps and hooks:** the only apps the agent may start, the names you can call them, and which app gets YouTube,
+   politeness at the end ("thanks"), and fixes for common mishearings ("got to" → "go to", "un pause" → "unpause",
+   "subtitles of" → "subtitles off", "beach mode" → "binge mode"), including a layer that turns Spanish commands
+   into the English the rules know. Always on.
+2. Then the **decision steps**, in the order set in the Decisions tab (this is the default), each switchable:
+   - **Fixed phrases** (instant): an exact sentence → its action ("pause", "next episode"), and the sentences you
+     taught in the Activity tab.
+   - **Pattern rules** (instant), tried in order: a regular expression with named parts → an action template
+     whose fields are filled by converters (`seconds`, `time`, `number`, `level`, `title`, `play`, `app`…). A
+     converter marked `!` makes the rule not match when its part can't be converted, so the next rule gets a try.
+     The last ones catch "play / put on / watch / start + a title" and a title said with a season or episode, so
+     the commonest commands never wait for a model; a title described instead of named is left to the models.
+   - **The LLM** (with an OpenRouter key, ~0.4 s): one action in a fixed JSON shape, checked like the rules'; its
+     "not a command" is final. It also names the real title behind a misheard one the search can't find.
+   - **d1** (Liquid AI's decision model: this laptop's d1-3B, Liquid's hosted one, or either first) chooses among
+     the intents by their descriptions; unless it's 0.65 sure and its answer is twice as likely as the next, the
+     next step decides. d1 sees only the descriptions, so each says what it does with an example. Built-in intents
+     pull titles and numbers out with code; your own intents do a fixed action or fill one from the whole
+     sentence. d1 also picks between candidate titles when a name is ambiguous.
+
+   A step that can't be reached passes to the next. When no model answered (off or unreachable), what's left is
+   treated as the d1 tab's "when no model answers" intent (a title to play, or nothing).
+3. **Two commands in one** ("play Severance episode 2 and go to the middle"): when one side of an "and" / "y" is a
+   control command the rules know, the other side goes through the steps and both run, one after the other.
+4. **Apps and hooks:** the only apps the agent may start, the names you can call them, and which app gets YouTube,
    Twitch and Stremio-page links (and the link format).
 
 Saving checks everything first (regexes compile, actions and fields exist, hooks point at real apps) and keeps the
@@ -124,7 +136,7 @@ URL-encoded into the hook templates.
 | Stage | Result |
 |---|---|
 | Speech-to-text | 103 ms p50, 193 ms p95 in real use (5 s test clip: 211 ms) |
-| Decision | fixed phrase / pattern under 0.1 ms; d1 ~0.65 s (22 described intents, ~470 prompt tokens). Rules decide ~96% of commands. Test sets: 107/107 (`eval/utterances.jsonl`) and 654/654 full actions (`eval/commands.jsonl`: 476 for tuning, 178 held out) |
+| Decision | fixed phrase / pattern under 0.1 ms; the LLM ~0.4 s; d1 ~0.9 s local, ~0.2 s hosted. Rules decide ~96% of commands. Test sets: 107/107 (`eval/utterances.jsonl`), 654/654 full actions (`eval/commands.jsonl`: 476 for tuning, 178 held out), and every pattern of the command list (130 sentences, English and Spanish) |
 | Transport, volume, apps | ~0.1-0.8 s after you stop talking |
 | Film or episode | ~6 s from your words to moving picture in either player (addon lookup + link check + opening the 4K link dominate) |
 | Cost on this computer | tv-agent ~1.1 GB RAM (mostly the speech model), 0% CPU idle; d1-3B 1.7 GB of GPU memory |
@@ -150,19 +162,21 @@ Optional:
 ```bash
 .venv/bin/tv-agent setup stt                # the speech models; `setup stt parakeet-v3` downloads (487 MB) and uses
                                             # the multilingual one (Spanish commands), checked against its SHA-256
-op read "op://Personal/<item>/credential" | .venv/bin/tv-agent setup liquid      # hosted d1 as a fallback
-op read "op://Personal/<item>/credential" | .venv/bin/tv-agent setup openrouter  # an LLM for what isn't understood
+op read "op://Personal/<item>/credential" | .venv/bin/tv-agent setup liquid      # Liquid's hosted d1
+op read "op://Personal/<item>/credential" | .venv/bin/tv-agent setup openrouter  # the LLM step
 ```
 
 The keys are checked with the service, never shown, and kept in `secrets.toml` (the panel's Settings can set them
-too); `hosted_d1` and `llm_fallback` (on by default) say whether they're used. With an OpenRouter key, the LLM
-(`llm_model`, Gemini 3.5 Flash-Lite) decides what the rules don't, before d1 (`llm_first`: on 40 fresh hard commands
-the whole path was right 95% of the time in English and in Spanish, against 70% / 60% with the local d1, at ~0.8 s;
-[research §2.8](../docs/research-2026-10-22.md)); d1 then only
-decides when the LLM can't be reached, and Liquid's hosted d1 only when the local one doesn't answer either. What
-goes to them: the LLM gets what you said, what's playing, the app names and up to 10 of your library's titles
-(fastest provider; `llm_private` for zero-data-retention ones only); Liquid gets what you said and the options
-(its terms allow training on it).
+too). How a command is decided is set in the panel's Decisions tab, live (or `decide_steps`, `decide_off`,
+`d1_where` in config.toml): after the clean-up, fixed phrases, pattern rules, the LLM and d1 run in that order by
+default, each can be moved or switched off, and d1 can be the local one, Liquid's hosted one, or either first. A
+step that can't be reached passes to the next. With an OpenRouter key the LLM (`llm_model`, DeepSeek V4.1 Flash
+with reasoning off) decides what the rules don't, before d1: on fresh hard commands the whole path was right 95-100%
+of the time in English and Spanish, at ~0.4 s, against 65-80% with d1 ([research §2.9](../docs/research-2026-10-22.md));
+it also says what a title the search can't find was misheard from. What goes to them: the LLM gets what you said,
+what's playing, the app names and up to 10 of your library's titles (fastest provider; `llm_private` for
+zero-data-retention ones only); Liquid gets what you said and the options (its terms allow training on it). With
+both cloud steps on, the local d1 server (llama-d1) can be stopped: the Decisions tab offers it.
 
 `config.toml` needs at least `tv_hosts` (the TV's address, e.g. Ethernet then Wi-Fi; mDNS is tried otherwise).
 Every setting: [config.example.toml](config.example.toml). Secrets: `~/.config/tv-agent/secrets.toml` (mode 600;

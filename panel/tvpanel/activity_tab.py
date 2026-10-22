@@ -19,7 +19,7 @@ FIELDS = ["t", "source", "heard", "type", "via", "rule", "confidence", "ok", "sa
 
 def describe_how(e: dict) -> str:
     via = {"phrase": "fixed phrase", "pattern": "pattern", "d1": "d1 model", "grammar": "fixed phrase",
-           "cue": "pattern"}.get(e.get("via", ""), e.get("via", ""))
+           "cue": "pattern", "llm": "LLM", "split": "two commands"}.get(e.get("via", ""), e.get("via", ""))
     rule = f" {e['rule']}" if e.get("rule") and e.get("via") != "d1" else ""
     conf = f" {e.get('confidence', 0):.2f}" if e.get("via") == "d1" else ""
     return f"{str(e.get('type', '')).replace('_', ' ')} · {via}{rule}{conf}"

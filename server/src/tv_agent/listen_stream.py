@@ -4,8 +4,9 @@ The TV app streams the remote's microphone in 20 ms chunks from the moment the p
 This module decides when you've finished, from the audio as it arrives (the same energy measure the app uses):
 
   ~160 ms of quiet  a complete command that can't be the start of a longer one, from a fixed phrase or pattern
-                    ("pause", "next episode", "go home", "… season 3 episode 2")
-  ~460 ms           anything else understood that doesn't end mid-phrase ("volume twenty", d1's answers)
+                    ("pause", "next episode", "go home")
+  ~460 ms           anything else understood that doesn't end mid-phrase ("volume twenty", "… season 3 episode 2",
+                    the models' answers, two commands in one)
   ~720 ms           whatever was heard (the old fixed wait), or at once when the app ends the audio. A title or a
                     search on its own waits this long too: people pause before the season ("play the bear … season 3")
 
@@ -27,8 +28,9 @@ START_FRAMES = 3                     # 60 ms above the threshold = speech
 PREROLL = 15                         # frames kept before speech starts (300 ms), as the app does
 CHECKPOINTS = (8, 23, 36)            # frames of quiet after speech: 160, 460, 720 ms
 # Last words that mean more is coming ("play the …", "season …", "volume …", "skip thirty …").
-OPEN_ENDED = re.compile(r"\b(?:the|a|an|to|of|on|in|and|with|by|for|from|at|season|series|episode|ep|part|play|watch|"
-                        r"put|open|go|start|continue|resume|volume|set|skip|jump|seek|search|turn|switch)$")
+OPEN_ENDED = re.compile(r"\b(?:the|a|an|to|of|on|in|and|then|with|by|for|from|at|season|series|episode|ep|part|play|"
+                        r"watch|put|open|go|start|continue|resume|volume|set|skip|jump|seek|search|turn|switch|y|"
+                        r"luego|despu[eé]s)$")
 # A number that can still grow: "twenty" → "twenty five", "30" → "35". "two" or "fifteen" is final.
 TRAILING_NUMBER = re.compile(r"(?:\b\d*0|\b(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred))$")
 # Whole commands that are often the first word of a longer one ("play" → "play the bear").
@@ -96,10 +98,10 @@ def ready(action, via: str, text: str, stage: int) -> bool:
         return True
     if via not in ("phrase", "pattern") or TRAILING_NUMBER.search(text):
         return False
-    if action.type in ("volume", "home", "next_episode", "open_in_stremio", "open_app", "transport", "show_list",
-                       "pick", "library", "skip", "auto_skip", "wrong", "help"):
-        return True
-    return action.type == "play_title"   # with an episode (title-only waited above); continue_watching waits
+    # A title with its episode waits for the next checkpoint too: "… and skip the intro" may follow, and a start
+    # takes seconds anyway. continue_watching waits as well.
+    return action.type in ("volume", "home", "next_episode", "open_in_stremio", "open_app", "transport", "show_list",
+                           "pick", "library", "skip", "auto_skip", "wrong", "help", "info")
 
 
 class StreamSession:

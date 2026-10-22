@@ -30,6 +30,10 @@ def captions(adb: Adb, on: bool, language: str | None = None):
         adb.run(["settings", "put", "secure", "accessibility_captioning_locale", language])
 
 
+def captions_on(adb: Adb) -> bool:
+    return adb.run(["settings", "get", "secure", "accessibility_captioning_enabled"]).strip() == "1"
+
+
 def status(adb: Adb) -> tuple[str, int, float] | None:
     """(state, position ms now, speed) of Just Player's media session, or None if it isn't open."""
     out = adb.run(["sh", "-c", STATUS], timeout=8)

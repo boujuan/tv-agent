@@ -33,7 +33,7 @@ BUILTIN_INTENTS = ("play_title", "continue_watching", "next_episode", "previous_
                    "twitch", "open_app", "home", "pause", "resume", "stop", "skip_forward", "skip_back", "seek_to",
                    "restart", "volume_set", "volume_up", "volume_down", "mute", "unmute", "binge", "sleep_timer",
                    "subtitles", "audio_language", "replay", "show_recent", "show_new", "pick_number",
-                   "latest_episode", "library", "skip_segment", "help",
+                   "latest_episode", "library", "skip_segment", "help", "info",
                    "transport", "volume", "none")    # transport/volume: the broader intents of rules files before v2
 PLACEHOLDER = re.compile(r"^\{(\w+)(?:\|(\w+)(!)?)?\}$")
 PACKAGE = re.compile(r"^[a-zA-Z][\w]*(?:\.[\w]+)+$")
@@ -168,14 +168,16 @@ NOT_A_TITLE = re.compile(r"^(?:it|this|that|something|anything|again|the movie|t
 # (the LLM knows titles) decide those, not a title search for the description.
 DESCRIBED = re.compile(r"^(?:the one (?:with|where|about|that)|la de|el de|la que|el que|lo de)\b|"
                        r"\b(?:film|movie|series|show|documentary|peli|pel[ií]cula|serie|documental)\s+"
-                       r"(?:about|where|in which|with the|sobre|donde|en la que|del?)\b")
+                       r"(?:that\s+|esa\s+|ese\s+|esta\s+|este\s+)?(?:about|where|in which|with the|sobre|donde|"
+                       r"en la que|del?)\b")
 
 
 def _play(v, rules):
     """Like title, but not when what follows "play" is an app, the show that's on, or "the next one"."""
     s = T.title_slots(v)
     t = s["title"]
-    if not t or t in T.CURRENT or NOT_A_TITLE.search(t) or DESCRIBED.search(t) or _alias(t, rules):
+    if not t or t in T.CURRENT or NOT_A_TITLE.search(t) or DESCRIBED.search(t) or DESCRIBED.search(v.strip()) \
+            or _alias(t, rules):
         return None
     return s
 
@@ -218,6 +220,26 @@ def _language(v, _):
     return LANGUAGE_NAMES.get(re.sub(r"^the ", "", t))
 
 
+def _level(v, _):
+    """A volume level: a number, or the lowest / highest ("to the max")."""
+    t = re.sub(r"^(?:to |at )?(?:the |its |el |al )?", "", v.strip())
+    if re.fullmatch(r"(?:max(?:imum|imo)?|highest|top|full|loudest|m[aá]ximo)", t):
+        return 100
+    if re.fullmatch(r"(?:min(?:imum|imo)?|lowest|bottom|quietest|m[ií]nimo)", t):
+        return 1
+    n = CONVERTERS["number"](v, _)
+    return n if n is not None and 0 <= n <= 100 else None
+
+
+def _skip(v, _):
+    """How far "skip …" goes: a duration, a bare number (seconds), or "a bit" (30 s, as "skip" alone)."""
+    t = v.strip()
+    if re.fullmatch(r"(?:a (?:little )?bit|a little|a few seconds|some|a while|ahead)", t):
+        return 30
+    s = seconds_in(t)
+    return s if s is not None else to_int(t)
+
+
 def _minutes(v, _):
     s = seconds_in(v)
     if s is None and (n := to_int(v.strip())) is not None:
@@ -245,6 +267,8 @@ CONVERTERS = {
     "language": _language,
     "minutes": _minutes,
     "subject": _subject,
+    "level": _level,
+    "skip": _skip,
 }
 CONVERTER_HELP = {
     "text": "the words as said",
@@ -264,6 +288,8 @@ CONVERTER_HELP = {
     "language": "a language by name ('spanish', 'traditional chinese') as its code, or 'original'",
     "minutes": "a duration in minutes ('half an hour', 'in 45')",
     "subject": "a title (season, episode), or nothing for 'this' / 'it': what's on (use with \"*\")",
+    "level": "a volume level 0-100; 'the max' 100, 'the minimum' 1",
+    "skip": "how far to skip: a duration, a number of seconds, or 'a bit' (30 s)",
 }
 
 
@@ -306,6 +332,8 @@ def build(raw: dict, source: str) -> Rules:
     norm = raw.get("normalize", {})
     fixes = []
     for i, f in enumerate(norm.get("fixes", [])):
+        if not f.get("from"):
+            raise RulesError(f"clean-up fix {i + 1}: what's heard (the regex) is empty")
         try:
             fixes.append((re.compile(f["from"]), str(f.get("to", ""))))
         except (re.error, KeyError, TypeError) as e:

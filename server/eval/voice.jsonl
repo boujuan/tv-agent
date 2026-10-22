@@ -1,0 +1,33 @@
+{"lang": "es", "text": "¿Qué estoy viendo?", "expect": {"type": "info"}}
+{"lang": "es", "text": "¿Qué puedes hacer?", "expect": {"type": "help"}}
+{"lang": "es", "text": "Pon el show del químico este que hace drogas.", "expect": {"type": "play_title", "title_any": ["breaking bad"]}}
+{"lang": "en", "text": "What am I watching right now?", "expect": {"type": "info"}}
+{"lang": "en", "text": "What can I do?", "expect": {"type": "help"}}
+{"lang": "en", "text": "Play.", "expect": {"type": "transport", "op": "resume"}}
+{"lang": "en", "text": "What is the last episode of Cebruns that I watched?", "expect": {"type": "info", "title_any": ["cebruns", "severance"]}}
+{"lang": "en", "text": "Play the last episode of Ceberance.", "expect": {"type": "play_title", "title_any": ["ceberance", "severance"]}}
+{"lang": "en", "text": "Showice in StreamU.", "expect": {"type": "open_in_stremio", "title_any": ["office"]}}
+{"lang": "en", "text": "What's new?", "expect": {"type": "show_list", "list": "new"}}
+{"lang": "en", "text": "New films.", "expect": {"type": "show_list", "list": "movies"}}
+{"lang": "en", "text": "New movies.", "expect": {"type": "show_list", "list": "movies"}}
+{"lang": "en", "text": "Go to the second episode of Sevence and go to the middle of it.", "expect": {"type": "sequence"}}
+{"lang": "en", "text": "Auto skip off.", "expect": {"type": "auto_skip", "on": false}}
+{"lang": "en", "text": "Subtitles all.", "expect": {"type": "tracks"}}
+{"lang": "en", "text": "Sub purpose all", "expect": {"type": "tracks"}}
+{"lang": "en", "text": "Turn the subtitles on.", "expect": {"type": "tracks", "subtitles": "on"}}
+{"lang": "en", "text": "Volume seventy.", "expect": {"type": "volume", "op": "set", "amount": 70}}
+{"lang": "en", "text": "Turn down the volume to the minimum.", "expect": {"type": "volume", "op": "set"}}
+{"lang": "en", "text": "Beach mode Oh.", "expect": {"type": "binge", "on": true}}
+{"lang": "en", "text": "Binge mode on", "expect": {"type": "binge", "on": true}}
+{"lang": "en", "text": "Ibai on Twitch.", "expect": {"type": "twitch", "channel": "ibai"}}
+{"lang": "en", "text": "Pinch Mode On", "expect": {"type": "binge", "on": true}}
+{"lang": "en", "text": "Play the second episode of Pluriboos.", "expect": {"type": "play_title", "title_any": ["plurib"], "episode": 2}}
+{"lang": "en", "text": "Go to the middle of this episode.", "expect": {"type": "transport", "op": "seek_to", "percent": 50}}
+{"lang": "en", "text": "Subtitles of", "expect": {"type": "tracks", "subtitles": "off"}}
+{"lang": "en", "text": "That's wrong.", "expect": {"type": "wrong"}}
+{"lang": "es", "text": "Cambia el idioma español.", "expect": {"type": "tracks"}}
+{"lang": "es", "text": "Subtítulos en español.", "expect": {"type": "tracks", "subtitles": "spa"}}
+{"lang": "en", "text": "Sops off.", "expect": {"type": "tracks", "subtitles": "off"}}
+{"lang": "es", "text": "Versión original.", "expect": {"type": "tracks", "audio": "original"}}
+{"lang": "en", "text": "Mm.", "expect": {"type": "none"}}
+{"lang": "en", "text": "Okay.", "expect": {"type": "none"}}

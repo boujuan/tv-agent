@@ -1,15 +1,15 @@
-"""The last step for what the rules and d1 leave undecided: a general LLM through OpenRouter (`llm_model`, by default
-Gemini 3.5 Flash-Lite), asked for one action in a fixed JSON shape. Only with an OpenRouter key
-(`tv-agent setup openrouter`) and `llm_fallback` on. Research: docs/research-2026-10-22.md §2.5. Gemini 3.5
-Flash-Lite always reasons a little; `llm_reasoning` keeps it at "minimal" (its floor; "" sends nothing, for models
-that take no reasoning setting).
+"""A general LLM through OpenRouter (`llm_model`), asked for one action in a fixed JSON shape: one of the decision
+steps (router.py; its place and on/off in the panel's Decisions tab). Only with an OpenRouter key
+(`tv-agent setup openrouter`). Research: docs/research-2026-10-22.md §2.5 and §2.9. `llm_reasoning` sets the
+reasoning effort for models that reason ("" sends nothing, for models that take no reasoning setting).
 
 It gets what you said, what's playing, the app names and up to 10 of your library's titles that sound like what you
 said, so a misheard name can still be matched ("the bare" -> The Bear), and a title can come from its own knowledge
 ("the one with the robbers in Dalí masks" -> La casa de papel). The fastest provider that enforces the JSON shape
-answers (`llm_private` keeps to providers that keep no data, which is slower for Gemini 3.5 Flash-Lite). Its answer
-is checked like everything else: numbers in range, an app from the list, one of the agent's own actions; a title it
-names still has to be found by the title search before anything plays.
+answers (`llm_private` keeps to providers that keep no data). Its answer is checked like everything else: numbers in
+range, an app from the list, one of the agent's own actions; a title it names still has to be found by the title
+search before anything plays. `titles()` asks it which real titles a name the search can't find sounds like
+("ceberance": Severance); the agent keeps the one that sounds closest.
 """
 import json
 import logging
@@ -27,39 +27,47 @@ FAST = {"require_parameters": True, "sort": "latency"}       # only endpoints th
 # Zero data retention only. Gemini 3.5 Flash-Lite's one such endpoint (Vertex) doesn't list every parameter, so they
 # can't be required there: the schema is still sent, and the answer is checked here anyway.
 PRIVATE = {"zdr": True, "data_collection": "deny", "sort": "latency"}
-ACTIONS = ["play_title", "continue_watching", "show_in_stremio", "next_episode", "previous_episode", "pause", "resume",
-           "stop", "home", "start_over", "replay", "forward", "back", "seek_to", "seek_percent", "volume_up",
-           "volume_down", "volume_set", "mute", "unmute", "open_app", "youtube", "twitch", "subtitles", "audio",
-           "skip_intro", "skip_recap", "skip_credits", "stop_after_this", "turn_off_after_this", "stop_in", "turn_off_in",
+ACTIONS = ["play_title", "continue_watching", "show_in_stremio", "info", "next_episode", "previous_episode", "pause",
+           "resume", "stop", "home", "start_over", "replay", "forward", "back", "seek_to", "seek_percent", "volume_up",
+           "volume_down", "volume_set", "mute", "unmute", "open_app", "youtube", "twitch", "subtitles_on",
+           "subtitles_off", "subtitles_toggle", "subtitles", "audio", "skip_intro", "skip_recap", "skip_credits",
+           "auto_skip_on", "auto_skip_off", "stop_after_this", "turn_off_after_this", "stop_in", "turn_off_in",
            "cancel_timer", "binge_on", "binge_off", "library_add", "library_remove", "mark_watched", "mark_unwatched",
-           "show_recent", "show_new", "show_movies", "pick", "help", "none"]
+           "show_recent", "show_new", "show_movies", "pick", "help", "wrong", "none"]
 SLOTS = {"title": "string", "season": "integer", "episode": "integer", "seconds": "integer", "number": "integer",
          "app": "string", "language": "string", "query": "string"}
 SCHEMA = {"type": "object", "additionalProperties": False, "required": ["action", *SLOTS],
           "properties": {"action": {"type": "string", "enum": ACTIONS},
                          **{k: {"type": [t, "null"]} for k, t in SLOTS.items()}}}
-SYSTEM = """You turn one spoken command for a TV voice agent into one action. The words come from speech-to-text,
-so some may be misheard. Answer only with the JSON object. Use "none" when it isn't a TV command or you aren't sure.
+SYSTEM = """You turn one spoken command for a TV voice agent into one action. Answer only with the JSON object.
+Use "none" when it isn't a TV command or you can't tell which one it is.
+
+The words come from speech-to-text, often of a Spanish speaker, so command words get misheard: pick the command it
+sounds like ("of" or "all" after subtitles, "oh" after mode: on / off; "beach mode", "pinch mode": binge mode;
+"sops", "sobs": subs). The command may be in Spanish.
 
 Actions and their fields (every other field null):
 play_title: title, season, episode · continue_watching: title, or null for what was watched last
 show_in_stremio: title (its page, without playing)
+info: title, or null for what's playing ("what am I watching", "what episode of X am I on", "where am I in X")
 next_episode, previous_episode, pause, resume, stop, home, start_over, replay ("what did they say?")
 forward / back: seconds · seek_to: seconds from the start · seek_percent: number (50 = the middle)
 volume_up, volume_down, mute, unmute · volume_set: number 0-100
 open_app: app (one of "apps") · youtube: query · twitch: query (the streamer)
-subtitles: language, "on" or "off" · audio: language or "original"
-skip_intro, skip_recap, skip_credits
+subtitles_on, subtitles_off · subtitles_toggle (on or off unclear) · subtitles: language · audio: language or
+"original"
+skip_intro (the opening, its credits or theme), skip_recap, skip_credits (the end credits) · auto_skip_on,
+auto_skip_off (intros skipped by themselves)
 stop_after_this, turn_off_after_this (when what's playing ends) · stop_in, turn_off_in: number (minutes)
 cancel_timer · binge_on, binge_off (the next episode starts by itself)
 library_add, library_remove, mark_watched, mark_unwatched: title, season, episode, or all null for what's on
-show_recent ("what was I watching"), show_new ("what's new"), show_movies (new films), help ("what can you do")
-pick: number (an item of the list on screen)
+show_recent (a list of what was being watched, not finished yet), show_new ("what's new"), show_movies (new films),
+help ("what can you do")
+pick: number (an item of the list on screen) · wrong ("that's wrong": the last command was misunderstood)
 
 Titles: copy one exactly from "candidates" when it's what was said, even misheard ("the bare" is "The Bear"). When
 a film or series is described instead of named, give its real title. Otherwise copy the title as said.
 Numbers as digits ("season three" -> 3, "a couple of minutes" -> 120 seconds). Languages in English ("spanish").
-The command may be in Spanish.
 
 Examples:
 "put that bear show on, third season" -> {"action":"play_title","title":"The Bear","season":3}
@@ -67,7 +75,10 @@ Examples:
 "can you make it so I can actually hear them" -> {"action":"volume_up"}
 "I'm off to bed, switch it all off when this one's done" -> {"action":"turn_off_after_this"}
 "take me to the halfway point" -> {"action":"seek_percent","number":50}
+"beach mode oh" -> {"action":"binge_on"}
+"sops off" -> {"action":"subtitles_off"}
 "is ibai live?" -> {"action":"twitch","query":"ibai"}
+"what episode of severance am I on" -> {"action":"info","title":"Severance"}
 "este ya lo he visto" -> {"action":"mark_watched"}
 "empieza el capítulo otra vez" -> {"action":"start_over"}
 "go back to what I was watching yesterday" -> {"action":"continue_watching"}
@@ -75,27 +86,82 @@ Examples:
 "what was the weather like yesterday" -> {"action":"none"}"""
 
 
+TITLE_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["titles"],
+                "properties": {"titles": {"type": "array", "items": {"type": "string"}, "maxItems": 3}}}
+TITLE_SYSTEM = """Someone asked their TV for a film or series by voice. Speech-to-text wrote its name down wrong, as
+"spelled", and a title search found nothing by that name. Say it out loud: which real films or series sound like
+that? Give up to 3 of their real titles (English or original name, as on IMDb), the closest-sounding first. Examples:
+"ceberance" -> Severance, "the bare" -> The Bear, "stranger tings" -> Stranger Things. "watched" lists titles they
+have watched; use one only when it sounds like "spelled". Answer only with the JSON object; an empty list when nothing
+sounds like it."""
+
+
 class Llm:
     def __init__(self, http: httpx.AsyncClient, key: str, model: str, rules: Rules, reasoning: str = "minimal",
                  private: bool = False):
         self.http, self.key, self.model, self.rules, self.reasoning = http, key, model, rules, reasoning
         self.private = private
+        self.last_usage: dict = {}
+        self._params: dict[str, list[tuple[bool, bool]]] = {}   # per model: (temperature?, reasoning?) that worked
+        self._floor: dict[str, str] = {}             # models that can't turn reasoning off: their lowest
+
+    async def _post(self, body: dict, timeout: float) -> dict:
+        """One request. Temperature 0 and the reasoning setting where the model takes them: OpenRouter finds no
+        provider for a parameter a model doesn't take (404), so it's asked again without the temperature, then
+        without the reasoning setting, then without both; a model that can't turn reasoning off is asked at its
+        lowest. What worked is remembered."""
+        body = {"model": self.model, "max_tokens": 400, "provider": PRIVATE if self.private else FAST, **body}
+        effort = self._floor.get(self.model, self.reasoning) if self.reasoning == "none" else self.reasoning
+        tries = self._params.get(self.model) or [(True, True), (False, True), (True, False), (False, False)]
+        for temperature, reasoning in list(tries):
+            body.pop("temperature", None)
+            body.pop("reasoning", None)
+            if temperature:
+                body["temperature"] = 0
+            if reasoning and effort:
+                body["reasoning"] = {"effort": effort, "exclude": True}
+            r = await self.http.post(URL, json=body, timeout=timeout,
+                                     headers={"Authorization": f"Bearer {self.key}", "X-Title": "tv-agent"})
+            if r.status_code == 400 and effort == "none" and "mandatory" in r.text.lower():
+                self._floor[self.model] = effort = "minimal"
+                body["reasoning"] = {"effort": effort, "exclude": True}
+                r = await self.http.post(URL, json=body, timeout=timeout,
+                                         headers={"Authorization": f"Bearer {self.key}", "X-Title": "tv-agent"})
+            if r.status_code == 404 and "parameters" in r.text and len(tries) > 1:
+                continue
+            r.raise_for_status()
+            self._params[self.model] = [(temperature, reasoning)]
+            return r.json()
+        raise httpx.HTTPError("no provider takes this model's parameters")
 
     async def ask(self, said: str, context: dict, timeout: float = 3.0) -> dict | None:
-        body = {"model": self.model, "temperature": 0, "max_tokens": 400,
-                "provider": PRIVATE if self.private else FAST,
-                "response_format": {"type": "json_schema",
-                                    "json_schema": {"name": "tv_action", "strict": True, "schema": SCHEMA}},
-                "messages": [{"role": "system", "content": SYSTEM},
-                             {"role": "user", "content": json.dumps({"said": said, **context}, ensure_ascii=False)}]}
-        if self.reasoning:
-            body["reasoning"] = {"effort": self.reasoning, "exclude": True}
-        r = await self.http.post(URL, json=body, timeout=timeout,
-                                 headers={"Authorization": f"Bearer {self.key}", "X-Title": "tv-agent"})
-        r.raise_for_status()
-        content = r.json()["choices"][0]["message"]["content"]
+        data = await self._post({
+            "response_format": {"type": "json_schema",
+                                "json_schema": {"name": "tv_action", "strict": True, "schema": SCHEMA}},
+            "messages": [{"role": "system", "content": SYSTEM},
+                         {"role": "user", "content": json.dumps({"said": said, **context}, ensure_ascii=False)}]},
+            timeout)
+        self.last_usage = data.get("usage") or {}       # tokens (for the benchmark's cost)
+        content = data["choices"][0]["message"]["content"]
         answer = json.loads(content) if isinstance(content, str) else content
         return answer if isinstance(answer, dict) else None
+
+    async def titles(self, heard: str, sentence: str, library: list[str]) -> list[str]:
+        """Real titles a misheard one may be ("ceberance" -> ["Severance", …]), most likely first."""
+        try:
+            data = await self._post({
+                "response_format": {"type": "json_schema",
+                                    "json_schema": {"name": "title", "strict": True, "schema": TITLE_SCHEMA}},
+                "messages": [{"role": "system", "content": TITLE_SYSTEM},
+                             {"role": "user", "content": json.dumps({"spelled": heard, "sentence": sentence,
+                                                                     "watched": library}, ensure_ascii=False)}]},
+                3.0)
+            content = data["choices"][0]["message"]["content"]
+            got = (json.loads(content) if isinstance(content, str) else content).get("titles")
+        except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError, AttributeError) as e:
+            log.info("LLM title fix unavailable (%s)", type(e).__name__)
+            return []
+        return [t.strip()[:120] for t in got if isinstance(t, str) and t.strip()][:3] if isinstance(got, list) else []
 
     async def answer(self, said: str, context: dict) -> tuple[bool, A.Action | None]:
         """(whether it answered, its action or None for "not a command")."""
@@ -118,7 +184,8 @@ def to_action(a: dict, said: str, candidates: list[str], rules: Rules) -> A.Acti
     if title and not (any(fuzz.ratio(title.lower(), c.lower()) >= 90 for c in candidates)
                       or fuzz.partial_ratio(title.lower(), said.lower()) >= 70):
         log.info("LLM title %r comes from its own knowledge (not said, not in your library)", title)
-    lang = (a.get("language") or "").strip().lower()
+    # the language is sometimes put in another text field ("query": "on")
+    lang = (a.get("language") or a.get("query") or a.get("app") or "").strip().lower()
     code = LANGUAGE_NAMES.get(lang)
     library = {"library_add": "add", "library_remove": "remove", "mark_watched": "watched", "mark_unwatched": "unwatched"}
     try:
@@ -129,6 +196,14 @@ def to_action(a: dict, said: str, candidates: list[str], rules: Rules) -> A.Acti
                 return A.ContinueWatching(title=title)
             case "show_in_stremio" if title:
                 return A.OpenInStremio(title=title, season=num("season"), episode=num("episode"))
+            case "info":
+                return A.Info(title=title)
+            case "subtitles_on" | "subtitles_off" | "subtitles_toggle":
+                return A.Tracks(subtitles=kind.removeprefix("subtitles_"))
+            case "auto_skip_on" | "auto_skip_off":
+                return A.AutoSkip(on=kind == "auto_skip_on")
+            case "wrong":
+                return A.Wrong()
             case "start_over":
                 return A.Transport(op="seek_to", seconds=0)
             case "replay":

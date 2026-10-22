@@ -1,14 +1,16 @@
 """Transcript -> one typed action, following the rules (rules.py; editable in the panel's Decisions tab).
 
-1. Clean-up: fillers at the start, words removed anywhere, fixes for common mishearings.
-2. Fixed phrases: an exact sentence -> its action ("pause").
-3. Pattern rules, in order: the first whose regex matches and whose parts convert wins ("skip forward …").
-4. d1-3B picks one of the intents; rules pull out the title, season, episode and numbers. Below the confidence
-   threshold, or "none", nothing happens: a misheard sentence does nothing instead of something random.
-5. Only when an LLM is set up (llm.py, an OpenRouter key): it decides what the rules don't, before d1 (`llm_first`,
-   the default: measured more accurate on unusual phrasings, English and Spanish, at about d1's speed), and d1 only
-   when the LLM can't be reached; with llm_first off, it only sees what d1 leaves undecided. Its answer is checked
-   like the rest.
+1. Clean-up: fillers at the start, words removed anywhere, fixes for common mishearings. Always on.
+2. Then the steps, in the order set in the Decisions tab (`decide_steps`), each of them switchable (`decide_off`):
+   phrases   an exact sentence -> its action ("pause"), including the ones you taught
+   patterns  pattern rules, in order: the first whose regex matches and whose parts convert wins
+   llm       an LLM (llm.py, with an OpenRouter key) picks the action; its "not a command" is final
+   d1        d1 picks one of the intents and rules pull out the title, numbers…; below its confidence threshold the
+             next step gets a try. Local, hosted or either first (`d1_where`, d1.py)
+   A step that can't be reached passes to the next. When no model answered (off or unreachable), what's left is
+   treated as the rules' offline intent (a title to play, or nothing).
+3. Two commands in one ("play Severance episode 2 and go to the middle"): when one side is a control command the
+   rules know, the other side goes through the steps and both run, one after the other.
 Every decision carries a trace of the steps it went through, for the panel's diagram.
 """
 import logging
@@ -21,20 +23,30 @@ from pydantic import ValidationError
 from .. import actions as A
 from . import text as T
 from .d1 import D1
-from .numbers import NUMBER, seconds_in, to_int
+from .numbers import NUMBER, TENS, UNITS, seconds_in, to_int
 from .rules import BUILTIN_INTENTS, LANGUAGE_NAMES, NoMatch, Rules
 
 
 @dataclass
 class Decision:
     action: A.Action
-    via: str                          # "phrase", "pattern", "d1" or "none"
+    via: str                          # "phrase", "pattern", "llm", "d1", "split" (two commands) or "none"
     confidence: float = 1.0
     rule: str = ""                    # phrase group or pattern id; the intent for d1
     trace: list[dict] = field(default_factory=list)
 
 
 log = logging.getLogger(__name__)
+STEPS = ("phrases", "patterns", "llm", "d1")
+STAGE = {"phrases": "phrase", "patterns": "pattern", "llm": "llm", "d1": "model"}    # their names in the trace
+# What one side of "… and …" must be, as the rules decide it, for the sentence to be two commands
+CONTROL = {"transport", "volume", "tracks", "skip", "auto_skip", "binge", "timer", "replay", "home", "next_episode",
+           "show_list", "help", "info"}
+SPLIT = re.compile(r",?\s+(?:and then|and|then|y luego|y despu[eé]s|y)\s+")
+# What follows an "and" / "y" that's still the same command: "an hour and a half", "treinta y cinco"
+_NUMBER_WORDS = "|".join(sorted((w for w in [*UNITS, *TENS, "hundred"] if w not in ("a", "an", "un", "una", "oh")),
+                                key=len, reverse=True))
+SAME_COMMAND = re.compile(rf"(?:\d|(?:{_NUMBER_WORDS}|a half|half|a quarter|medio|media|un cuarto)\b)")
 
 
 def normalize(text: str, rules: Rules) -> str:
@@ -51,13 +63,21 @@ def normalize(text: str, rules: Rules) -> str:
     return t or ("please" if "please" in said else "")   # a lone "please" is usually a misheard "pause"
 
 
-def match_rules(t: str, rules: Rules, trace: list) -> tuple[A.Action, str, str] | None:
-    """Fixed phrases, then pattern rules in order. (action, via, rule id) or None."""
+def match_phrase(t: str, rules: Rules, trace: list) -> tuple[A.Action, str, str] | None:
     if t in rules.phrases:
         do, pid = rules.phrases[t]
         trace.append({"stage": "phrase", "rule": pid, "matched": True})
         return A.parse(do), "phrase", pid
     trace.append({"stage": "phrase", "matched": False})
+    return None
+
+
+def match_rules(t: str, rules: Rules, trace: list) -> tuple[A.Action, str, str] | None:
+    """Fixed phrases, then pattern rules in order. (action, via, rule id) or None."""
+    return match_phrase(t, rules, trace) or match_patterns(t, rules, trace)
+
+
+def match_patterns(t: str, rules: Rules, trace: list) -> tuple[A.Action, str, str] | None:
     for p in rules.patterns:
         m = p.regex.match(t)
         if not m:
@@ -153,6 +173,9 @@ def from_intent(intent: str, t: str, rules: Rules) -> A.Action | None:
         return A.LibraryEdit(op=op, title=title, season=s["season"], episode=s["episode"], kind=s["kind"])
     if intent == "help":
         return A.Help()
+    if intent == "info":
+        m = re.search(r"\b(?:in|of|with|into)\s+(.+?)(?:\s+(?:that\s+)?(?:am i on|are we on|i watched|we watched))?$", t)
+        return A.Info(title=T.continue_title(m.group(1)) if m else None)
     if intent == "skip_segment":
         if re.search(r"\b(?:recap|previously|summary)\b", t):
             return A.Skip(what="recap")
@@ -206,27 +229,12 @@ def from_intent(intent: str, t: str, rules: Rules) -> A.Action | None:
 
 
 class Router:
-    def __init__(self, d1: D1, rules: Rules, llm=None, context=None, llm_first: bool = True):
+    def __init__(self, d1: D1, rules: Rules, llm=None, context=None, steps=STEPS, off=()):
         self.d1, self.rules = d1, rules
-        self.llm = llm                  # llm.Llm, or None
+        self.llm = llm                  # llm.Llm, or None (no OpenRouter key)
         self.context = context          # async (text) -> dict for the LLM: what's playing, candidate titles, apps
-        self.llm_first = llm_first
-
-    async def _ask_llm(self, text: str, trace: list) -> Decision | None:
-        """The LLM's decision, or None when it couldn't be reached."""
-        context = await self.context(text) if self.context else {}
-        reached, action = await self.llm.answer(text, context)
-        trace.append({"stage": "llm", "model": self.llm.model, "action": action.type if action else "none",
-                      "reached": reached})
-        if not reached:
-            return None
-        return Decision(action or A.Unclear(heard=text), "llm", 0.9 if action else 0.0, "llm", trace)
-
-    async def _last_try(self, text: str, unclear: Decision) -> Decision:
-        """The LLM, for what rules and d1 couldn't decide (when one is set up and didn't already answer)."""
-        if self.llm is None or self.llm_first:
-            return unclear
-        return await self._ask_llm(text, unclear.trace) or unclear
+        self.steps = [s for s in steps if s in STEPS] + [s for s in STEPS if s not in steps]
+        self.off = set(off)             # the steps switched off (the panel's Decisions tab changes both live)
 
     async def decide(self, text: str) -> Decision:
         rules = self.rules                      # one consistent set even if a reload lands meanwhile
@@ -234,32 +242,92 @@ class Router:
         trace = [{"stage": "clean", "text": t}]
         if not t:
             return Decision(A.Unclear(heard=text), "none", 0.0, "", trace)
-        if hit := match_rules(t, rules, trace):
-            return Decision(hit[0], hit[1], 1.0, hit[2], trace)
-        if self.llm is not None and self.llm_first and (d := await self._ask_llm(text, trace)):
-            return d                            # d1 below only when the LLM couldn't be reached
+        d = await self._two(t, rules, trace) or await self._steps(text, t, rules, trace)
+        help_in = A.Help(lang="es" if T.spanish(text) else "en")         # the list in the language it was asked in
+        if d.action.type == "help" and d.action.lang is None:
+            d.action = help_in
+        elif d.action.type == "sequence" and any(x.type == "help" for x in d.action.steps):
+            d.action = A.Sequence(steps=[help_in if x.type == "help" else x for x in d.action.steps])
+        return d
+
+    def _rules_only(self, t: str, rules: Rules) -> tuple[A.Action, str, str] | None:
+        trace = []
+        return (("phrases" not in self.off and match_phrase(t, rules, trace))
+                or ("patterns" not in self.off and match_patterns(t, rules, trace)) or None)
+
+    async def _two(self, t: str, rules: Rules, trace: list) -> Decision | None:
+        """"play X and go to the middle", "turn it down and put on the news": two commands, when one side is a control
+        command the rules know (so "pride and prejudice" or "tom and jerry" stay one title). The other side goes
+        through every step."""
+        if "phrases" not in self.off and t in rules.phrases:
+            return None                         # a fixed phrase (or a taught one) with an "and" in it
+        for m in SPLIT.finditer(t):
+            left, right = t[:m.start()].strip(" ,"), t[m.end():].strip(" ,")
+            if not left or not right or SAME_COMMAND.match(right):
+                continue
+            for known, other in ((right, left), (left, right)):
+                hit = self._rules_only(normalize(known, rules), rules)     # each side gets its own clean-up
+                if not hit or hit[0].type not in CONTROL:
+                    continue
+                part = [{"stage": "split", "parts": [left, right], "known": known, "rule": hit[2]}]
+                said = normalize(other, rules)
+                d = await self._steps(other, said, rules, part)
+                if d.action.type in ("none", "sequence") or d.via == "none" or (
+                        # a bare name ("skip the intro and the recap") isn't a title to play
+                        d.action.type == "play_title" and not T.PLAY_VERBS.match(said)
+                        and d.action.season is None and d.action.episode is None):
+                    continue
+                trace += part
+                steps = [d.action, hit[0]] if other == left else [hit[0], d.action]
+                return Decision(A.Sequence(steps=steps), "split", d.confidence, f"{d.rule} + {hit[2]}", trace)
+        return None
+
+    async def _steps(self, text: str, t: str, rules: Rules, trace: list) -> Decision:
+        unsure = None                           # d1's answer when it wasn't sure enough to act
+        for step in self.steps:
+            if step in self.off or (step == "llm" and self.llm is None):
+                trace.append({"stage": STAGE[step], "off": True, "why": "off" if step in self.off else "no key"})
+                continue
+            if step == "phrases" and (hit := match_phrase(t, rules, trace)):
+                return Decision(hit[0], hit[1], 1.0, hit[2], trace)
+            if step == "patterns" and (hit := match_patterns(t, rules, trace)):
+                return Decision(hit[0], hit[1], 1.0, hit[2], trace)
+            if step == "llm":
+                context = await self.context(text) if self.context else {}
+                reached, action = await self.llm.answer(text, context)
+                trace.append({"stage": "llm", "model": self.llm.model, "action": action.type if action else "none",
+                              "reached": reached})
+                if reached:                     # its "not a command" is final: the d1 after it guesses worse
+                    return Decision(action or A.Unclear(heard=text), "llm", 0.9 if action else 0.0, "llm", trace)
+            if step == "d1" and (d := await self._ask_d1(text, t, rules, trace)):
+                if d.action.type != "none":
+                    return d
+                unsure = d
+        if unsure:
+            return unsure
+        # No model answered (off or unreachable): the rules' offline intent ("play it as a title"), if any
+        action = from_intent(rules.fallback_intent, t, rules) if rules.fallback_intent != "none" else None
+        trace.append({"stage": "fallback", "intent": rules.fallback_intent, "accepted": action is not None})
+        return Decision(action or A.Unclear(heard=text), "none", 0.0, rules.fallback_intent, trace)
+
+    async def _ask_d1(self, text: str, t: str, rules: Rules, trace: list) -> Decision | None:
+        """d1's decision ("none" when it isn't sure enough), or None when no d1 answered."""
         options = {k: v["describe"] for k, v in rules.intents.items()}
+        where = getattr(self.d1, "where", "local-first")
         try:
             pick = await self.d1.choice(t, rules.question, options)
         except (httpx.HTTPError, KeyError) as e:
-            log.warning("d1 unavailable (%s); trying %s", type(e).__name__, rules.fallback_intent)
-            trace.append({"stage": "model", "available": False})
-            if self.llm is not None and not self.llm_first:   # the LLM before guessing a title from the sentence
-                return await self._last_try(text, Decision(A.Unclear(heard=text), "none", 0.0, "", trace))
-            action = from_intent(rules.fallback_intent, t, rules)
-            return Decision(action or A.Unclear(heard=text), "none", 0.0, rules.fallback_intent, trace)
+            log.warning("d1 unavailable (%s)", type(e).__name__)
+            trace.append({"stage": "model", "available": False, "where": where})
+            return None
         top = sorted(pick.probabilities.items(), key=lambda kv: -kv[1])[:3]
         step = {"stage": "model", "intent": pick.key, "confidence": round(pick.confidence, 3),
-                "threshold": rules.min_confidence, "top": [[k, round(p, 3)] for k, p in top]}
-        if getattr(self.d1, "last_source", "local") == "hosted":
-            step["hosted"] = True                # Liquid's hosted d1 answered (the local one didn't)
+                "threshold": rules.min_confidence, "top": [[k, round(p, 3)] for k, p in top],
+                "source": getattr(self.d1, "last_source", "local"), "where": where}
         trace.append(step)
         ratio = top[0][1] / max(top[1][1], 1e-9) if len(top) > 1 else float("inf")
-        if pick.key == "none" or pick.confidence < rules.min_confidence or ratio < rules.min_ratio:
-            step["accepted"] = False
-            return await self._last_try(text, Decision(A.Unclear(heard=text), "d1", pick.confidence, pick.key, trace))
-        action = from_intent(pick.key, t, rules)
+        action = None
+        if pick.key != "none" and pick.confidence >= rules.min_confidence and ratio >= rules.min_ratio:
+            action = from_intent(pick.key, t, rules)
         step["accepted"] = action is not None
-        if action is None:
-            return await self._last_try(text, Decision(A.Unclear(heard=text), "d1", pick.confidence, pick.key, trace))
-        return Decision(action, "d1", pick.confidence, pick.key, trace)
+        return Decision(action or A.Unclear(heard=text), "d1", pick.confidence, pick.key, trace)

@@ -33,8 +33,8 @@ TV_AGENT = Path(shutil.which("tv-agent") or REPO / "server" / ".venv" / "bin" / 
 GREEN, AMBER, RED, GREY, BLUE, PURPLE = "#2fb170", "#e0a030", "#e05555", "#8a8f98", "#4c8dff", "#9b6cf5"
 SERVICES = [
     ("tv-agent", "Voice agent", "Speech-to-text, decisions and TV control. The remote's mic button talks to it."),
-    ("llama-d1", "Decision model", "Liquid AI d1-3B on the Radeon 780M. Without it only fixed phrases and "
-                                   "pattern rules work (pause, volume, apps…)."),
+    ("llama-d1", "Decision model", "Liquid AI d1-3B on this laptop's GPU: the local d1 step (Decisions tab). Not "
+                                   "needed when that step is off or uses Liquid's hosted d1."),
 ]
 STYLE = """
 QFrame#card { border: 1px solid palette(midlight); border-radius: 12px; background: palette(base); }
@@ -143,6 +143,15 @@ def load_cfg() -> agent_config.Config:
     return agent_config.load()
 
 
+def local_d1_needed() -> bool:
+    """Whether the decision steps use this laptop's d1 (llama-d1): its step is on and it isn't hosted only."""
+    try:
+        cfg = load_cfg()
+    except SystemExit:
+        return True
+    return "d1" not in cfg.decide_off and cfg.d1_where != "hosted"
+
+
 class ApiError(RuntimeError):
     pass
 
@@ -160,7 +169,8 @@ def api(path: str, body=None, timeout: float = 6.0, raw: bytes | None = None, ok
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         try:
-            detail = json.loads(e.read()).get("error") or e.reason
+            body = json.loads(e.read())
+            detail = body.get("error") or body.get("detail") or e.reason
         except ValueError:
             detail = e.reason
         raise ApiError(str(detail)) from None

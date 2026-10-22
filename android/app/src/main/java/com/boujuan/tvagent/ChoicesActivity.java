@@ -5,12 +5,17 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
 import android.text.TextUtils;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -33,13 +38,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * A numbered list from tv-agent ("what was I watching?", "what's new?"), opened by the laptop over adb with the list
  * as JSON. Say "number 2" (the pill opens on top; the list stays visible behind it) or pick with the remote: OK on a
  * row, or a number key. Closes when playback takes the screen, on BACK, or after 90 s untouched. Sized for six rows
- * on the TCL's 960×540 dp screen. In help mode ("what can you do?") it lists every command by topic instead:
- * nothing to pick, ▲▼ scrolls.
+ * on the TCL's 960×540 dp screen. In help mode ("what can you do?") it lists every command by section instead, as
+ * patterns with their ‹placeholders› set apart, in the language it was asked in: nothing to pick, ▲▼ scrolls.
  */
 public class ChoicesActivity extends Activity {
     private static final long IDLE_CLOSE_MS = 90_000;
@@ -52,7 +59,8 @@ public class ChoicesActivity extends Activity {
     private final List<TextView> details = new ArrayList<>();
     private LinearLayout rows;
     private ScrollView scroll;
-    private TextView title, hint;
+    private LinearLayout panel;
+    private TextView title, legend, hint;
     private boolean help;
 
     @Override
@@ -113,7 +121,7 @@ public class ChoicesActivity extends Activity {
 
     private void buildUi() {
         FrameLayout root = new FrameLayout(this);
-        LinearLayout panel = new LinearLayout(this);
+        panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setPadding(dp(20), dp(14), dp(20), dp(12));
         GradientDrawable bg = new GradientDrawable();
@@ -126,6 +134,10 @@ public class ChoicesActivity extends Activity {
         title.setTextColor(Color.WHITE);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
         title.setPadding(dp(8), 0, 0, dp(6));
+        legend = new TextView(this);
+        legend.setTextColor(0x99FFFFFF);
+        legend.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        legend.setPadding(dp(8), 0, 0, dp(4));
         rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
         scroll = new ScrollView(this);
@@ -137,6 +149,7 @@ public class ChoicesActivity extends Activity {
         hint.setPadding(dp(8), dp(6), 0, 0);
 
         panel.addView(title);
+        panel.addView(legend);
         panel.addView(scroll);
         panel.addView(hint);
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(500), FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -148,7 +161,8 @@ public class ChoicesActivity extends Activity {
 
     /**
      * Fills the list from the intent's JSON: {"title": …, "items": [{"label", "detail", "poster"}, …]}; with
-     * "mode": "help", items marked "header" are topic titles and nothing is numbered or picked.
+     * "mode": "help" ("legend", "hint" in the language asked in), items marked "header" are section titles, the
+     * others a pattern and what it does, and nothing is numbered or picked.
      */
     private boolean show(Intent intent) {
         if (intent.getBooleanExtra("close", false)) return false;
@@ -171,11 +185,16 @@ public class ChoicesActivity extends Activity {
                     rows.addView(row(i + 1, it.optString("label"), it.optString("detail"), it.optString("poster")));
                 }
             }
-            // Six picks fit as they are; the help list scrolls in a fixed height.
+            // Six picks fit as they are; the help list scrolls in a fixed height, wider for its two columns.
             scroll.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
-                    help ? dp(400) : LinearLayout.LayoutParams.WRAP_CONTENT));
-            hint.setText(help ? "Press the mic and say one · ▲▼ to scroll · BACK closes"
-                    : "Say “number 2”, or pick with OK or a number key");
+                    help ? dp(380) : LinearLayout.LayoutParams.WRAP_CONTENT));
+            FrameLayout.LayoutParams plp = (FrameLayout.LayoutParams) panel.getLayoutParams();
+            plp.width = dp(help ? 560 : 500);
+            panel.setLayoutParams(plp);
+            legend.setText(list.optString("legend", ""));
+            legend.setVisibility(help && !list.optString("legend").isEmpty() ? View.VISIBLE : View.GONE);
+            hint.setText(list.optString("hint", help ? "Press the mic and say one · ▲▼ to scroll · BACK closes"
+                    : "Say “number 2”, or pick with OK or a number key"));
             for (int i = 0; i < rows.getChildCount(); i++) {
                 if (rows.getChildAt(i).isFocusable()) {
                     rows.getChildAt(i).requestFocus();
@@ -261,11 +280,27 @@ public class ChoicesActivity extends Activity {
         return t;
     }
 
-    /** A help line: focusable only so ▲▼ scrolls through them. */
+    /** A pattern with its ‹placeholders› in blue italics, and its [optional] parts and “·” separators dimmed. */
+    private static CharSequence pattern(String text) {
+        SpannableStringBuilder b = new SpannableStringBuilder(text);
+        Matcher m = Pattern.compile("\\[[^\\]]*\\]| · ").matcher(text);
+        while (m.find()) {
+            b.setSpan(new ForegroundColorSpan(0x99FFFFFF), m.start(), m.end(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        m = Pattern.compile("‹[^›]+›").matcher(text);
+        while (m.find()) {
+            b.setSpan(new ForegroundColorSpan(0xFF8EC1FF), m.start(), m.end(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            b.setSpan(new StyleSpan(Typeface.ITALIC), m.start(), m.end(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        return b;
+    }
+
+    /** A help line, the pattern beside what it does: focusable only so ▲▼ scrolls through them. */
     private View helpRow(String label, String detail) {
         LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.VERTICAL);
-        row.setPadding(dp(8), dp(3), dp(8), dp(3));
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(8), dp(4), dp(8), dp(4));
         row.setFocusable(true);
         GradientDrawable focused = new GradientDrawable();
         focused.setColor(0x226EA8FF);
@@ -275,15 +310,17 @@ public class ChoicesActivity extends Activity {
         states.addState(new int[]{}, new GradientDrawable());
         row.setBackground(states);
         TextView main = new TextView(this);
-        main.setText(label);
+        main.setText(pattern(label));
         main.setTextColor(Color.WHITE);
         main.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         TextView sub = new TextView(this);
         sub.setText(detail);
-        sub.setTextColor(0xB3FFFFFF);
+        sub.setTextColor(0x99FFFFFF);
         sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        row.addView(main);
-        if (!detail.isEmpty()) row.addView(sub);
+        row.addView(main, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.25f));
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        sp.leftMargin = dp(14);
+        row.addView(sub, sp);
         return row;
     }
 

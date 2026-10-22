@@ -89,7 +89,7 @@ class Timer(_Action):
 
 class Tracks(_Action):
     type: Literal["tracks"] = "tracks"
-    subtitles: Literal["on", "off"] | Lang | None = None
+    subtitles: Literal["on", "off", "toggle"] | Lang | None = None     # toggle: off if they're on, else on
     audio: Literal["original"] | Lang | None = None
 
 
@@ -129,6 +129,12 @@ class AutoSkip(_Action):
 
 class Help(_Action):
     type: Literal["help"] = "help"              # "what can you do?": every command, on the TV
+    lang: Literal["en", "es"] | None = None     # the language it was asked in (the list is shown in it)
+
+
+class Info(_Action):
+    type: Literal["info"] = "info"              # "what am I watching?", "where am I in Severance?"
+    title: Title | None = None                  # None: what's playing
 
 
 class Wrong(_Action):
@@ -140,16 +146,20 @@ class Unclear(_Action):
     heard: str = ""
 
 
-Action = Annotated[Union[PlayTitle, ContinueWatching, NextEpisode, OpenInStremio, YouTube, Twitch, OpenApp, Home,
-                         Transport, Volume, Binge, Timer, Tracks, Replay, ShowList, Pick, LibraryEdit, Skip,
-                         AutoSkip, Help, Wrong, Unclear],
-                   Field(discriminator="type")]
+STEPS = (PlayTitle, ContinueWatching, NextEpisode, OpenInStremio, YouTube, Twitch, OpenApp, Home, Transport, Volume,
+         Binge, Timer, Tracks, Replay, ShowList, Pick, LibraryEdit, Skip, AutoSkip, Help, Info, Wrong)
+Step = Annotated[Union[STEPS], Field(discriminator="type")]
+
+
+class Sequence(_Action):
+    type: Literal["sequence"] = "sequence"      # "play The Bear and skip the intro": one after the other
+    steps: list[Step] = Field(min_length=2, max_length=3)
+
+
+Action = Annotated[Union[(*STEPS, Sequence, Unclear)], Field(discriminator="type")]
 ACTION = TypeAdapter(Action)
-ACTION_TYPES = {m.model_fields["type"].default: m for m in (PlayTitle, ContinueWatching, NextEpisode, OpenInStremio,
-                                                             YouTube, Twitch, OpenApp, Home, Transport, Volume, Binge,
-                                                             Timer, Tracks, Replay, ShowList, Pick, LibraryEdit,
-                                                             Skip, AutoSkip, Help, Wrong, Unclear)}
+ACTION_TYPES = {m.model_fields["type"].default: m for m in (*STEPS, Sequence, Unclear)}
 
 
-def parse(data: str | dict) -> Action:
-    return ACTION.validate_json(data) if isinstance(data, str) else ACTION.validate_python(data)
+def parse(data: str | bytes | dict) -> Action:
+    return ACTION.validate_json(data) if isinstance(data, (str, bytes)) else ACTION.validate_python(data)

@@ -66,6 +66,36 @@
         "note": "the remote's mic opens a moment late and clips the “p” of “play”"
       },
       {
+        "from": "\\b(?:beach|pinch|bench|binch|bing|bins|vinge|vinch)(?= mode\\b)",
+        "to": "binge",
+        "note": "misheard “binge mode” (“beach mode”, “pinch mode”)"
+      },
+      {
+        "from": "^(?:sops|sobs|sabs|saps|soaps|sub)(?= (?:on|off|of|oh|all)$)",
+        "to": "subs",
+        "note": "misheard “subs on/off” (“sops off”)"
+      },
+      {
+        "from": "\\b(subtitles?|subs|captions|mode|skip|skipping|autoplay|sound|it)\\s+(?:of|oof|af)$",
+        "to": "\\1 off",
+        "note": "“off” heard as “of” at the end of a switch (“subtitles of”)"
+      },
+      {
+        "from": "\\b(subtitles?|subs|captions|mode|skip|skipping|autoplay|sound|it)\\s+(?:oh|own)$",
+        "to": "\\1 on",
+        "note": "“on” heard as “oh” (“binge mode oh”)"
+      },
+      {
+        "from": "^(?:the )?(subtitles?|subs|captions) (?:all|ol)$",
+        "to": "\\1",
+        "note": "on or off heard as “all”: the bare word switches them over"
+      },
+      {
+        "from": "^(turn|switch|put) (?:the )?(subtitles?|subs|captions|sound|binge(?: mode)?|autoplay|auto ?skip(?:ping)?)(?: back)? (on|off)(?:,? please)?$",
+        "to": "\\1 \\3 the \\2",
+        "note": "“turn the subtitles on” is “turn on the subtitles” (subtitles, sound, binge mode, auto skip)"
+      },
+      {
         "from": "^(?:(?:oye|oiga|venga|vale|bueno|a ver|eh|pues|uh|um|erm|hmm|d[eé]jalo|olv[ií]dalo|da igual|nada)(?: (?:tele|tv))?[, ]+)+",
         "to": "",
         "note": "Spanish: “oye”, “venga”, “a ver” (and hesitations) before a command"
@@ -171,6 +201,16 @@
         "note": "Spanish: ¿qué ha dicho?"
       },
       {
+        "from": "^(?:qu[eé] (?:estoy|estamos) viendo|qu[eé] es esto|qu[eé] (?:serie|pel[ií]cula|peli|cap[ií]tulo|episodio) es (?:esto|este|esta))$",
+        "to": "what am i watching",
+        "note": "Spanish: ¿qué estoy viendo?"
+      },
+      {
+        "from": "^(?:por d[oó]nde (?:voy|vamos|iba|[ií]bamos)|en qu[eé] (?:cap[ií]tulo|episodio) (?:voy|vamos|iba|[ií]bamos)|cu[aá]l (?:es|fue) el [uú]ltimo (?:cap[ií]tulo|episodio) que (?:vi|he visto|vimos|hemos visto)) (?:de|en|con) ",
+        "to": "where am i in ",
+        "note": "Spanish: ¿por dónde voy de Severance?"
+      },
+      {
         "from": "^(?:qu[eé] estaba(?:mos)? viendo|qu[eé] (?:he|hemos) estado viendo)$",
         "to": "what was i watching",
         "note": "Spanish: ¿qué estaba viendo?"
@@ -201,9 +241,34 @@
         "note": "Spanish: salta los créditos"
       },
       {
+        "from": "^(marca|m[aá]rcalo|a[nñ]ade|guarda|quita|borra|elimina) (?:esto|eso|este|esta|ese|esa)(?: (?:cap[ií]tulo|episodio|serie|pel[ií]cula|peli))?(?= )",
+        "to": "\\1 this",
+        "note": "Spanish: “esto”, “este capítulo”: what's on"
+      },
+      {
+        "from": "^(?:a[nñ]ade|guarda) (.+?) (?:a|en) (?:mi |la )?(?:biblioteca|lista)$",
+        "to": "add \\1 to my library",
+        "note": "Spanish: añade Severance a mi biblioteca"
+      },
+      {
+        "from": "^(?:quita|borra|elimina) (.+?) de (?:mi |la )?(?:biblioteca|lista)$",
+        "to": "remove \\1 from my library",
+        "note": "Spanish: quita Friends de mi biblioteca"
+      },
+      {
         "from": "^(?:a[nñ]ade|guarda|a[nñ][aá]delo|gu[aá]rdalo) (?:a|en) (?:mi |la )?(?:biblioteca|lista)$",
         "to": "add this to my library",
         "note": "Spanish: añádelo a mi biblioteca"
+      },
+      {
+        "from": "^marca (.+?) como no visto$",
+        "to": "mark \\1 as unwatched",
+        "note": "Spanish: marca The Bear como no visto"
+      },
+      {
+        "from": "^marca (.+?) como visto$",
+        "to": "mark \\1 as watched",
+        "note": "Spanish: marca The Bear como visto"
       },
       {
         "from": "^(?:m[aá]rcalo|marca|ponlo) como no visto$",
@@ -216,6 +281,16 @@
         "note": "Spanish: márcalo como visto"
       },
       {
+        "from": "^(?:activa|pon|enciende) (?:el )?salto autom[aá]tico$",
+        "to": "auto skip on",
+        "note": "Spanish: activa el salto automático"
+      },
+      {
+        "from": "^(?:desactiva|quita|apaga) (?:el )?salto autom[aá]tico$",
+        "to": "auto skip off",
+        "note": "Spanish: desactiva el salto automático"
+      },
+      {
         "from": "^(?:activa|pon|enciende) (?:el )?modo marat[oó]n$",
         "to": "binge mode on",
         "note": "Spanish: activa el modo maratón"
@@ -224,6 +299,11 @@
         "from": "^(?:desactiva|quita|apaga) (?:el )?modo marat[oó]n$",
         "to": "binge mode off",
         "note": "Spanish: desactiva el modo maratón"
+      },
+      {
+        "from": "^(?:los )?subt[ií]tulos$",
+        "to": "subtitles",
+        "note": "Spanish: subtítulos (switches them over)"
       },
       {
         "from": "^(?:quita|desactiva|sin)(?: los)? subt[ií]tulos$",
@@ -241,7 +321,7 @@
         "note": "Spanish: subtítulos en inglés"
       },
       {
-        "from": "^(?:audio|idioma) (?:en )?original$|^versi[oó]n original$",
+        "from": "^(?:(?:p[oó]n(?:lo|la|me)?|c[aá]mbia(?:lo|la)|cambia el (?:audio|idioma)) )?(?:en |a )?(?:el |la )?(?:idioma|versi[oó]n|audio) (?:en )?original$",
         "to": "original audio",
         "note": "Spanish: versión original"
       },
@@ -354,6 +434,11 @@
         "from": "^(?:pon(?:me|nos)?|mira|ver)?\\s*(.+?)\\s+en\\s+twitch$",
         "to": "\\1 on twitch",
         "note": "Spanish: ibai en twitch"
+      },
+      {
+        "from": "^(?:ens[eé][nñ]ame|mu[eé]strame|abre) (.+?) en stremio$",
+        "to": "show me \\1 in stremio",
+        "note": "Spanish: enséñame The Office en Stremio"
       },
       {
         "from": "^(?:abre|abrir|ve a|vete a|cambia a)\\s+",
@@ -560,7 +645,11 @@
         "mute the tv",
         "mute the sound",
         "mute the volume",
-        "silence it"
+        "silence it",
+        "sound off",
+        "turn off the sound",
+        "turn the sound off",
+        "no sound"
       ],
       "do": {
         "type": "volume",
@@ -576,7 +665,9 @@
         "unmute it",
         "unmute the tv",
         "turn the sound back on",
-        "sound back on"
+        "sound back on",
+        "turn on the sound",
+        "turn the sound on"
       ],
       "do": {
         "type": "volume",
@@ -775,13 +866,24 @@
     {
       "id": "seek_forward",
       "stage": "grammar",
-      "match": "^(?:skip forward|skip ahead|fast forward|go forward|jump forward|jump ahead|forward|ahead|skip(?! (?:back|to)\\b))\\b(?:\\s+(?:by\\s+)?(?P<amount>.+))?$",
+      "match": "^(?:skip forward|skip ahead|fast forward|go forward|jump forward|jump ahead|forward|ahead)\\b(?:\\s+(?:by\\s+)?(?P<amount>.+))?$|^skip(?: it| this| ahead)?$",
       "do": {
         "type": "transport",
         "op": "forward",
         "seconds": "{amount|seconds}"
       },
-      "note": "not “skip back …” or “skip to …”, which come next"
+      "note": "“skip” alone too; “skip thirty seconds” is the next rule"
+    },
+    {
+      "id": "skip_by",
+      "stage": "grammar",
+      "match": "^skip (?!(?:back|to|the|this|these|over|past)\\b)(?:by )?(?P<amount>.+)$",
+      "do": {
+        "type": "transport",
+        "op": "forward",
+        "seconds": "{amount|skip!}"
+      },
+      "note": "with a duration, a number (seconds) or “a bit”: “skip the entry” isn't one"
     },
     {
       "id": "back_a_bit",
@@ -821,7 +923,7 @@
       "do": {
         "type": "volume",
         "op": "set",
-        "amount": "{level|number!}"
+        "amount": "{level|level!}"
       }
     },
     {
@@ -831,7 +933,7 @@
       "do": {
         "type": "volume",
         "op": "set",
-        "amount": "{level|number!}"
+        "amount": "{level|level!}"
       },
       "note": "“increase the volume to fifty”"
     },
@@ -949,7 +1051,17 @@
         "type": "tracks",
         "subtitles": "on"
       },
-      "match": "^(?:(?:turn|switch) on|enable|show|put on|activate|i want|give me)\\s+(?:the\\s+)?(?:subtitles|subtitle|subs|captions)$|^(?:subtitles|subtitle|subs|captions)(?:\\s+on)?$"
+      "match": "^(?:(?:turn|switch) on|enable|show|put on|activate|i want|give me)\\s+(?:the\\s+)?(?:subtitles|subtitle|subs|captions)$|^(?:subtitles|subtitle|subs|captions)\\s+on$"
+    },
+    {
+      "id": "subtitles_toggle",
+      "stage": "grammar",
+      "match": "^(?:the\\s+)?(?:subtitles|subtitle|subs|captions)$",
+      "do": {
+        "type": "tracks",
+        "subtitles": "toggle"
+      },
+      "note": "just “subtitles”: off if they're on, else on (like the remote's button)"
     },
     {
       "id": "subtitles_language",
@@ -1005,6 +1117,35 @@
       },
       "match": "^what (?:did|was|were) (?:he|she|they|it|that|you) (?:just )?(?:say|saying)$",
       "note": "back 10 seconds with subtitles on for a moment"
+    },
+    {
+      "id": "info_now",
+      "stage": "grammar",
+      "match": "^(?:what (?:am i|are we|is this|'?s this|is it) (?:watching|playing)|what(?:'s| is) (?:this|playing|on)(?: (?:show|movie|film|series|episode|called))?|what (?:episode|show|movie|film|series) is (?:this|it|on|playing))(?: (?:right )?now)?$",
+      "do": {
+        "type": "info"
+      },
+      "note": "the title, episode and time left of what's playing"
+    },
+    {
+      "id": "info_title",
+      "stage": "grammar",
+      "match": "^(?:where (?:am i|are we|did i leave off|did we leave off) (?:in|with|on)|how far (?:am i|are we|did i get|did we get) (?:in|with|into)|what episode (?:am i|are we) on (?:in|of|with)) (?P<what>.+)$",
+      "do": {
+        "type": "info",
+        "title": "{what|continue}"
+      },
+      "note": "your last episode of a title and how far in"
+    },
+    {
+      "id": "info_title_last",
+      "stage": "grammar",
+      "match": "^(?:what episode of|what(?:'s| is| was) the last episode of) (?P<what>.+?) (?:that )?(?:am i on|are we on|i watched|we watched|i saw|we saw|did i watch|did we watch|i was watching|we were watching)$",
+      "do": {
+        "type": "info",
+        "title": "{what|continue}"
+      },
+      "note": "“what's the last episode of Severance I watched?”"
     },
     {
       "id": "thats_wrong",
@@ -1350,6 +1491,9 @@
       },
       "none": {
         "describe": "not a TV command, or not understandable (e.g. 'what time is it')"
+      },
+      "info": {
+        "describe": "say what is playing, or how far the user is in a named series (e.g. 'what am I watching', 'where am I in severance')"
       }
     }
   },

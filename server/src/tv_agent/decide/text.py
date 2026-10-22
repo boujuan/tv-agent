@@ -20,6 +20,15 @@ WHERE_I_WAS = {"watching", "what i was watching", "where i left off", "where we 
                "what we were watching", "where i was"}
 
 
+SPANISH = re.compile(r"[ñáéíóú¿¡]|\b(?:qu[eé]|puedes|hacer|sabes|dime|ayuda|ayudame|comandos|pon|ponme|el|la|los|las|"
+                     r"del|en|un|una|y|es|est[aá]|por|para|c[oó]mo|d[oó]nde|cu[aá]l|tienes|algo|esto)\b")
+
+
+def spanish(text: str) -> bool:
+    """Whether a sentence is Spanish (for what's shown back, like the "what can you do?" list)."""
+    return bool(SPANISH.search(text.lower()))
+
+
 def clean_title(text: str) -> str:
     t = PLAY_VERBS.sub("", re.sub(r"\s+", " ", text.strip()))
     t = RESTART.sub("", t)

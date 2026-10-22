@@ -14,8 +14,6 @@ from .common import TV_AGENT, agent_config, agent_stt, card, dim, load_cfg, run_
 
 AUDIO = [("English", "eng"), ("Spanish", "spa"), ("French", "fre"), ("Italian", "ita"), ("German", "ger"),
          ("Portuguese", "por"), ("Japanese", "jpn"), ("Korean", "kor"), ("Chinese", "chi")]
-LLM_MODELS = ["google/gemini-3.5-flash-lite", "google/gemini-3.1-flash-lite", "google/gemini-2.5-flash-lite",
-              "anthropic/claude-haiku-5.5", "openai/gpt-oss-20b"]
 SUBTITLES = [("English", "eng"), ("Spanish", "spa"), ("Chinese (Simplified · 简体)", "chs"),
              ("Chinese (Traditional · 繁體)", "cht"), ("Chinese (either)", "chi"), ("French", "fre"),
              ("Italian", "ita"), ("German", "ger"), ("Portuguese", "por"), ("Japanese", "jpn"), ("Korean", "kor")]
@@ -105,15 +103,23 @@ class Settings(QScrollArea):
         for label, v in (("4K (2160p)", 2160), ("1440p", 1440), ("1080p", 1080), ("720p", 720)):
             self.height_.addItem(label, v)
         self.mbps = QDoubleSpinBox()
-        self.mbps.setRange(5, 95)
+        self.mbps.setRange(5, 400)
         self.mbps.setDecimals(0)
         self.mbps.setSuffix(" Mbit/s")
-        self.mbps.setToolTip("The TV's Ethernet port tops out at ~94 Mbit/s; Wi-Fi does ~300")
+        self.mbps.setToolTip("Streams above it are skipped. The TV's Ethernet port tops out at ~94 Mbit/s; "
+                             "Wi-Fi does ~300")
+        self.no_limit = QCheckBox("No limit")
+        self.no_limit.setToolTip("The best stream whatever its bitrate (the resolution limit still applies)")
+        self.no_limit.toggled.connect(lambda on: self.mbps.setEnabled(not on))
+        mbps_row = QHBoxLayout()
+        mbps_row.addWidget(self.mbps)
+        mbps_row.addWidget(self.no_limit)
+        mbps_row.addStretch()
         self.probe = QCheckBox("Check a link answers before playing it")
         self.probe.setToolTip("Turn off while the TV uses a VPN (debrid services allow one IP at a time)")
         f1.addRow("Player", self.player)
         f1.addRow("Highest resolution", self.height_)
-        f1.addRow("Highest bitrate", self.mbps)
+        f1.addRow("Highest bitrate", mbps_row)
         f1.addRow("", self.probe)
         outer.addWidget(play)
 
@@ -153,32 +159,11 @@ class Settings(QScrollArea):
         self.auto_skip.setToolTip("From TheIntroDB and IntroDB; “skip the intro” works either way. "
                                   "Also by voice: “auto skip on / off”.")
         f5.addRow("Speech model", stt_row)
-        f5.addRow(dim("Parakeet v3 understands Spanish commands too (“pon la casa de papel”, “siguiente capítulo”) "
-                      "and works out the language by itself; v2 is a little better at English."))
+        f5.addRow(dim("A multilingual model understands Spanish commands too and works out the language by itself; "
+                      "an English-only one can be a little better at English."))
         f5.addRow("", self.binge)
         f5.addRow("", self.auto_skip)
-        self.hosted_d1 = QCheckBox("When the local d1 doesn't answer, ask Liquid's hosted d1")
-        self.hosted_d1.setToolTip("~0.3 s. Liquid may use what it's sent for training (what you said and the "
-                                  "options). Key: op read \"op://Personal/…\" | tv-agent setup liquid")
-        self.llm = QCheckBox("For commands nothing else understood, ask an LLM (OpenRouter)")
-        self.llm.setToolTip("~0.7-1 s, only for those. Zero-data-retention providers only. Its answer is checked "
-                            "like the rest. Key: op read \"op://Personal/…\" | tv-agent setup openrouter")
         self.cloud_note = dim("")
-        self.hosted_model = QComboBox()
-        self.hosted_model.addItem("d1", "d1")
-        self.hosted_model.addItem("d1-ultra (bigger, a little slower and dearer)", "d1-ultra")
-        self.llm_model = QComboBox()
-        self.llm_model.setEditable(True)                  # any OpenRouter model id
-        self.llm_model.addItems(LLM_MODELS)
-        self.llm_reasoning = QComboBox()
-        for label, v in (("Minimal (fastest; Gemini 3.5 Flash-Lite's lowest)", "minimal"), ("Low", "low"),
-                         ("None (models that allow turning it off)", "none"),
-                         ("Don't send (models with no reasoning setting)", "")):
-            self.llm_reasoning.addItem(label, v)
-        self.llm_private = QCheckBox("Only providers that keep no data (slower for Gemini 3.5 Flash-Lite)")
-        self.llm_first = QCheckBox("Ask the LLM before d1 (more accurate on unusual phrasings, about as fast)")
-        self.llm_first.setToolTip("Off: the LLM only sees what d1 leaves undecided. Measured: "
-                                  "docs/research-2026-10-22.md")
         keys = QHBoxLayout()
         for what, label in (("liquid", "Set Liquid key…"), ("openrouter", "Set OpenRouter key…")):
             b = QPushButton(label)
@@ -186,15 +171,11 @@ class Settings(QScrollArea):
             b.clicked.connect(lambda _=False, w=what: self.set_key(w))
             keys.addWidget(b)
         keys.addStretch()
-        f5.addRow("Cloud", self.hosted_d1)
-        f5.addRow("Hosted d1 model", self.hosted_model)
-        f5.addRow("", self.llm)
-        f5.addRow("", self.llm_first)
-        f5.addRow("LLM model", self.llm_model)
-        f5.addRow("LLM reasoning", self.llm_reasoning)
-        f5.addRow("", self.llm_private)
-        f5.addRow("", self.cloud_note)
         f5.addRow("API keys", keys)
+        f5.addRow("", self.cloud_note)
+        f5.addRow(dim("Which steps decide a command, in what order, the LLM's model and which d1 (this laptop's or "
+                      "Liquid's hosted one): the Decisions tab, live at once. Liquid and OpenRouter may keep what "
+                      "they're sent (what you said)."))
         outer.addWidget(voice)
         self._dl_status = None
         self._dl_timer = QTimer(self)
@@ -384,7 +365,8 @@ class Settings(QScrollArea):
             return
         self._select(self.player, cfg.player)
         self._select(self.height_, cfg.max_height)
-        self.mbps.setValue(cfg.max_mbps)
+        self.no_limit.setChecked(not cfg.max_mbps)
+        self.mbps.setValue(cfg.max_mbps or 90)
         self.probe.setChecked(cfg.probe_streams)
         self._select(self.audio, cfg.audio_language)
         self._select(self.native, cfg.native_language)
@@ -395,13 +377,6 @@ class Settings(QScrollArea):
         self._fill_stt(cfg.stt_model)
         self.binge.setChecked(cfg.binge)
         self.auto_skip.setChecked(cfg.auto_skip)
-        self.hosted_d1.setChecked(cfg.hosted_d1)
-        self._select(self.hosted_model, cfg.hosted_d1_model)
-        self.llm.setChecked(cfg.llm_fallback)
-        self.llm_model.setCurrentText(cfg.llm_model)
-        self._select(self.llm_reasoning, cfg.llm_reasoning)
-        self.llm_private.setChecked(cfg.llm_private)
-        self.llm_first.setChecked(cfg.llm_first)
         for key, w in self.adv.items():
             value = getattr(cfg, key)
             if isinstance(w, QSpinBox):
@@ -409,15 +384,15 @@ class Settings(QScrollArea):
             else:
                 w.setText(str(value))
         state = lambda name, cmd: "key set" if cfg.secret(name) else f"no key yet (tv-agent setup {cmd})"  # noqa: E731
-        self.cloud_note.setText(f"Liquid: {state('liquid_api_key', 'liquid')} · OpenRouter "
-                                f"({cfg.llm_model}): {state('openrouter_api_key', 'openrouter')}")
+        self.cloud_note.setText(f"Liquid (hosted d1): {state('liquid_api_key', 'liquid')} · OpenRouter (the LLM): "
+                                f"{state('openrouter_api_key', 'openrouter')}")
 
     def values(self) -> dict:
         split = lambda s: [x.strip() for x in s.split(",") if x.strip()]  # noqa: E731
         return {
             "player": self.player.currentData(),
             "max_height": int(self.height_.currentData()),
-            "max_mbps": float(self.mbps.value()),
+            "max_mbps": 0.0 if self.no_limit.isChecked() else float(self.mbps.value()),
             "probe_streams": self.probe.isChecked(),
             "audio_language": self.audio.currentData(),
             "subtitle_languages": self.subs.codes() or ["eng"],
@@ -428,13 +403,6 @@ class Settings(QScrollArea):
             "stt_model": self.stt.currentData(),
             "binge": self.binge.isChecked(),
             "auto_skip": self.auto_skip.isChecked(),
-            "hosted_d1": self.hosted_d1.isChecked(),
-            "hosted_d1_model": self.hosted_model.currentData(),
-            "llm_fallback": self.llm.isChecked(),
-            "llm_model": self.llm_model.currentText().strip() or LLM_MODELS[0],
-            "llm_reasoning": self.llm_reasoning.currentData(),
-            "llm_private": self.llm_private.isChecked(),
-            "llm_first": self.llm_first.isChecked(),
             **{k: (w.value() if isinstance(w, QSpinBox) else w.text().strip()) for k, w in self.adv.items()},
         }
 
@@ -450,6 +418,13 @@ class Settings(QScrollArea):
             current = tomllib.loads(old) if old else {}
         except ValueError:
             current = {}
+        if any(k in current for k in agent_config.LEGACY):        # replaced settings: keep what they meant
+            try:
+                cfg = load_cfg()
+                current.update(decide_steps=cfg.decide_steps, decide_off=cfg.decide_off, d1_where=cfg.d1_where)
+            except SystemExit:
+                pass
+        current = {k: v for k, v in current.items() if k not in agent_config.LEGACY}
         merged = {**current, **values}                        # settings not shown here are kept
         lines = ["# tv-agent settings (written by the TV Agent panel; see config.example.toml for all of them).\n"]
         lines += [f"{k} = {toml(v)}\n" for k, v in merged.items()]

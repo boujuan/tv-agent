@@ -10,8 +10,8 @@ Upgrading from 0.3.0, which was signed with a debug key: uninstall it once (`tv-
 com.boujuan.tvagent`), then `tv-agent tv install tv-agent-android-<version>.apk`, which pairs again.
 
 ### Added
-- "What can you do?" ("¿qué puedes hacer?"): every command by topic, English and Spanish, in a scrolling list on
-  the TV (0.6.0).
+- "What can you do?" ("¿qué puedes hacer?"): every command as a pattern with its ‹placeholders› set apart, by
+  section, beside what it does, in the language you asked in; a scrolling list on the TV (0.6.0, patterns 0.7.0).
 - A numbered list on the TV for "what was I watching?", "what's new?" and "new films", with posters: say "number
   2", or pick with OK or a number key. It stays visible while you speak (the pill opens beside it, bottom-right)
   and closes when playback starts, on BACK, or after 90 s (`ChoicesActivity`, opened over adb only).
@@ -98,6 +98,12 @@ panel's Decisions tab, then redo your changes.
 - A title spelled differently by speech-to-text but said the same finds your library's ("the bare" played "Jamie
   Oliver: The Naked Chef Bares All" instead of your The Bear).
 - With d1 unreachable, an unmatched sentence went to a title search; the LLM decides it first when set up.
+- "Skip" followed by anything but a duration ("skip purpose all") jumped forward 30 s; "sops off" turned the TV off
+  after the episode (the LLM's guess; now the rules read it as subtitles off). A "put the bear show on" with "on"
+  in the language field of the LLM's answer was dropped.
+- `POST /v1/action` took no raw JSON body; "Finding SevenceE2…" lacked a space.
+- `tv-agent eval` asks d1 where the decision steps do (`d1_where`), not always the local one. An empty clean-up
+  regex is refused.
 
 ### Added
 - The TV app's audio stream (port 8767): decided ~0.25-0.3 s after your last word for complete commands
@@ -130,19 +136,42 @@ panel's Decisions tab, then redo your changes.
   volumen", "¿qué hay de nuevo?", "salta la intro"… A clean-up layer turns them into the English the rules know
   (titles stay as said, Spanish numbers are read); 49 Spanish test sentences. They need a multilingual speech model
   to be heard as Spanish.
-- Liquid's hosted d1 as a fallback when the local d1 doesn't answer (`hosted_d1`, `tv-agent setup liquid`).
-- An LLM for what the rules don't catch (`llm_fallback`, `tv-agent setup openrouter`; `llm_model` =
-  google/gemini-3.5-flash-lite through OpenRouter, reasoning at its "minimal" floor): asked before d1 by default
-  (`llm_first`; measured more accurate in English and Spanish at about d1's speed), d1 only when it can't be
-  reached. One action in a fixed JSON shape covering every command; it gets up to 10 of your library's titles that
-  sound like what you said, and names described titles itself ("the series with the chemistry teacher" is Breaking
-  Bad); its answer is checked like the rules', and a title it names still has to be found. Fastest provider by
-  default; `llm_private` keeps to zero-data-retention providers (slower).
-- `hosted_d1_model` ("d1" or "d1-ultra").
-- "What can you do?" / "help": every command on the TV; the same list (`tv_agent/commands.py`) is the panel's
-  Commands tab, and a test checks every example in it is understood.
-- `scripts/bench_fallbacks.py` and `eval/hard.jsonl` (80 hard commands, English and Spanish): accuracy and delay of
-  each decision path.
+- The decision steps (fixed phrases, pattern rules, the LLM, d1) run in an order you set and each can be switched
+  off (`decide_steps`, `decide_off`; the panel's Decisions tab changes them live, `GET/POST /v1/pipeline`). A step
+  that can't be reached passes to the next; the LLM's "not a command" is final; d1 below its confidence passes
+  on. When no model answers, the rules' offline intent applies (a title to play, or nothing).
+- d1 can be the local one, Liquid's hosted one (`tv-agent setup liquid`; `hosted_d1_model` "d1" or "d1-ultra"),
+  or either first with the other as backup (`d1_where`).
+- An LLM step through OpenRouter (`tv-agent setup openrouter`; `llm_model`, by default
+  deepseek/deepseek-v4.1-flash-1017 with reasoning off, the most accurate and fastest of 9 models measured; see
+  docs/research-2026-10-22.md §2.9). One action in a fixed JSON shape covering every command; it gets up to 10 of
+  your library's titles that sound like what you said, knows that speech-to-text mishears command words, and names
+  described titles itself ("the series with the chemistry teacher" is Breaking Bad); its answer is checked like
+  the rules', and a title it names still has to be found. Temperature and reasoning adapt to what the model takes
+  (a model that can't turn reasoning off uses its lowest). Fastest provider by default; `llm_private` keeps to
+  zero-data-retention providers.
+- Misheard titles: a name the search doesn't find exactly also goes to the LLM, for the real titles it sounds
+  like, and the closest-sounding one that your library or Cinemeta has is played ("ceberance", "cebruns",
+  "sevence": Severance; "suxession": Succession).
+- Two commands in one: "play Severance episode 2 and go to the middle", "pon La casa de papel y salta la intro",
+  "turn it down and put on The Bear" run one after the other (the second waits until playback starts; "skip the
+  intro" then skips it when it comes). Split only when one side is a control command the rules know and the other
+  is understood on its own, so "Pride and Prejudice", "treinta y cinco" and "an hour and a half" stay one command.
+- "What am I watching?" (the title, how far in, when it ends) and "where am I in Severance?" / "what's the last
+  episode of X I watched?" (your last episode and how far in, from your Stremio library), in Spanish too.
+- "Subtitles" on its own switches them over (off if they're on), like the remote's button; "auto skip on/off" for
+  the LLM; "volume to the max / the minimum".
+- Mishearings of switches, from real use: "subtitles of" / "sops off" (off), "subtitles all" (switched over),
+  "beach mode oh" / "pinch mode on" (binge mode on); "turn the subtitles on" and any "turn X on/off" in either word
+  order.
+- "What can you do?" / "help": every command on the TV, as patterns with ‹placeholders›, by section, in the
+  language it was asked in (`tv_agent/commands.py`, also the panel's Commands tab). A test expands every pattern
+  into the sentences it stands for, English and Spanish (130), and checks each gets its action from the rules
+  alone.
+- `scripts/bench_fallbacks.py`: accuracy, delay and cost of each decision path and of several LLMs side by side
+  (`--models`, `--hosted d1,d1-ultra`, `--local`), on `eval/hard.jsonl` (80 hard commands, English and Spanish),
+  `eval/hard_holdout.jsonl` (40 nothing was tuned on) and `eval/voice.jsonl` (33 real commands said to the TV).
+- `max_mbps = 0`: no bitrate limit.
 - "That's wrong" ("eso está mal") marks the last command in the history; the panel teaches it the right action,
   saved as that exact sentence (`learned.json`, checked before the rules, apart from `rules.json`). `tv-agent
   review` lists marked and not-understood commands, with the LLM's guess when one is set up.
@@ -168,15 +197,31 @@ panel's Decisions tab, then redo your changes.
 
 ## panel — unreleased
 
+### Fixed
+- Saving the rules in the Decisions tab trimmed the spaces of clean-up replacements ("pon " → "play " became
+  "play"), so "pon the bear" read "playthe bear"; they're kept exactly as typed now. A rules.json saved that way
+  needs Reset to defaults (or its replacements' trailing spaces put back).
+- Saving Settings no longer drops what the replaced settings (`hosted_d1`, `llm_fallback`, `llm_first`) meant: their
+  step order, steps off and d1 choice are written first.
+- Overview: with the local d1 unused (its step off, or hosted only), "Start all" leaves llama-d1 stopped and voice
+  control counts as on without it.
+
 ### Added
-- Commands: everything you can say, by topic, English and Spanish, with a filter; right-click to copy an example
-  or try it on the TV.
-- Settings covers every setting now: the LLM's model, reasoning, "before d1" and private mode, the hosted d1
-  model, buttons to set the Liquid and OpenRouter keys (checked, then saved; the panel keeps nothing), and an
-  Advanced section (addresses, ports, model files, Kodi user).
+- Decisions: the diagram shows the steps as they run now (fixed phrases, pattern rules, the LLM, d1 between
+  "Clean-up" and "Action"); drag a step (or ▲▼) into another order and tick it on or off, live at once; d1's box
+  picks local, hosted, or either first. Choosing a local d1 while its server (llama-d1) is stopped offers to start
+  it; hosted only, or d1 off, offers to stop it. An LLM tab (model, reasoning, private providers); the hosted d1
+  model and "when no model answers" in the d1 tab. The tester explains two-command sentences, skipped and
+  unreachable steps and where d1 answered from; "How a pattern rule works" is folded away, leaving the table the
+  room.
+- Commands: everything you can say as patterns with ‹placeholders›, by section, in English or Spanish, with a
+  filter; "try" fills one in with an example you can edit, then explains it (nothing sent) or does it on the TV.
+- Settings covers every setting now: buttons to set the Liquid and OpenRouter keys (checked, then saved; the
+  panel keeps nothing), "No limit" for the bitrate, and an Advanced section (addresses, ports, model files, Kodi
+  user).
 - Settings: a Voice card: the speech model (with "Download and use" for one not on this computer yet), binge
-  mode, auto skip, and the cloud fallbacks (Liquid's hosted d1, an LLM) with whether their keys are set. The tab
-  reloads when shown, so a binge mode changed by voice isn't overwritten.
+  mode, auto skip, and whether the cloud keys are set. The tab reloads when shown, so a binge mode changed by
+  voice isn't overwritten.
 - Activity: "Only wrong or not understood"; right-click a command to mark it wrong, teach it the right action
   (type what you meant, see how the agent takes it, save) or forget what it was taught.
 - Decisions: explains sentences you taught, answers from Liquid's hosted d1 and the LLM step.

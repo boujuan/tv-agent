@@ -18,7 +18,10 @@ CONFIG_FILE = CONFIG_DIR / "config.toml"
 SECRETS_FILE = CONFIG_DIR / "secrets.toml"
 
 SECRET_NAMES = ("agent_token", "stremio_auth_key", "kodi_password", "liquid_api_key", "openrouter_api_key")
-OPTIONAL_SECRETS = ("liquid_api_key", "openrouter_api_key")     # only for the cloud fallbacks
+OPTIONAL_SECRETS = ("liquid_api_key", "openrouter_api_key")     # only for the cloud steps
+STEPS = ("phrases", "patterns", "llm", "d1")                     # the decision steps (decide/router.py)
+D1_WHERE = ("local-first", "hosted-first", "local", "hosted")
+LEGACY = ("hosted_d1", "llm_fallback", "llm_first")              # before decide_steps, decide_off and d1_where
 
 
 @dataclass
@@ -37,7 +40,7 @@ class Config:
     kodi_port: int = 8080
     kodi_user: str = "kodi"
     max_height: int = 2160                  # preferred maximum resolution (lines)
-    max_mbps: float = 60.0                  # stay under what the TV's network link carries
+    max_mbps: float = 60.0                  # stay under what the TV's network link carries; 0: no limit
     probe_streams: bool = True              # turn off while the TV uses Mullvad (debrid one-IP rules)
     player: str = "kodi"                    # "kodi" (full remote control) or "just" (Just Player)
     # Tracks Kodi switches to after a start (ISO 639-2 codes, as Kodi reports them). Titles made in a country
@@ -49,13 +52,15 @@ class Config:
     twitch_favorites: list[str] = field(default_factory=list)
     binge: bool = True                      # at the end of an episode the next one starts (also by voice)
     auto_skip: bool = False                 # intros and recaps skipped by themselves when the timestamps are sure
-    hosted_d1: bool = True                  # local d1 down: Liquid's hosted d1 (only with `tv-agent setup liquid`)
-    hosted_d1_model: str = "d1"             # or "d1-ultra" (Liquid's bigger one)
-    llm_fallback: bool = True               # an LLM over OpenRouter for what the rules don't get (`tv-agent setup openrouter`)
-    llm_first: bool = True                  # the LLM before d1 (more accurate, about as fast); false: only after d1
-    llm_model: str = "google/gemini-3.5-flash-lite"
-    llm_reasoning: str = "minimal"          # its lowest; "" for models that take no reasoning setting
-    llm_private: bool = False               # only providers that keep no data (slower for Gemini 3.5 Flash-Lite)
+    # How a command is decided (the panel's Decisions tab changes these live): the steps in order, the ones
+    # switched off, and which d1 answers (local, Liquid's hosted one with `tv-agent setup liquid`, or either first)
+    decide_steps: list[str] = field(default_factory=lambda: list(STEPS))
+    decide_off: list[str] = field(default_factory=list)
+    d1_where: str = "local-first"
+    hosted_d1_model: str = "d1"             # Liquid's hosted d1: "d1" or "d1-ultra"
+    llm_model: str = "deepseek/deepseek-v4.1-flash-1017"   # any OpenRouter model (`tv-agent setup openrouter`)
+    llm_reasoning: str = "none"             # reasoning effort ("none": off where the model allows); "" sends none
+    llm_private: bool = False               # only providers that keep no data
     log_transcripts: bool = True
     secrets: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -78,15 +83,27 @@ def check_permissions():
 def load() -> Config:
     check_permissions()
     cfg = Config()
-    if CONFIG_FILE.exists():
-        data = tomllib.loads(CONFIG_FILE.read_text())
-        for key, value in data.items():
-            if key == "secrets" or not hasattr(cfg, key):
-                raise SystemExit(f"{CONFIG_FILE}: unknown setting {key!r}")
-            default = getattr(cfg, key)
-            setattr(cfg, key, Path(value).expanduser() if isinstance(default, Path) else value)
+    data = tomllib.loads(CONFIG_FILE.read_text()) if CONFIG_FILE.exists() else {}
+    legacy = {k: data.pop(k) for k in LEGACY if k in data}
+    for key, value in data.items():
+        if key == "secrets" or not hasattr(cfg, key):
+            raise SystemExit(f"{CONFIG_FILE}: unknown setting {key!r}")
+        default = getattr(cfg, key)
+        setattr(cfg, key, Path(value).expanduser() if isinstance(default, Path) else value)
+    # the settings these replaced
+    if legacy.get("llm_fallback") is False and "decide_off" not in data:
+        cfg.decide_off = [*cfg.decide_off, "llm"]
+    if legacy.get("llm_first") is False and "decide_steps" not in data:
+        cfg.decide_steps = ["phrases", "patterns", "d1", "llm"]
+    if legacy.get("hosted_d1") is False and "d1_where" not in data:
+        cfg.d1_where = "local"
     if cfg.player not in ("kodi", "just"):
         raise SystemExit(f"{CONFIG_FILE}: player must be \"kodi\" or \"just\"")
+    if not set(cfg.decide_steps) | set(cfg.decide_off) <= set(STEPS):
+        raise SystemExit(f"{CONFIG_FILE}: decide_steps and decide_off take {', '.join(STEPS)}")
+    cfg.decide_steps = [s for s in cfg.decide_steps if s in STEPS] + [s for s in STEPS if s not in cfg.decide_steps]
+    if cfg.d1_where not in D1_WHERE:
+        raise SystemExit(f"{CONFIG_FILE}: d1_where must be one of {', '.join(D1_WHERE)}")
     if SECRETS_FILE.exists():
         cfg.secrets = {k: v for k, v in tomllib.loads(SECRETS_FILE.read_text()).items() if k in SECRET_NAMES}
     return cfg
@@ -139,6 +156,25 @@ def set_value(cfg: Config, key: str, value):
     tmp.write_text("".join(lines))
     os.replace(tmp, CONFIG_FILE)
     setattr(cfg, key, value)
+
+
+def written(keys: tuple[str, ...]) -> bool:
+    """Whether config.toml sets any of these."""
+    if not CONFIG_FILE.exists():
+        return False
+    return any(l.split("=", 1)[0].strip() in keys for l in CONFIG_FILE.read_text().splitlines())
+
+
+def unset(keys: tuple[str, ...]):
+    """Remove settings from config.toml (the replaced ones, once their new form is written)."""
+    if not CONFIG_FILE.exists():
+        return
+    lines = CONFIG_FILE.read_text().splitlines(keepends=True)
+    kept = [l for l in lines if l.split("=", 1)[0].strip() not in keys]
+    if kept != lines:
+        tmp = CONFIG_FILE.with_suffix(".tmp")
+        tmp.write_text("".join(kept))
+        os.replace(tmp, CONFIG_FILE)
 
 
 def new_token() -> str:

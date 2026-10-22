@@ -1,73 +1,263 @@
-"""Decisions tab: how a command becomes an action, drawn as a decision tree; a tester that lights up the path a
-sentence takes; and editors for every rule (clean-up, fixed phrases, patterns, the d1 model, apps and hooks).
-Saving sends the rules to the agent, which checks them and uses them at once (no restart)."""
+"""Decisions tab: how a command becomes an action, drawn as a diagram whose decision steps can be dragged into another
+order and switched on or off (live, /v1/pipeline); a tester that lights up the path a sentence takes; and editors
+for every rule (clean-up, fixed phrases, patterns, the LLM, the d1 model, apps and hooks). Saving sends the rules to
+the agent, which checks them and uses them at once (no restart)."""
 import copy
 import json
 import subprocess
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QFrame,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QFrame,
                                QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
                                QPushButton, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
-                               QVBoxLayout, QWidget)
+                               QToolButton, QVBoxLayout, QWidget)
 
-from .common import AMBER, BLUE, GREEN, GREY, RED, ApiError, api, card, dim
+from .common import AMBER, BLUE, GREEN, GREY, RED, ApiError, api, card, dim, systemctl
 
 # ---------------------------------------------------------------- the diagram
 
-NODES = {   # id: (column, row, title)   on a 5 x 5 grid
-    "input": (0, 0, "Your words"), "stt": (1, 0, "Speech to text"), "clean": (2, 0, "Clean-up"),
-    "phrase": (2, 1, "① Fixed phrases"), "pattern": (2, 2, "② Pattern rules"), "model": (2, 3, "③ d1 model"),
-    "unclear": (2, 4, "Didn't get that"), "action": (4, 2, "Action"), "tv": (4, 3, "TV"),
-}
-EDGES = [("input", "stt", ""), ("stt", "clean", ""), ("clean", "phrase", ""), ("phrase", "pattern", "no match"),
-         ("pattern", "model", "no match"), ("model", "unclear", "unsure / not a command"),
-         ("phrase", "action", "exact match"), ("pattern", "action", "first rule that fits"),
-         ("model", "action", "confident"), ("action", "tv", "")]
-TAB_FOR = {"clean": 0, "phrase": 1, "pattern": 2, "model": 3, "action": 4, "tv": 4, "unclear": 3}
+LLM_MODELS = ["deepseek/deepseek-v4.1-flash-1017", "google/gemini-3.5-flash-lite", "google/gemini-3.1-flash-lite",
+              "anthropic/claude-haiku-5.5", "openai/gpt-5.6-luna", "z-ai/glm-5.3-flash"]
+
+FIXED = {"input": "Your words", "stt": "Speech to text", "clean": "Clean-up", "unclear": "Didn't get that",
+         "action": "Action", "tv": "TV"}
+STEP_TITLE = {"phrases": "Fixed phrases", "patterns": "Pattern rules", "llm": "LLM", "d1": "d1 model"}
+STEP_EDGE = {"phrases": "exact match", "patterns": "a rule fits", "llm": "answered", "d1": "confident"}
+WHERE = [("local-first", "Local, then hosted"), ("hosted-first", "Hosted, then local"), ("local", "Local only"),
+         ("hosted", "Hosted only")]
+NUMS = "①②③④"
+TAB_FOR = {"clean": 0, "phrases": 1, "patterns": 2, "llm": 3, "d1": 4, "unclear": 4, "action": 5, "tv": 5}
+
+
+class StepCard(QFrame):
+    """One decision step in the diagram: drag it (or ▲▼) to change the order, tick it on or off."""
+    toggled = Signal(str, bool)
+    nudged = Signal(str, int)            # step, -1 earlier / +1 later
+    dragged = Signal(str, float)         # step, the card's centre (y) while it's dragged
+    dropped = Signal(str)
+    clicked = Signal(str)
+    where_changed = Signal(str)
+
+    def __init__(self, step: str, parent: QWidget):
+        super().__init__(parent)
+        self.step, self.state, self._press, self._dragging = step, "", None, False
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(8, 3, 6, 3)
+        lay.setSpacing(6)
+        self.handle = QLabel("⠿")
+        self.handle.setToolTip("Drag to change the order")
+        self.handle.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.num = QLabel("")
+        texts = QVBoxLayout()
+        texts.setSpacing(0)
+        self.title = QLabel(f"<b>{STEP_TITLE[step]}</b>")
+        self.sub = QLabel("")
+        small = QFont(self.font())
+        small.setPointSizeF(max(7.0, small.pointSizeF() - 1.5))
+        self.sub.setFont(small)
+        texts.addWidget(self.title)
+        texts.addWidget(self.sub)
+        lay.addWidget(self.handle)
+        lay.addWidget(self.num)
+        lay.addLayout(texts, 1)
+        self.where = None
+        if step == "d1":
+            self.where = QComboBox()
+            for key, label in WHERE:
+                self.where.addItem(label, key)
+            self.where.setToolTip("The d1 on this laptop (llama-d1), Liquid's hosted one, or one of them first and "
+                                  "the other when it doesn't answer")
+            self.where.activated.connect(lambda i: self.where_changed.emit(self.where.itemData(i)))
+            lay.addWidget(self.where)
+        self.on = QCheckBox("On")
+        self.on.clicked.connect(lambda checked: (self.set_state(self.state), self.toggled.emit(step, checked)))
+        lay.addWidget(self.on)
+        for arrow, d, tip in ((Qt.ArrowType.UpArrow, -1, "Earlier"), (Qt.ArrowType.DownArrow, 1, "Later")):
+            b = QToolButton()
+            b.setArrowType(arrow)
+            b.setAutoRaise(True)
+            b.setToolTip(tip)
+            b.clicked.connect(lambda _=False, d=d: self.nudged.emit(step, d))
+            lay.addWidget(b)
+        self.set_state("")
+
+    def set_state(self, state: str):
+        """"" normal, "visited" asked without an answer, "hit" decided, "off" skipped, "out" didn't answer."""
+        self.state = state
+        off = not self.on.isChecked()
+        color = {"hit": GREEN, "visited": BLUE, "out": AMBER}.get(state, GREY)
+        fill = {"hit": "rgba(47,177,112,0.18)", "visited": "rgba(76,141,255,0.12)",
+                "out": "rgba(224,160,48,0.15)"}.get(state, "palette(base)")
+        style = "dashed" if off else "solid"
+        self.setStyleSheet(f"StepCard {{ border: {1.6 if state else 1}px {style} {color}; border-radius: 9px; "
+                           f"background: {fill}; }}")
+        for w in (self.title, self.sub, self.num):
+            w.setEnabled(not off)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._press, self._start, self._dragging = e.globalPosition(), self.y(), False
+
+    def mouseMoveEvent(self, e):
+        if self._press is None:
+            return
+        dy = e.globalPosition().y() - self._press.y()
+        if self._dragging or abs(dy) > 5:
+            self._dragging = True
+            self.raise_()
+            self.handle.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self.move(self.x(), int(self._start + dy))
+            self.dragged.emit(self.step, self.y() + self.height() / 2)
+
+    def mouseReleaseEvent(self, e):
+        if self._dragging:
+            self.handle.setCursor(Qt.CursorShape.OpenHandCursor)
+            self.dropped.emit(self.step)
+        elif self._press is not None:
+            self.clicked.emit(self.step)
+        self._press, self._dragging = None, False
 
 
 class FlowDiagram(QWidget):
-    clicked = Signal(str)
+    """How a command is decided: the fixed nodes are drawn; the decision steps are StepCards in the middle column, in
+    their order. A traced sentence lights up the path it took."""
+    clicked = Signal(str)                 # a node or step: open its editor
+    order_changed = Signal(list)
+    step_toggled = Signal(str, bool)
+    where_changed = Signal(str)
 
     def __init__(self):
         super().__init__()
-        self.setMinimumHeight(250)
-        self.sub = {k: "" for k in NODES}
-        self.path: set[str] = set()
-        self.taken: set[tuple[str, str]] = set()
-        self.hit = ""                  # the node that decided
+        self.setMinimumHeight(390)
+        self.order = ["phrases", "patterns", "llm", "d1"]
+        self.cards = {}
+        for step in self.order:
+            c = StepCard(step, self)
+            c.toggled.connect(self.step_toggled)
+            c.nudged.connect(self._nudge)
+            c.dragged.connect(self._drag)
+            c.dropped.connect(lambda _s: self._drop())
+            c.clicked.connect(self.clicked)
+            c.where_changed.connect(self.where_changed)
+            self.cards[step] = c
+        self.sub = {k: "" for k in FIXED}
+        self.steps_sub: dict[str, str] = {}
+        self.path: set[str] = set()       # fixed nodes on the traced path
+        self.walked: list[str] = []       # steps the sentence went through, in order
+        self.hit = ""                     # the step that decided ("fallback": the offline guess)
+        self._dragging_step = ""
         self.setMouseTracking(True)
 
-    def set_counts(self, counts: dict, model: dict):
+    # ---- state ----
+
+    def set_pipeline(self, order: list[str], off: set[str], where: str, subs: dict[str, str]):
+        self.order = list(order)
+        for step, c in self.cards.items():
+            c.on.setChecked(step not in off)
+            if c.where is not None:
+                c.where.setCurrentIndex(max(0, c.where.findData(where)))
+        self.steps_sub = subs
+        self._number()
+        self._place()
+        self.clear()
+
+    def set_counts(self, counts: dict):
         self.sub.update({"input": "remote · laptop mic · typed", "stt": "Parakeet, on this laptop",
-                         "clean": "fillers, mishearing fixes", "phrase": f"{counts.get('phrases', 0)} sentences",
-                         "pattern": f"{counts.get('patterns', 0)} rules, in order",
-                         "model": f"{counts.get('intents', 0)} intents · ≥ {model.get('min_confidence', 0.3):.2f}",
-                         "unclear": "nothing happens", "action": "one typed action",
-                         "tv": "player · app · volume"})
+                         "clean": "fillers, mishearing fixes", "unclear": "nothing happens",
+                         "action": "one typed action (or two)", "tv": "player · app · volume"})
         self.update()
 
-    def show_trace(self, path: list[str], taken: list[tuple[str, str]], hit: str, notes: dict):
-        self.path, self.taken, self.hit = set(path), set(taken), hit
+    def show_trace(self, path: list[str], walked: list[str], states: dict[str, str], hit: str, notes: dict):
+        self.path, self.walked, self.hit = set(path), walked, hit
+        for step, c in self.cards.items():
+            c.set_state(states.get(step, ""))
+            c.sub.setText(notes.get(step) or self.steps_sub.get(step, ""))
         for k, v in notes.items():
-            self.sub[k] = v
+            if k in self.sub:
+                self.sub[k] = v
         self.update()
 
     def clear(self):
-        self.path, self.taken, self.hit = set(), set(), ""
+        self.path, self.walked, self.hit = set(), [], ""
+        for step, c in self.cards.items():
+            c.set_state("")
+            c.sub.setText(self.steps_sub.get(step, ""))
         self.update()
 
+    def _number(self):
+        for i, step in enumerate(self.order):
+            self.cards[step].num.setText(NUMS[i])
+
+    # ---- reordering ----
+
+    def _nudge(self, step: str, d: int):
+        i = self.order.index(step)
+        j = i + d
+        if 0 <= j < len(self.order):
+            self.order[i], self.order[j] = self.order[j], self.order[i]
+            self._number()
+            self._place()
+            self.order_changed.emit(list(self.order))
+
+    def _drag(self, step: str, cy: float):
+        slots = self._slots()
+        target = min(range(len(slots)), key=lambda i: abs(slots[i].center().y() - cy))
+        self._dragging_step = step
+        if self.order.index(step) != target:
+            self.order.remove(step)
+            self.order.insert(target, step)
+            self._number()
+            self._place(skip=step)
+        self.update()
+
+    def _drop(self):
+        moved = bool(self._dragging_step)
+        self._dragging_step = ""
+        self._place()
+        if moved:
+            self.order_changed.emit(list(self.order))
+
+    # ---- geometry ----
+
+    def _frame(self) -> tuple[float, float, float, float, float]:
+        """(steps column x, its width, node width, node height, card height)."""
+        w = self.width()
+        nw = min(160.0, w * 0.17)
+        sw = min(470.0, w * 0.46)
+        return w * 0.27, sw, nw, 42.0, 44.0
+
+    def _slots(self) -> list[QRectF]:
+        sx, sw, _, nh, ch = self._frame()
+        top = 8 + nh + 24
+        return [QRectF(sx, top + i * (ch + 14), sw, ch) for i in range(len(self.order))]
+
     def _rects(self) -> dict[str, QRectF]:
-        w, h = self.width(), self.height()
-        cw, rh = w / 5, h / 5
-        bw, bh = min(168.0, cw * 0.9), min(44.0, rh * 0.82)
-        out = {}
-        for k, (c, r, _) in NODES.items():
-            cx, cy = cw * c + cw / 2, rh * r + rh / 2
-            out[k] = QRectF(cx - bw / 2, cy - bh / 2, bw, bh)
-        return out
+        sx, sw, nw, nh, ch = self._frame()
+        cx = sx + sw / 2
+        slots = self._slots()
+        r = {"clean": QRectF(cx - nw / 2, 8, nw, nh)}
+        r["stt"] = QRectF(max(8.0, cx - nw / 2 - nw - 40), 8, nw, nh)
+        r["input"] = QRectF(max(8.0, r["stt"].left() - nw - 40), 8, nw, nh)
+        if r["input"].right() + 20 > r["stt"].left():              # narrow window: squeeze the first two
+            r["input"] = QRectF(8, 8, nw * 0.8, nh)
+            r["stt"] = QRectF(r["input"].right() + 18, 8, nw * 0.8, nh)
+        r["unclear"] = QRectF(cx - nw / 2, slots[-1].bottom() + 34, nw, nh)
+        aw = min(170.0, self.width() * 0.17)
+        ax = self.width() - aw - 10
+        mid = (slots[0].top() + slots[-1].bottom()) / 2
+        r["action"] = QRectF(ax, mid - nh / 2, aw, nh)
+        r["tv"] = QRectF(ax, r["action"].bottom() + 26, aw, nh)
+        return r
+
+    def _place(self, skip: str = ""):
+        for step, rect in zip(self.order, self._slots()):
+            if step != skip:
+                self.cards[step].setGeometry(rect.toRect())
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._place()
 
     def mousePressEvent(self, e):
         for k, r in self._rects().items():
@@ -79,61 +269,97 @@ class FlowDiagram(QWidget):
         over = any(r.contains(e.position()) for r in self._rects().values())
         self.setCursor(Qt.CursorShape.PointingHandCursor if over else Qt.CursorShape.ArrowCursor)
 
+    # ---- drawing ----
+
+    def _arrow(self, p: QPainter, path: QPainterPath, color: QColor, width: float, label: str = "",
+               label_at: float = 0.5, dashed: bool = False):
+        pen = QPen(color, width)
+        if dashed:
+            pen.setStyle(Qt.PenStyle.DashLine)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPath(path)
+        p.save()
+        p.translate(path.pointAtPercent(1.0))
+        p.rotate(-path.angleAtPercent(1.0))
+        p.setPen(QPen(color, 1))
+        p.setBrush(color)
+        p.drawPolygon([QPointF(0, 0), QPointF(-7, -4), QPointF(-7, 4)])
+        p.restore()
+        if label:
+            pt = path.pointAtPercent(label_at)
+            p.setPen(color)
+            p.drawText(QPointF(pt.x() + 6, pt.y() - 4), label)
+
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         rects = self._rects()
+        slots = {step: QRectF(self.cards[step].geometry()) for step in self.order}
         text = self.palette().text().color()
         faint = QColor(text)
         faint.setAlpha(70)
         tracing = bool(self.path)
         small = QFont(self.font())
         small.setPointSizeF(max(7.0, small.pointSizeF() - 1.5))
-        for a, b, label in EDGES:
-            ra, rb = rects[a], rects[b]
-            on = (a, b) in self.taken
-            color = QColor(GREEN if on and b == "action" else BLUE) if on else (faint if tracing else QColor(GREY))
-            p.setPen(QPen(color, 2.4 if on else 1.3))
-            if NODES[a][0] == NODES[b][0]:        # same column: straight down
-                start, end = QPointF(ra.center().x(), ra.bottom()), QPointF(rb.center().x(), rb.top())
-                path = QPainterPath(start)
-                path.lineTo(end)
-            elif NODES[a][1] == NODES[b][1]:      # same row: straight across
-                start, end = QPointF(ra.right(), ra.center().y()), QPointF(rb.left(), rb.center().y())
-                path = QPainterPath(start)
-                path.lineTo(end)
-            else:                                 # to the action column: a curve
-                start, end = QPointF(ra.right(), ra.center().y()), QPointF(rb.left(), rb.center().y())
-                mid = (start.x() + end.x()) / 2
-                path = QPainterPath(start)
-                path.cubicTo(QPointF(mid, start.y()), QPointF(mid, end.y()), end)
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawPath(path)
-            ang = path.angleAtPercent(1.0)
-            tip = path.pointAtPercent(1.0)
-            p.save()
-            p.translate(tip)
-            p.rotate(-ang)
-            p.setBrush(color)
-            p.drawPolygon([QPointF(0, 0), QPointF(-7, -4), QPointF(-7, 4)])
-            p.restore()
-            if label:
-                p.setFont(small)
-                p.setPen(color if on else (faint if tracing else QColor(GREY)))
-                mid_pt = path.pointAtPercent(0.5)
-                if NODES[a][0] == NODES[b][0]:
-                    p.drawText(QPointF(mid_pt.x() + 8, mid_pt.y() + 4), label)
-                else:
-                    p.drawText(QPointF(mid_pt.x() - p.fontMetrics().horizontalAdvance(label) / 2, mid_pt.y() - 5),
-                               label)
+        p.setFont(small)
+
+        def color(on: bool) -> QColor:
+            return QColor(BLUE) if on else (faint if tracing else QColor(GREY))
+
+        def line(a: QPointF, b: QPointF) -> QPainterPath:
+            path = QPainterPath(a)
+            path.lineTo(b)
+            return path
+
+        # the top row and into the steps
+        for a, b in (("input", "stt"), ("stt", "clean")):
+            on = a in self.path and b in self.path
+            self._arrow(p, line(QPointF(rects[a].right(), rects[a].center().y()),
+                                QPointF(rects[b].left(), rects[b].center().y())), color(on), 2.4 if on else 1.3)
+        first = slots[self.order[0]]
+        on = bool(self.walked)
+        self._arrow(p, line(QPointF(rects["clean"].center().x(), rects["clean"].bottom()),
+                            QPointF(rects["clean"].center().x(), first.top())), color(on), 2.4 if on else 1.3)
+        # down the steps: "no match", "not sure", "off"
+        for a, b in zip(self.order, self.order[1:]):
+            ra, rb = slots[a], slots[b]
+            on = a in self.walked and b in self.walked
+            x = ra.left() + 22
+            self._arrow(p, line(QPointF(x, ra.bottom()), QPointF(x, rb.top())), color(on), 2.4 if on else 1.3)
+        last = slots[self.order[-1]]
+        on = "unclear" in self.path
+        self._arrow(p, line(QPointF(rects["unclear"].center().x(), last.bottom()),
+                            QPointF(rects["unclear"].center().x(), rects["unclear"].top())),
+                    QColor(AMBER) if on else color(False), 2.4 if on else 1.3, "nothing decided", 0.95)
+        # each step that's on, to the action
+        for step in self.order:
+            r = slots[step]
+            off = not self.cards[step].on.isChecked()
+            on = self.hit == step
+            start = QPointF(r.right(), r.center().y())
+            end = QPointF(rects["action"].left(), rects["action"].center().y())
+            mid = (start.x() + end.x()) / 2
+            path = QPainterPath(start)
+            path.cubicTo(QPointF(mid, start.y()), QPointF(mid, end.y()), end)
+            c = QColor(GREEN) if on else color(False)
+            if off:
+                c.setAlpha(45)
+            self._arrow(p, path, c, 2.4 if on else 1.3, "" if off else STEP_EDGE[step], 0.18, dashed=off)
+        on = "tv" in self.path
+        self._arrow(p, line(QPointF(rects["action"].center().x(), rects["action"].bottom()),
+                            QPointF(rects["tv"].center().x(), rects["tv"].top())), color(on), 2.4 if on else 1.3)
+        # the fixed nodes
+        bold = QFont(self.font())
+        bold.setBold(True)
         for k, r in rects.items():
             visited = k in self.path
             fill = QColor(self.palette().base().color())
             border = QColor(GREY)
-            if k == self.hit:
+            if k == "action" and visited:
                 fill, border = QColor(GREEN), QColor(GREEN)
                 fill.setAlpha(60)
-            elif k == "unclear" and k in self.path:
+            elif k == "unclear" and visited:
                 fill, border = QColor(AMBER), QColor(AMBER)
                 fill.setAlpha(60)
             elif visited:
@@ -141,14 +367,12 @@ class FlowDiagram(QWidget):
                 fill.setAlpha(35)
             elif tracing:
                 border = faint
-            p.setPen(QPen(border, 1.6 if visited or k == self.hit else 1.0))
+            p.setPen(QPen(border, 1.6 if visited else 1.0))
             p.setBrush(fill)
             p.drawRoundedRect(r, 9, 9)
             p.setPen(text if (visited or not tracing) else faint)
-            bold = QFont(self.font())
-            bold.setBold(True)
             p.setFont(bold)
-            p.drawText(r.adjusted(6, 4, -6, -r.height() / 2), Qt.AlignmentFlag.AlignCenter, NODES[k][2])
+            p.drawText(r.adjusted(6, 3, -6, -r.height() / 2), Qt.AlignmentFlag.AlignCenter, FIXED[k])
             p.setFont(small)
             sub = QColor(text)
             sub.setAlpha(170 if (visited or not tracing) else 60)
@@ -160,7 +384,8 @@ class FlowDiagram(QWidget):
 # ---------------------------------------------------------------- a generic table editor
 
 class TableEditor(QWidget):
-    """Rows of dicts. Column kinds: text, list (comma-separated), json (one line), choice, bool."""
+    """Rows of dicts. Column kinds: text (trimmed), raw (exactly as typed: a clean-up fix's spaces matter, "pon " →
+    "play "), list (comma-separated), json (one line), choice, bool."""
     changed = Signal()
 
     def __init__(self, columns: list[tuple], movable: bool = True, add_label: str = "Add"):
@@ -175,8 +400,13 @@ class TableEditor(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         hh = self.table.horizontalHeader()
         for i, c in enumerate(columns):
-            hh.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch if c[3] else
-                                    QHeaderView.ResizeMode.ResizeToContents)
+            if c[3] is True:
+                hh.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
+            elif c[3]:                                   # a width to start at, then yours to drag
+                hh.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+                self.table.setColumnWidth(i, c[3])
+            else:
+                hh.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
         self.table.itemChanged.connect(lambda *_: self.changed.emit())
         lay.addWidget(self.table)
         btns = QHBoxLayout()
@@ -271,6 +501,9 @@ class TableEditor(QWidget):
                 if kind == "bool":
                     r[key] = it.checkState() == Qt.CheckState.Checked
                     continue
+                if kind == "raw":
+                    r[key] = it.text() if it else ""
+                    continue
                 text = (it.text() if it else "").strip()
                 if kind == "list":
                     r[key] = [x.strip() for x in text.split(",") if x.strip()]
@@ -326,12 +559,16 @@ class Decisions(QWidget):
         tl = QVBoxLayout(top)
         tl.setContentsMargins(14, 10, 14, 10)
         head = QHBoxLayout()
-        head.addWidget(QLabel("<b>How a command is decided</b> <span style='color:gray'>· click a box to edit "
-                              "that step</span>"))
+        head.addWidget(QLabel("<b>How a command is decided</b> <span style='color:gray'>· drag the steps into "
+                              "another order, switch them on or off (live at once) · click one to edit it</span>"))
         head.addStretch()
         tl.addLayout(head)
         self.diagram = FlowDiagram()
         self.diagram.clicked.connect(self.node_clicked)
+        self.diagram.order_changed.connect(lambda order: self.set_pipeline({"steps": order}))
+        self.diagram.step_toggled.connect(self.step_toggled)
+        self.diagram.where_changed.connect(self.where_changed)
+        self.pipeline: dict = {}
         tl.addWidget(self.diagram, 1)
         trow = QHBoxLayout()
         self.test = QLineEdit()
@@ -373,35 +610,80 @@ class Decisions(QWidget):
         form.addRow("Words removed anywhere", self.remove_words)
         cf.addLayout(form)
         cf.addWidget(dim("Fixes for common mishearings: a regular expression and what to put instead."))
-        self.fixes = TableEditor([("Heard (regex)", "from", "text", True), ("Becomes", "to", "text", True),
+        self.fixes = TableEditor([("Heard (regex)", "from", "raw", True), ("Becomes", "to", "raw", True),
                                   ("Note", "note", "text", True)], movable=True, add_label="Add fix")
         cf.addWidget(self.fixes)
         self.tabs.addTab(cw, "Clean-up")
 
         # fixed phrases
         self.phrases = TableEditor([("ID", "id", "text", False), ("Sentences (comma-separated)", "say", "list", True),
-                                    ("Action (JSON)", "do", "json", True), ("Note", "note", "text", False)],
+                                    ("Action (JSON)", "do", "json", True), ("Note", "note", "text", 200)],
                                    add_label="Add phrase")
         pw = QWidget()
         pl = QVBoxLayout(pw)
-        pl.addWidget(dim("The whole sentence must match exactly (after clean-up). Checked before anything else."))
+        pl.addWidget(dim("The whole sentence must match exactly (after clean-up). The sentences you taught in the "
+                         "Activity tab count as fixed phrases too."))
         pl.addWidget(self.phrases)
-        self.tabs.addTab(pw, "① Fixed phrases")
+        self.tabs.addTab(pw, "Fixed phrases")
 
         # patterns
         self.patterns = TableEditor([("ID", "id", "text", False), ("Group", "stage", "text", False),
                                      ("Pattern (regex)", "match", "text", True), ("Action template (JSON)", "do",
                                                                                   "json", True),
-                                     ("Note", "note", "text", False)], add_label="Add rule")
+                                     ("Note", "note", "text", 200)], add_label="Add rule")
         aw = QWidget()
         al = QVBoxLayout(aw)
         al.addWidget(self.patterns, 1)
+        self.help_toggle = QToolButton()
+        self.help_toggle.setText("How a pattern rule works")
+        self.help_toggle.setCheckable(True)
+        self.help_toggle.setAutoRaise(True)
+        self.help_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.help_toggle.setArrowType(Qt.ArrowType.RightArrow)
+        al.addWidget(self.help_toggle)
         self.pattern_help = QLabel(PATTERN_HELP)
         self.pattern_help.setWordWrap(True)
         self.pattern_help.setTextFormat(Qt.TextFormat.RichText)
         self.pattern_help.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.pattern_help.setVisible(False)
+        self.help_toggle.toggled.connect(lambda on: (self.pattern_help.setVisible(on), self.help_toggle.setArrowType(
+            Qt.ArrowType.DownArrow if on else Qt.ArrowType.RightArrow)))
         al.addWidget(self.pattern_help)
-        self.tabs.addTab(aw, "② Pattern rules")
+        self.tabs.addTab(aw, "Pattern rules")
+
+        # the LLM (applies at once, like the steps above)
+        lw = QWidget()
+        ll = QVBoxLayout(lw)
+        lf = QFormLayout()
+        self.llm_model = QComboBox()
+        self.llm_model.setEditable(True)               # any OpenRouter model id
+        self.llm_model.addItems(LLM_MODELS)
+        self.llm_model.setToolTip("Any model id from openrouter.ai/models that supports structured outputs")
+        self.llm_model.lineEdit().editingFinished.connect(self.llm_changed)
+        self.llm_model.activated.connect(lambda _i: self.llm_changed())
+        self.llm_reasoning = QComboBox()
+        for label, v in (("None (reasoning off)", "none"), ("Minimal", "minimal"), ("Low", "low"),
+                         ("Medium", "medium"), ("Don't send a setting", "")):
+            self.llm_reasoning.addItem(label, v)
+        self.llm_reasoning.setToolTip("How much the model thinks before it answers: more is slower and dearer. "
+                                      "None turns it off where the model allows (else its lowest is used); "
+                                      "“Don't send” is for models that take no setting")
+        self.llm_reasoning.activated.connect(lambda _i: self.llm_changed())
+        self.llm_private = QCheckBox("Only providers that keep no data")
+        self.llm_private.setToolTip("Zero data retention providers only: fewer to choose from, often slower")
+        self.llm_private.clicked.connect(lambda _c: self.llm_changed())
+        lf.addRow("Model", self.llm_model)
+        lf.addRow("Reasoning", self.llm_reasoning)
+        lf.addRow("", self.llm_private)
+        ll.addLayout(lf)
+        self.llm_note = dim("")
+        ll.addWidget(self.llm_note)
+        ll.addWidget(dim("It gets what you said, what's playing, the app names and up to 10 of your library's titles "
+                         "that sound like what you said. Its answer is checked like every other: a title it names "
+                         "still has to be found before anything plays. It also gets titles the search can't find, to "
+                         "say what they were misheard from. Measured models: docs/research-2026-10-22.md."))
+        ll.addStretch()
+        self.tabs.addTab(lw, "LLM")
 
         # model
         mw = QWidget()
@@ -411,7 +693,9 @@ class Decisions(QWidget):
         self.min_conf = QDoubleSpinBox()
         self.min_conf.setRange(0, 1)
         self.min_conf.setSingleStep(0.05)
-        self.min_conf.setToolTip("d1's confidence (0 = all options equally likely). Below it: “Didn't get that”.")
+        self.min_conf.setToolTip("d1's confidence (0 = all options equally likely). Below it, the next step decides "
+                                 "(or “Didn't get that”).")
+        self.fallback_note = "the LLM and d1 off or unreachable: what the rules don't catch is treated as this"
         self.fallback = QComboBox()
         self.title_q = QLineEdit()
         self.cands = QSpinBox()
@@ -421,9 +705,16 @@ class Decisions(QWidget):
         self.min_conf.valueChanged.connect(self.mark_dirty)
         self.cands.valueChanged.connect(self.mark_dirty)
         self.fallback.currentIndexChanged.connect(self.mark_dirty)
+        self.hosted_model = QComboBox()
+        self.hosted_model.addItem("d1", "d1")
+        self.hosted_model.addItem("d1-ultra", "d1-ultra")
+        self.hosted_model.setToolTip("Liquid's hosted model, when the d1 step uses it (needs a Liquid key: Settings)")
+        self.hosted_model.activated.connect(
+            lambda _i: self.set_pipeline({"hosted_d1_model": self.hosted_model.currentData()}))
+        mf.addRow("Liquid's hosted model", self.hosted_model)
         mf.addRow("Question d1 answers", self.question)
         mf.addRow("Act only above confidence", self.min_conf)
-        mf.addRow("If d1 is offline, treat as", self.fallback)
+        mf.addRow("When no model answers", self.fallback)
         mf.addRow("Title-choice question", self.title_q)
         mf.addRow("Title candidates shown to d1", self.cands)
         ml.addLayout(mf)
@@ -435,7 +726,7 @@ class Decisions(QWidget):
                                     ("Action (JSON, your own intents)", "do", "json", True)],
                                    movable=False, add_label="Add intent")
         ml.addWidget(self.intents, 1)
-        self.tabs.addTab(mw, "③ d1 model")
+        self.tabs.addTab(mw, "d1 model")
 
         # apps & hooks
         hw = QWidget()
@@ -516,7 +807,8 @@ class Decisions(QWidget):
             src = "your rules.json" if res["source"].endswith("rules.json") else res["source"]
             err_text = f" · <span style='color:{RED}'>{res['error']}</span>" if res.get("error") else ""
             self.status.setText(f"Using {src}: " + ", ".join(f"{v} {k}" for k, v in res["counts"].items()) + err_text)
-            self.diagram.set_counts(res["counts"], res["rules"].get("model", {}))
+            self.diagram.set_counts(res["counts"])
+            self.load_pipeline()
             self.pattern_help.setText(PATTERN_HELP + "<br><b>Converters:</b> " + " · ".join(
                 f"<code>{k}</code> {v}" for k, v in res["converters"].items()) + "<br><b>Actions and their fields:</b> "
                 + " · ".join(f"<code>{k}</code>({', '.join(v)})" for k, v in res["fields"].items()))
@@ -548,9 +840,11 @@ class Decisions(QWidget):
             self.intents.table.item(i, 3).setText("built-in")
         self.fallback.blockSignals(True)
         self.fallback.clear()
+        self.fallback.addItem("nothing (“Didn't get that”)", "none")
         for k in m.get("intents", {}):
             if k != "none":
-                self.fallback.addItem(k, k)
+                self.fallback.addItem(k.replace("play_title", "play_title (play it as a title)"), k)
+        self.fallback.setToolTip(self.fallback_note)
         self.fallback.setCurrentIndex(max(0, self.fallback.findData(m.get("offline_fallback", "play_title"))))
         self.fallback.blockSignals(False)
         self.apps.set_rows(raw.get("apps", []))
@@ -668,6 +962,117 @@ class Decisions(QWidget):
 
         self.panel.bg.run(lambda: api("/v1/eval", {"rules": raw}, timeout=180), done)
 
+    # ---- the steps: order, on/off, which d1, the LLM (live at once) ----
+
+    def load_pipeline(self):
+        self.panel.bg.run(lambda: api("/v1/pipeline", timeout=5), self.show_pipeline)
+
+    def show_pipeline(self, res, err):
+        if err or not res:
+            return
+        self.pipeline = res
+        c = res.get("counts", {})
+        taught = f" + {res['learned']} taught" if res.get("learned") else ""
+        subs = {"phrases": f"{c.get('phrases', 0)} sentences{taught}",
+                "patterns": f"{c.get('patterns', 0)} rules, in order",
+                "llm": res["llm_model"].split("/")[-1] if res["keys"]["openrouter"] else "no OpenRouter key (Settings)",
+                "d1": f"{c.get('intents', 0)} intents" + (
+                    f" · hosted: {res['hosted_d1_model']}" if res["d1_where"] != "local" else "")}
+        self.diagram.set_pipeline(res["steps"], set(res["off"]), res["d1_where"], subs)
+        self.llm_model.setCurrentText(res["llm_model"])
+        self.llm_reasoning.setCurrentIndex(max(0, self.llm_reasoning.findData(res["llm_reasoning"])))
+        self.llm_private.setChecked(res["llm_private"])
+        self.hosted_model.setCurrentIndex(max(0, self.hosted_model.findData(res["hosted_d1_model"])))
+        self.llm_note.setText("OpenRouter key set." if res["keys"]["openrouter"] else
+                              f"<span style='color:{AMBER}'>No OpenRouter key yet: Settings › Set OpenRouter key."
+                              "</span>")
+
+    def set_pipeline(self, change: dict, then=None):
+        def done(res, err):
+            if err:
+                QMessageBox.warning(self, "TV Agent", f"Not changed: {err}")
+                self.load_pipeline()
+                return
+            self.show_pipeline(res, None)
+            self.status.setText(f"<span style='color:{GREEN}'>Steps saved · live now</span>")
+            if then:
+                then()
+
+        self.panel.bg.run(lambda: api("/v1/pipeline", change, timeout=10), done)
+
+    def _d1_server(self) -> str:
+        """The local d1 server's state: "active", "inactive", "failed"…"""
+        return (getattr(self.panel, "units", {}) or {}).get("llama-d1", {}).get("ActiveState", "unknown")
+
+    def _offer_local(self):
+        """The local d1 is about to be asked: offer to start its server when it isn't running."""
+        if self._d1_server() in ("active", "activating", "reloading"):
+            return
+        box = QMessageBox(QMessageBox.Icon.Warning, "TV Agent",
+                          "The local d1 server (llama-d1) isn't running, so the local d1 won't answer.",
+                          parent=self)
+        start = box.addButton("Start it", QMessageBox.ButtonRole.AcceptRole)
+        boot = box.addButton("Start it, and at every boot", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Not now", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() in (start, boot):
+            verb = ("enable", "--now") if box.clickedButton() is boot else ("start",)
+            self.panel.bg.run(lambda: systemctl(*verb, "llama-d1.service"), lambda *_: self.panel.refresh_units())
+
+    def _offer_stop(self, why: str):
+        """The local d1 isn't needed any more: offer to stop its server (frees its memory; a step to running the
+        agent without this laptop's GPU)."""
+        if self._d1_server() not in ("active", "activating"):
+            return
+        box = QMessageBox(QMessageBox.Icon.Question, "TV Agent",
+                          f"{why} The local d1 server (llama-d1) isn't needed now. Stop it to free its memory?",
+                          parent=self)
+        stop = box.addButton("Stop it", QMessageBox.ButtonRole.AcceptRole)
+        boot = box.addButton("Stop it, and don't start it at boot", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("Keep it running", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        if box.clickedButton() in (stop, boot):
+            verb = ("disable", "--now") if box.clickedButton() is boot else ("stop",)
+            self.panel.bg.run(lambda: systemctl(*verb, "llama-d1.service"), lambda *_: self.panel.refresh_units())
+
+    def step_toggled(self, step: str, on: bool):
+        keys = self.pipeline.get("keys", {})
+        if on and step == "llm" and not keys.get("openrouter"):
+            QMessageBox.information(self, "TV Agent", "The LLM step needs an OpenRouter key: Settings › Set "
+                                    "OpenRouter key. Until then it's skipped.")
+        off = set(self.pipeline.get("off", []))
+        off = off - {step} if on else off | {step}
+        if len(off) == 4:
+            QMessageBox.information(self, "TV Agent", "Every step is off now: nothing will be understood until you "
+                                    "switch one back on.")
+        where = self.pipeline.get("d1_where", "local-first")
+        then = None
+        if step == "d1" and on and where != "hosted":
+            then = self._offer_local
+        elif step == "d1" and not on:
+            then = lambda: self._offer_stop("The d1 step is off.")        # noqa: E731
+        self.set_pipeline({"off": sorted(off)}, then)
+
+    def where_changed(self, where: str):
+        keys = self.pipeline.get("keys", {})
+        if where != "local" and not keys.get("liquid"):
+            QMessageBox.information(self, "TV Agent", "Liquid's hosted d1 needs a Liquid key: Settings › Set Liquid "
+                                    "key. Until then only the local d1 is asked.")
+        d1_on = "d1" not in self.pipeline.get("off", [])
+        then = None
+        if d1_on and where in ("local-first", "local", "hosted-first"):
+            then = self._offer_local
+        elif where == "hosted":
+            then = lambda: self._offer_stop("Only Liquid's hosted d1 is asked now.")        # noqa: E731
+        self.set_pipeline({"d1_where": where}, then)
+
+    def llm_changed(self):
+        change = {"llm_model": self.llm_model.currentText().strip(), "llm_reasoning": self.llm_reasoning.currentData(),
+                  "llm_private": self.llm_private.isChecked()}
+        if self.pipeline and all(self.pipeline.get(k) == v for k, v in change.items()):
+            return
+        self.set_pipeline(change)
+
     # ---- the tester ----
 
     def node_clicked(self, node: str):
@@ -694,92 +1099,110 @@ class Decisions(QWidget):
             return
         self.last = res
         trace = res["trace"]
-        path, taken, notes, lines = ["input", "clean"], [("input", "stt"), ("stt", "clean")], {}, []
-        path.append("stt")
+        order = self.diagram.order
+        num = lambda step: NUMS[order.index(step)] if step in order else ""      # noqa: E731
+        step_of = {"phrase": "phrases", "pattern": "patterns", "llm": "llm", "model": "d1"}
+        path, walked, states, notes, lines = ["input", "stt", "clean"], [], {}, {}, []
+        skipped: list[str] = []          # pattern rules whose regex matched but whose parts didn't convert
         cleaned = trace[0].get("text", "")
         lines.append(f"Cleaned to “<b>{cleaned}</b>”" if cleaned else "Nothing left after clean-up")
         hit = ""
-        prev = "clean"
-        for step in trace[1:]:
-            st = step["stage"]
-            if st == "phrase":
-                path.append("phrase")
-                taken.append((prev, "phrase"))
-                prev = "phrase"
-                if step.get("matched") and step.get("rule") == "learned":
-                    hit = "phrase"
-                    notes["phrase"] = "matched: taught"
-                    lines.append("① A sentence you taught (Activity tab) matches exactly")
-                elif step.get("matched"):
-                    hit = "phrase"
-                    notes["phrase"] = f"matched: {step.get('rule')}"
-                    lines.append(f"① Fixed phrase <b>{step.get('rule')}</b> matches exactly")
+        for t in trace[1:]:
+            st = t["stage"]
+            if st == "split":
+                left, right = t["parts"]
+                lines.append(f"Two commands: “<b>{left}</b>” and “<b>{right}</b>”; “{t['known']}” is the rule "
+                             f"<b>{t['rule']}</b>, the other goes through the steps:")
+                continue
+            if st == "fallback":
+                if t.get("accepted"):
+                    hit = "fallback"
+                    lines.append(f"No model answered: treated as <b>{t['intent']}</b> (the d1 tab's “When no model "
+                                 "answers”)")
+                continue
+            step = step_of.get(st)
+            if not step:
+                continue
+            if step not in walked:
+                walked.append(step)
+            n = num(step)
+            if t.get("off"):
+                states[step] = "off"
+                notes[step] = "off" if t.get("why") == "off" else "no OpenRouter key"
+                lines.append(f"{n} <span style='color:gray'>{STEP_TITLE[step]}: "
+                             f"{'off' if t.get('why') == 'off' else 'no key, skipped'}</span>")
+            elif st == "phrase":
+                if t.get("matched"):
+                    hit, states[step] = step, "hit"
+                    taught = t.get("rule") == "learned"
+                    notes[step] = "matched: taught" if taught else f"matched: {t.get('rule')}"
+                    lines.append(f"{n} " + ("A sentence you taught (Activity tab) matches exactly" if taught else
+                                            f"Fixed phrase <b>{t.get('rule')}</b> matches exactly"))
                 else:
-                    notes["phrase"] = "no exact match"
-                    lines.append("① No fixed phrase is exactly this")
+                    states[step], notes[step] = "visited", "no exact match"
+                    lines.append(f"{n} No fixed phrase is exactly this")
             elif st == "pattern":
-                if "pattern" not in path:
-                    path.append("pattern")
-                    taken.append((prev, "pattern"))
-                    prev = "pattern"
-                if step.get("matched"):
-                    hit = "pattern"
-                    parts = ", ".join(f"{k} = “{v}”" for k, v in (step.get("parts") or {}).items())
-                    notes["pattern"] = f"matched: {step.get('rule')}"
-                    lines.append(f"② Pattern rule <b>{step.get('rule')}</b> fits" + (f" ({parts})" if parts else ""))
-                elif step.get("rule"):
-                    lines.append(f"② <span style='color:gray'>{step['rule']}: the pattern matched but "
-                                 f"{step.get('why', 'it was skipped')}</span>")
-                else:
-                    notes.setdefault("pattern", "no rule fits")
-                    if not any(s.get("matched") for s in trace if s["stage"] == "pattern"):
-                        lines.append("② No pattern rule fits")
-            elif st == "model":
-                path.append("model")
-                taken.append((prev, "model"))
-                prev = "model"
-                if step.get("available") is False:
-                    lines.append(f"③ <span style='color:{AMBER}'>d1 isn't running</span>; tried the offline fallback")
-                    continue
-                top = " · ".join(f"{k} {p:.2f}" for k, p in step.get("top", []))
-                who = "Liquid's hosted d1 (the local one didn't answer)" if step.get("hosted") else "d1"
-                lines.append(f"③ {who} picked <b>{step.get('intent')}</b> with confidence "
-                             f"{step.get('confidence', 0):.2f} (needs ≥ {step.get('threshold', 0):.2f}) — top: {top}")
-                if step.get("accepted"):
-                    hit = "model"
-                    notes["model"] = f"{step.get('intent')} {step.get('confidence', 0):.2f}"
-                else:
-                    notes["model"] = f"{step.get('intent')} {step.get('confidence', 0):.2f}: not acting"
+                if not t.get("rule") or t.get("matched"):
+                    if skipped:
+                        lines.append(f"{n} <span style='color:gray'>{len(skipped)} rule{'s' * (len(skipped) > 1)} "
+                                     f"matched the words but a part didn't convert: {', '.join(skipped)}</span>")
+                        skipped.clear()
+                if t.get("matched"):
+                    hit, states[step] = step, "hit"
+                    parts = ", ".join(f"{k} = “{v}”" for k, v in (t.get("parts") or {}).items())
+                    notes[step] = f"matched: {t.get('rule')}"
+                    lines.append(f"{n} Pattern rule <b>{t.get('rule')}</b> fits" + (f" ({parts})" if parts else ""))
+                elif t.get("rule"):
+                    skipped.append(t["rule"])
+                elif states.get(step) != "hit":
+                    states[step], notes[step] = "visited", "no rule fits"
+                    lines.append(f"{n} No pattern rule fits")
             elif st == "llm":
-                said = str(step.get("action", "none")).replace("_", " ")
-                if "model" not in path:            # asked before d1: it's the model step
-                    path.append("model")
-                    taken.append((prev, "model"))
-                    prev = "model"
-                if step.get("reached") is False:
-                    lines.append(f"③ <span style='color:{AMBER}'>The LLM ({step.get('model')}) didn't answer</span>; "
-                                 "d1 decides")
+                model = str(t.get("model", "")).split("/")[-1]
+                if t.get("reached") is False:
+                    states[step], notes[step] = "out", "didn't answer"
+                    lines.append(f"{n} <span style='color:{AMBER}'>The LLM ({model}) didn't answer</span>; the next "
+                                 "step decides")
                     continue
-                if step.get("action") not in (None, "none"):
-                    hit = "model"
-                    notes["model"] = f"LLM: {said}"
+                said = str(t.get("action", "none")).replace("_", " ")
+                if t.get("action") not in (None, "none"):
+                    hit, states[step], notes[step] = step, "hit", f"answered: {said}"
                 else:
-                    notes["model"] = "LLM: not a command"
-                lines.append(f"③ The LLM ({step.get('model')}) answered <b>{said}</b>, checked like the rest")
+                    states[step], notes[step] = "visited", "not a command"
+                lines.append(f"{n} The LLM ({model}) answered <b>{said}</b>, checked like the rest")
+            elif st == "model":
+                if t.get("available") is False:
+                    states[step], notes[step] = "out", "didn't answer"
+                    lines.append(f"{n} <span style='color:{AMBER}'>d1 didn't answer</span> "
+                                 f"({dict(WHERE).get(t.get('where'), '').lower()})")
+                    continue
+                top = " · ".join(f"{k} {p:.2f}" for k, p in t.get("top", []))
+                who = "Liquid's hosted d1" if t.get("source") == "hosted" else "the local d1"
+                lines.append(f"{n} {who} picked <b>{t.get('intent')}</b> with confidence "
+                             f"{t.get('confidence', 0):.2f} (needs ≥ {t.get('threshold', 0):.2f}) — top: {top}")
+                if t.get("accepted"):
+                    hit, states[step] = step, "hit"
+                    notes[step] = f"{t.get('intent')} {t.get('confidence', 0):.2f}"
+                else:
+                    states[step] = "visited"
+                    notes[step] = f"{t.get('intent')} {t.get('confidence', 0):.2f}: not sure enough"
         a = res["action"]
         if a["type"] == "none":
             path.append("unclear")
-            taken.append((prev, "unclear"))
             lines.append(f"→ <span style='color:{AMBER}'><b>Nothing happens</b></span> (“Didn't get that”)")
         else:
             path += ["action", "tv"]
-            taken += [(hit or prev, "action"), ("action", "tv")]
-            fields = ", ".join(f"{k} {v}" for k, v in a.items() if k != "type" and v not in (None, False, ""))
-            notes["action"] = a["type"].replace("_", " ")
+            if a["type"] == "sequence":
+                what = " + ".join(x["type"].replace("_", " ") for x in a.get("steps", []))
+                fields = ""
+            else:
+                what = a["type"].replace("_", " ")
+                fields = ", ".join(f"{k} {v}" for k, v in a.items() if k != "type" and v not in (None, False, ""))
+            notes["action"] = what
             notes["tv"] = res.get("describe", "")
-            lines.append(f"→ <span style='color:{GREEN}'><b>{a['type'].replace('_', ' ')}</b></span> {fields} — "
-                         f"the TV would show “{res.get('describe', '')}”")
-        self.diagram.show_trace(path, taken, hit, notes)
+            lines.append(f"→ <span style='color:{GREEN}'><b>{what}</b></span> {fields} — the TV would show "
+                         f"“{res.get('describe', '')}”")
+        self.diagram.show_trace(path, walked, states, hit, notes)
         self.explanation.setText("<br>".join(lines))
         rule = res.get("rule")
         if res.get("via") == "pattern":
@@ -795,7 +1218,7 @@ class Decisions(QWidget):
         action = {k: v for k, v in action.items() if v not in (None, False, "") or k == "type"}
         if action.get("type") == "none":
             action = {"type": "transport", "op": "pause"}
-        self.tabs.setCurrentIndex(1)
+        self.tabs.setCurrentIndex(TAB_FOR["phrases"])
         self.phrases.add_row({"id": "_".join(text.split()[:3]), "say": [text], "do": action,
                               "note": "added from the tester"})
         self.status.setText("<span style='color:#e0a030'>● Added a phrase: check its action, then Save</span>")
