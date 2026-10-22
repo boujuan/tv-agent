@@ -1,0 +1,87 @@
+"""The closed set of things the agent can do. The decision layer (rules + d1-3B) only ever produces one of these
+validated objects; nothing it outputs reaches the TV's shell except through the executors in agent.py."""
+from typing import Annotated, Literal, Union
+
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+
+
+Title = Annotated[str, Field(min_length=1, max_length=120)]
+
+
+class _Action(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class PlayTitle(_Action):
+    type: Literal["play_title"] = "play_title"
+    title: Title | None = None           # None: the series playing now (or the last one watched)
+    season: int | None = Field(None, ge=0, le=100)
+    episode: int | None = Field(None, ge=0, le=2000)
+    kind: Literal["movie", "series"] | None = None
+    restart: bool = False
+
+
+class ContinueWatching(_Action):
+    type: Literal["continue_watching"] = "continue_watching"
+    title: Title | None = None
+
+
+class NextEpisode(_Action):
+    type: Literal["next_episode"] = "next_episode"
+    offset: int = Field(1, ge=-20, le=20)   # -1: the previous episode
+
+
+class OpenInStremio(_Action):
+    type: Literal["open_in_stremio"] = "open_in_stremio"
+    title: Title
+    season: int | None = Field(None, ge=0, le=100)
+    episode: int | None = Field(None, ge=0, le=2000)
+    kind: Literal["movie", "series"] | None = None
+
+
+class YouTube(_Action):
+    type: Literal["youtube"] = "youtube"
+    query: Annotated[str, Field(min_length=1, max_length=200)]
+
+
+class Twitch(_Action):
+    type: Literal["twitch"] = "twitch"
+    channel: Annotated[str, Field(min_length=1, max_length=50)]
+
+
+class OpenApp(_Action):
+    type: Literal["open_app"] = "open_app"
+    app: Annotated[str, Field(pattern=r"^[a-z0-9_]{1,30}$")]   # a key of the app list in the rules
+
+
+class Home(_Action):
+    type: Literal["home"] = "home"
+
+
+class Transport(_Action):
+    type: Literal["transport"] = "transport"
+    op: Literal["pause", "resume", "stop", "forward", "back", "seek_to", "next", "previous"]
+    seconds: int | None = Field(None, ge=0, le=14400)   # for forward/back/seek_to
+    percent: int | None = Field(None, ge=0, le=100)     # seek_to a share of the runtime ("the middle")
+
+
+class Volume(_Action):
+    type: Literal["volume"] = "volume"
+    op: Literal["up", "down", "set", "mute", "unmute"]
+    amount: int | None = Field(None, ge=0, le=100)      # steps for up/down, level for set
+
+
+class Unclear(_Action):
+    type: Literal["none"] = "none"
+    heard: str = ""
+
+
+Action = Annotated[Union[PlayTitle, ContinueWatching, NextEpisode, OpenInStremio, YouTube, Twitch, OpenApp, Home,
+                         Transport, Volume, Unclear], Field(discriminator="type")]
+ACTION = TypeAdapter(Action)
+ACTION_TYPES = {m.model_fields["type"].default: m for m in (PlayTitle, ContinueWatching, NextEpisode, OpenInStremio,
+                                                             YouTube, Twitch, OpenApp, Home, Transport, Volume, Unclear)}
+
+
+def parse(data: str | dict) -> Action:
+    return ACTION.validate_json(data) if isinstance(data, str) else ACTION.validate_python(data)

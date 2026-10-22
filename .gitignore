@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+/dist/
+server/dist/
+server/build/
+
+# Android / Gradle (build output can hold machine-specific files)
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.apk
+
+# Editors
+.idea/
+.vscode/
+*.iml
+*.swp
+
+# Personal: the Phase 0 voice recordings stay on the computer that made them
+docs/phase0/*.wav

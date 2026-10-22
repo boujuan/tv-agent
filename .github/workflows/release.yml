@@ -1,0 +1,66 @@
+# A component tag (server-vX.Y.Z, panel-vX.Y.Z, android-vX.Y.Z) builds that component and publishes a GitHub
+# Release with its artifacts and its CHANGELOG section. See RELEASING.md.
+name: Release
+
+on:
+  push:
+    tags: ["server-v*", "panel-v*", "android-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read the tag
+        id: tag
+        run: |
+          echo "component=${GITHUB_REF_NAME%%-v*}" >> "$GITHUB_OUTPUT"
+          echo "version=${GITHUB_REF_NAME#*-v}" >> "$GITHUB_OUTPUT"
+
+      # ---- server: wheel and sdist
+      - if: steps.tag.outputs.component == 'server'
+        uses: astral-sh/setup-uv@v10.3.2
+      - if: steps.tag.outputs.component == 'server'
+        working-directory: server
+        run: |
+          have=$(sed -n 's/^version = "\(.*\)".*/\1/p' pyproject.toml)
+          [ "$have" = "${{ steps.tag.outputs.version }}" ] || { echo "pyproject.toml says $have"; exit 1; }
+          uv build --out-dir ../dist
+
+      # ---- panel: source tarball (the AUR recipe installs from it)
+      - if: steps.tag.outputs.component == 'panel'
+        run: |
+          v="${{ steps.tag.outputs.version }}"
+          have=$(sed -n 's/^__version__ = "\(.*\)".*/\1/p' panel/tvpanel/__init__.py)
+          [ "$have" = "$v" ] || { echo "panel/tvpanel/__init__.py says $have"; exit 1; }
+          mkdir -p dist
+          tar --exclude='__pycache__' --transform "s,^,tv-agent-panel-$v/," -czf "dist/tv-agent-panel-$v.tar.gz" panel LICENSE
+
+      # ---- android: the APK (signed with the runner's debug key; see RELEASING.md)
+      - if: steps.tag.outputs.component == 'android'
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - if: steps.tag.outputs.component == 'android'
+        working-directory: android
+        run: |
+          v="${{ steps.tag.outputs.version }}"
+          have=$(sed -n "s/.*versionName '\(.*\)'.*/\1/p" app/build.gradle)
+          [ "$have" = "$v" ] || { echo "app/build.gradle says $have"; exit 1; }
+          ./gradlew assembleRelease --console=plain
+          mkdir -p ../dist
+          cp app/build/outputs/apk/release/app-release.apk "../dist/tv-agent-android-$v.apk"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          .github/scripts/release-notes.sh "${{ steps.tag.outputs.component }}" "${{ steps.tag.outputs.version }}" > notes.md
+          (cd dist && sha256sum * > SHA256SUMS)
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "${{ steps.tag.outputs.component }} ${{ steps.tag.outputs.version }}" --notes-file notes.md

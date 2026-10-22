@@ -1,0 +1,26 @@
+# Maintainer: Juan Manuel Boullosa Novo <Jmb0507@gmail.com>
+# Draft: builds from the panel-v* release tarball. Before publishing to the AUR the release must be downloadable
+# without login (a public repo), and sha256sums must be filled in (`updpkgsums`).
+pkgname=tv-agent-panel
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Desktop panel with a tray icon for tv-agent, voice control for an Android TV"
+arch=(any)
+url="https://github.com/boujuan/tv-agent"
+license=(MIT)
+depends=(python pyside6 python-psutil pipewire systemd tv-agent)
+source=("$pkgname-$pkgver.tar.gz::$url/releases/download/panel-v$pkgver/tv-agent-panel-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+  cd "tv-agent-panel-$pkgver"
+  install -d "$pkgdir/usr/lib/$pkgname"
+  cp -r panel/tvpanel panel/tv_agent_panel.py panel/tv-agent.svg panel/tv-agent-panel.desktop.in \
+    "$pkgdir/usr/lib/$pkgname/"
+  printf '#!/bin/sh\nexec /usr/bin/python3 /usr/lib/%s/tv_agent_panel.py "$@"\n' "$pkgname" |
+    install -Dm755 /dev/stdin "$pkgdir/usr/bin/$pkgname"
+  sed -e "s|@EXEC@|$pkgname|" -e "s|@ICON@|$pkgname|" panel/tv-agent-panel.desktop.in |
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/$pkgname.desktop"
+  install -Dm644 panel/tv-agent.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/$pkgname.svg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

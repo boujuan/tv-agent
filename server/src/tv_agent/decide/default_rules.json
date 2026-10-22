@@ -1,0 +1,460 @@
+{
+  "version": 1,
+  "normalize": {
+    "fillers": [
+      "hey tv",
+      "hey telly",
+      "hey agent",
+      "ok tv",
+      "okay tv",
+      "ok telly",
+      "okay telly",
+      "ok agent",
+      "okay agent",
+      "please",
+      "can you",
+      "could you",
+      "would you",
+      "um",
+      "uh",
+      "erm",
+      "er",
+      "hmm",
+      "so",
+      "okay so",
+      "right"
+    ],
+    "remove_words": [
+      "please"
+    ],
+    "fixes": [
+      {
+        "from": "^got to\\b",
+        "to": "go to",
+        "note": "a common mishearing of “go to”"
+      }
+    ]
+  },
+  "phrases": [
+    {
+      "id": "pause",
+      "say": [
+        "pause",
+        "pause it",
+        "hold on",
+        "please",
+        "please please"
+      ],
+      "do": {
+        "type": "transport",
+        "op": "pause"
+      },
+      "note": "speech-to-text often hears “pause please” as “please please”"
+    },
+    {
+      "id": "resume",
+      "say": [
+        "resume",
+        "unpause",
+        "play",
+        "continue",
+        "keep playing"
+      ],
+      "do": {
+        "type": "transport",
+        "op": "resume"
+      }
+    },
+    {
+      "id": "stop",
+      "say": [
+        "stop",
+        "stop it",
+        "stop playing"
+      ],
+      "do": {
+        "type": "transport",
+        "op": "stop"
+      }
+    },
+    {
+      "id": "start_over",
+      "say": [
+        "start over",
+        "from the beginning"
+      ],
+      "do": {
+        "type": "transport",
+        "op": "seek_to",
+        "seconds": 0
+      }
+    },
+    {
+      "id": "mute",
+      "say": [
+        "mute",
+        "silence"
+      ],
+      "do": {
+        "type": "volume",
+        "op": "mute"
+      }
+    },
+    {
+      "id": "unmute",
+      "say": [
+        "unmute",
+        "sound on",
+        "sound back"
+      ],
+      "do": {
+        "type": "volume",
+        "op": "unmute"
+      }
+    },
+    {
+      "id": "home",
+      "say": [
+        "home",
+        "go home",
+        "home screen",
+        "go to the home screen"
+      ],
+      "do": {
+        "type": "home"
+      }
+    },
+    {
+      "id": "next_episode",
+      "say": [
+        "next episode",
+        "play the next episode",
+        "next",
+        "skip episode",
+        "skip this episode",
+        "play next episode"
+      ],
+      "do": {
+        "type": "next_episode"
+      }
+    }
+  ],
+  "patterns": [
+    {
+      "id": "previous_episode",
+      "stage": "grammar",
+      "match": "^(?:play |go to |go back to )?(?:the )?(?:previous|last|prior) episode(?: again)?$|^(?:go )?back (?:an|one) episode$|^previous$",
+      "do": {
+        "type": "next_episode",
+        "offset": -1
+      }
+    },
+    {
+      "id": "to_start",
+      "stage": "grammar",
+      "match": "^(?:(?:go|jump|skip|back|go back|take me back) to (?:the )?(?:beginning|start)|from the top|restart|start (?:it |this )?(?:over|again)|play (?:it|this) from the (?:start|beginning))(?: of (?:it|this(?: \\w+)?|the \\w+))?$",
+      "do": {
+        "type": "transport",
+        "op": "seek_to",
+        "seconds": 0
+      }
+    },
+    {
+      "id": "to_middle",
+      "stage": "grammar",
+      "match": "^(?:go|jump|skip) to (?:the )?(?:middle|half ?way(?: point)?)(?: of (?:it|this(?: \\w+)?|the \\w+(?: \\w+)?))?$",
+      "do": {
+        "type": "transport",
+        "op": "seek_to",
+        "percent": 50
+      }
+    },
+    {
+      "id": "episode_of_this_show",
+      "stage": "grammar",
+      "match": "^(?P<all>.*\\b(?:season|series|episode|ep|s\\d+\\s*e\\d+)\\b.*)$",
+      "do": {
+        "type": "play_title",
+        "*": "{all|episode_here!}"
+      },
+      "note": "only when no title is said: the show that's on"
+    },
+    {
+      "id": "skip_to_next_episode",
+      "stage": "grammar",
+      "match": "^(?:skip|fast forward|forward|go forward|jump forward|skip ahead)\\b.*\\bepisode\\b.*$",
+      "do": {
+        "type": "next_episode"
+      }
+    },
+    {
+      "id": "seek_forward",
+      "stage": "grammar",
+      "match": "^(?:skip forward|skip ahead|fast forward|go forward|jump forward|forward|skip|ahead)\\b(?:\\s+(?:by\\s+)?(?P<amount>.+))?$",
+      "do": {
+        "type": "transport",
+        "op": "forward",
+        "seconds": "{amount|seconds}"
+      }
+    },
+    {
+      "id": "seek_back",
+      "stage": "grammar",
+      "match": "^(?:go back|skip back|jump back|back up|rewind|back)\\b(?:\\s+(?:by\\s+)?(?P<amount>.+))?$",
+      "do": {
+        "type": "transport",
+        "op": "back",
+        "seconds": "{amount|seconds!}"
+      },
+      "note": "“go back to the menu” has no duration, so it doesn't match"
+    },
+    {
+      "id": "seek_to",
+      "stage": "grammar",
+      "match": "^(?:go to|jump to|skip to|seek to)\\s+(?:minute\\s+)?(?P<at>.+)$",
+      "do": {
+        "type": "transport",
+        "op": "seek_to",
+        "seconds": "{at|time!}"
+      }
+    },
+    {
+      "id": "volume_set",
+      "stage": "grammar",
+      "match": "^(?:set (?:the )?)?volume(?: to| at| level)? (?P<level>.+)$",
+      "do": {
+        "type": "volume",
+        "op": "set",
+        "amount": "{level|number!}"
+      }
+    },
+    {
+      "id": "volume_to",
+      "stage": "grammar",
+      "match": "^(?:increase|decrease|raise|lower|turn|put|change|bring|set)(?: (?:up|down))? (?:the )?(?:volume|sound)(?: (?:up|down))? (?:to|at) (?P<level>.+)$",
+      "do": {
+        "type": "volume",
+        "op": "set",
+        "amount": "{level|number!}"
+      },
+      "note": "“increase the volume to fifty”"
+    },
+    {
+      "id": "volume_up",
+      "stage": "grammar",
+      "match": "^(?:volume up|louder|turn (?:it|the volume|the sound) up|turn up (?:the )?(?:volume|sound)|more volume|raise (?:the )?volume)\\b(?P<how>.*)$",
+      "do": {
+        "type": "volume",
+        "op": "up",
+        "amount": "{how|amount}"
+      }
+    },
+    {
+      "id": "volume_down",
+      "stage": "grammar",
+      "match": "^(?:volume down|quieter|softer|lower (?:the )?volume|turn (?:it|the volume|the sound) down|turn down (?:the )?(?:volume|sound)|less volume)\\b(?P<how>.*)$",
+      "do": {
+        "type": "volume",
+        "op": "down",
+        "amount": "{how|amount}"
+      }
+    },
+    {
+      "id": "youtube_on",
+      "stage": "cue",
+      "match": "^(?:search youtube for|youtube search for|find on youtube|search for|search|look up|find|play|put on|put|watch|show me)?\\s*(?P<q>.+?)\\s+on\\s+(?:youtube|you tube)$",
+      "do": {
+        "type": "youtube",
+        "query": "{q|query!}"
+      }
+    },
+    {
+      "id": "youtube_first",
+      "stage": "cue",
+      "match": "^(?:search )?(?:youtube|you tube)(?: for)?\\s+(?P<q>.+)$",
+      "do": {
+        "type": "youtube",
+        "query": "{q|query!}"
+      }
+    },
+    {
+      "id": "twitch_on",
+      "stage": "cue",
+      "match": "^(?:put on|put|watch|open|play|show me)?\\s*(?P<ch>.+?)\\s+on\\s+twitch$",
+      "do": {
+        "type": "twitch",
+        "channel": "{ch|text!}"
+      }
+    },
+    {
+      "id": "twitch_first",
+      "stage": "cue",
+      "match": "^twitch\\s+(?P<ch>.+)$",
+      "do": {
+        "type": "twitch",
+        "channel": "{ch|text!}"
+      }
+    },
+    {
+      "id": "stremio_page",
+      "stage": "cue",
+      "match": "^(?:show me|show|open|find)?\\s*(?P<what>.+?)\\s+(?:in|on)\\s+stremio$",
+      "do": {
+        "type": "open_in_stremio",
+        "*": "{what|title!}"
+      }
+    },
+    {
+      "id": "open_app",
+      "stage": "cue",
+      "match": "^(?:open|launch|start|go to|go back to|back to|return to|switch to|switch back to|take me to)\\s+(?:the\\s+)?(?P<name>.+?)(?:\\s+app)?$",
+      "do": {
+        "type": "open_app",
+        "app": "{name|app!}"
+      }
+    },
+    {
+      "id": "app_by_name",
+      "stage": "cue",
+      "match": "^(?P<name>.+)$",
+      "do": {
+        "type": "open_app",
+        "app": "{name|alias!}"
+      },
+      "note": "just an app's name: “twitch”"
+    },
+    {
+      "id": "continue",
+      "stage": "cue",
+      "match": "^(?:continue|resume|keep watching|carry on with|carry on|finish|go on with)\\s*(?:watching\\s+)?(?P<rest>.*)$",
+      "do": {
+        "type": "continue_watching",
+        "title": "{rest|continue}"
+      }
+    }
+  ],
+  "model": {
+    "question": "TV voice command: what should the TV do?",
+    "min_confidence": 0.3,
+    "offline_fallback": "play_title",
+    "title_question": "Which title does the user most likely mean?",
+    "title_candidates": 4,
+    "intents": {
+      "play_title": {
+        "describe": "play a specific movie, or an episode or season of a series"
+      },
+      "continue_watching": {
+        "describe": "continue or resume a series or movie already started"
+      },
+      "next_episode": {
+        "describe": "play the next episode"
+      },
+      "open_in_stremio": {
+        "describe": "show a title's page in Stremio without playing it"
+      },
+      "youtube": {
+        "describe": "play or search something on YouTube"
+      },
+      "twitch": {
+        "describe": "watch a Twitch streamer"
+      },
+      "open_app": {
+        "describe": "open an app by name"
+      },
+      "home": {
+        "describe": "go to the home screen"
+      },
+      "transport": {
+        "describe": "pause, resume, stop, skip or seek"
+      },
+      "volume": {
+        "describe": "change volume or mute"
+      },
+      "none": {
+        "describe": "not a TV command"
+      }
+    }
+  },
+  "apps": [
+    {
+      "key": "tizentube",
+      "label": "TizenTube",
+      "package": "io.gh.reisxd.tizentube.cobalt",
+      "activity": "dev.cobalt.app.MainActivity",
+      "aliases": [
+        "youtube",
+        "you tube",
+        "tizentube",
+        "tizen tube"
+      ]
+    },
+    {
+      "key": "stremio",
+      "label": "Stremio",
+      "package": "com.stremio.one",
+      "activity": "com.stremio.tv.MainActivity",
+      "aliases": [
+        "stremio",
+        "stream io"
+      ]
+    },
+    {
+      "key": "kodi",
+      "label": "Kodi",
+      "package": "org.xbmc.kodi",
+      "activity": ".Splash",
+      "aliases": [
+        "kodi",
+        "codey",
+        "cody"
+      ]
+    },
+    {
+      "key": "twitch",
+      "label": "Twitch",
+      "package": "tv.twitch.android.app",
+      "activity": "tv.twitch.starshot64.app.StarshotActivity",
+      "aliases": [
+        "twitch"
+      ]
+    },
+    {
+      "key": "movistar",
+      "label": "Movistar+",
+      "package": "com.movistarplus.androidtv",
+      "activity": ".MainActivity",
+      "aliases": [
+        "movistar",
+        "movistar plus",
+        "movistar tv"
+      ]
+    },
+    {
+      "key": "prime",
+      "label": "Prime Video",
+      "package": "com.amazon.amazonvideo.livingroom",
+      "activity": "com.amazon.ignition.IgnitionActivity",
+      "aliases": [
+        "prime",
+        "prime video",
+        "amazon",
+        "amazon prime"
+      ]
+    }
+  ],
+  "hooks": {
+    "youtube": {
+      "app": "tizentube",
+      "link": "https://www.youtube.com/watch?v={id}"
+    },
+    "twitch": {
+      "app": "twitch",
+      "link": "twitch://stream/{channel}"
+    },
+    "stremio": {
+      "app": "stremio",
+      "link": "stremio:///detail/{type}/{id}",
+      "link_episode": "stremio:///detail/{type}/{id}/{video}"
+    }
+  }
+}

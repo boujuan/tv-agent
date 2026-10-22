@@ -1,0 +1,40 @@
+"""What the agent remembers between commands: the volume before mute, what it last played (for "next episode"
+and progress sync), and per-stage timings for `tv-agent stats`."""
+import statistics
+import time
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+
+
+@dataclass
+class NowPlaying:
+    imdb_id: str
+    kind: str                 # "movie" or "series"
+    video_id: str             # the movie id, or tt…:season:episode
+    name: str
+    player: str = "kodi"      # "kodi" or "just"
+    url: str = field(default="", repr=False)   # the debrid link (secret; memory only), to reopen it at a time
+    runtime_ms: int = 0       # Cinemeta's runtime, for Just Player (its session doesn't give a duration)
+    started: float = field(default_factory=time.time)
+
+
+class Timings:
+    def __init__(self, size=200):
+        self._data: dict[str, deque] = defaultdict(lambda: deque(maxlen=size))
+
+    def add(self, stage: str, ms: float):
+        self._data[stage].append(ms)
+
+    def summary(self) -> dict[str, dict[str, float]]:
+        out = {}
+        for stage, xs in self._data.items():
+            s = sorted(xs)
+            out[stage] = {"n": len(s), "p50": statistics.median(s), "p95": s[min(len(s) - 1, int(0.95 * len(s)))]}
+        return out
+
+
+@dataclass
+class State:
+    volume_before_mute: int | None = None
+    now_playing: NowPlaying | None = None
+    timings: Timings = field(default_factory=Timings)

@@ -1,0 +1,33 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.boujuan.tvagent'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.boujuan.tvagent'
+        // The living-room TCL runs Android 14; nothing older needs this app.
+        minSdk 34
+        targetSdk 34
+        // Released as android-v<versionName> tags (see RELEASING.md); bump versionCode with every release.
+        versionCode 3
+        versionName '0.3.0'
+    }
+
+    buildTypes {
+        release {
+            // No libraries to shrink: plain Java on the platform API only.
+            minifyEnabled false
+            // Signed with this computer's debug key, so a build here installs over the one already on the TV.
+            // Store releases will need a release key (see RELEASING.md).
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

@@ -1,0 +1,24 @@
+# ~/.config/tv-agent/config.toml (optional: these are the defaults). Secrets live in secrets.toml next to it,
+# written by `tv-agent setup token|stremio|kodi`, never here.
+
+tv_hosts = ["192.168.1.41", "192.168.1.40"]   # Ethernet, Wi-Fi; also the only addresses the LAN listener accepts
+lan_host = "192.168.1.51"                     # this laptop on bond0; never 0.0.0.0 (tailscale0 is up too)
+lan_port = 8765
+local_port = 8766
+d1_url = "http://127.0.0.1:8091"
+kodi_port = 8080
+kodi_user = "kodi"
+
+player = "kodi"            # "just" for Just Player (simpler on screen; fewer controls), "kodi" for full control
+max_height = 2160          # largest resolution to pick
+max_mbps = 60.0            # skip files whose bitrate the TV's 100 Mbit/s port can't carry
+probe_streams = true       # check a debrid link answers before handing it to Kodi; false while the TV uses a VPN
+
+# Tracks after Kodi starts: Spanish-made titles in Spanish without subtitles; everything else English audio
+# (if the file has it) with English subtitles, else Spanish ones.
+audio_language = "eng"
+subtitle_languages = ["eng", "spa"]
+native_language = "spa"
+
+twitch_favorites = []      # e.g. ["ibai", "auronplay"]: matched first, since speech-to-text spells names freely
+log_transcripts = true     # what you said, in `journalctl --user -u tv-agent`

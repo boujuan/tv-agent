@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app talks to one server, the tv-agent address set by pairing (`tv-agent tv pair`), usually plain HTTP
+     on the home network with a bearer token. Its address isn't known when the APK is built, so cleartext
+     can't be limited to it here. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

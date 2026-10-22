@@ -1,0 +1,13 @@
+# User service for a packaged install: llama.cpp's server from the system (e.g. the llama.cpp-vulkan package)
+# with the model `scripts/fetch-models.sh` downloads. From a checkout, `tv-agent setup services` writes the
+# equivalent for this computer's llama.cpp.
+[Unit]
+Description=d1-3B decision model for tv-agent (llama.cpp, localhost only)
+
+[Service]
+ExecStart=/usr/bin/llama-server -m %h/.local/share/tv-agent/models/d1-3B/d1-3B-Q4_K_M.gguf --host 127.0.0.1 --port 8091 -ngl 99 -c 4096 --parallel 1 -fa on --alias d1-3B --no-webui
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

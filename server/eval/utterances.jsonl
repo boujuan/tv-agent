@@ -1,0 +1,107 @@
+{"text": "Play the Bear Season Three Episode Two", "expect": {"type": "play_title", "title": "the bear", "season": 3, "episode": 2}}
+{"text": "play the bear s3e2", "expect": {"type": "play_title", "title": "the bear", "season": 3, "episode": 2}}
+{"text": "put on dune part two", "expect": {"type": "play_title", "title": "dune part two"}}
+{"text": "I want to watch Severance from the start", "expect": {"type": "play_title", "title": "severance", "restart": true}}
+{"text": "watch stranger things season four", "expect": {"type": "play_title", "title": "stranger things", "season": 4}}
+{"text": "play episode 4 of season 2 of severance", "expect": {"type": "play_title", "title": "severance", "season": 2, "episode": 4}}
+{"text": "play the godfather", "expect": {"type": "play_title", "title": "the godfather"}}
+{"text": "put on the movie oppenheimer", "expect": {"type": "play_title", "title": "oppenheimer", "kind": "movie"}}
+{"text": "let's watch breaking bad", "expect": {"type": "play_title", "title": "breaking bad"}}
+{"text": "play la casa de papel", "expect": {"type": "play_title", "title": "la casa de papel"}}
+{"text": "play the office third season episode ten", "expect": {"type": "play_title", "title": "the office", "season": 3, "episode": 10}}
+{"text": "Hey TV, play Shogun please", "expect": {"type": "play_title", "title": "shogun"}}
+{"text": "can you put on interstellar", "expect": {"type": "play_title", "title": "interstellar"}}
+{"text": "start the first episode of the last of us", "expect": {"type": "play_title", "title": "the last of us"}}
+{"text": "play parasite", "expect": {"type": "play_title", "title": "parasite"}}
+{"text": "watch the series fallout", "expect": {"type": "play_title", "title": "fallout", "kind": "series"}}
+{"text": "play the bare season three episode two", "expect": {"type": "play_title", "season": 3, "episode": 2}}
+{"text": "put on squid game season two", "expect": {"type": "play_title", "title": "squid game", "season": 2}}
+{"text": "play arcane", "expect": {"type": "play_title", "title": "arcane"}}
+{"text": "I'd like to see the matrix", "expect": {"type": "play_title", "title": "the matrix"}}
+{"text": "continue the bear", "expect": {"type": "continue_watching", "title": "the bear"}}
+{"text": "resume the last of us", "expect": {"type": "continue_watching", "title": "the last of us"}}
+{"text": "keep watching what I was watching", "expect": {"type": "continue_watching"}}
+{"text": "carry on with shogun", "expect": {"type": "continue_watching", "title": "shogun"}}
+{"text": "continue watching", "expect": {"type": "continue_watching"}}
+{"text": "continue where I left off", "expect": {"type": "continue_watching"}}
+{"text": "resume severance", "expect": {"type": "continue_watching", "title": "severance"}}
+{"text": "next episode", "expect": {"type": "next_episode"}}
+{"text": "play the next episode", "expect": {"type": "next_episode"}}
+{"text": "skip this episode", "expect": {"type": "next_episode"}}
+{"text": "show me the office in stremio", "expect": {"type": "open_in_stremio", "title": "the office"}}
+{"text": "open the bear season 3 in stremio", "expect": {"type": "open_in_stremio", "title": "the bear", "season": 3}}
+{"text": "play lofi hip hop on youtube", "expect": {"type": "youtube", "query": "lofi hip hop"}}
+{"text": "search youtube for how to make paella", "expect": {"type": "youtube", "query": "how to make paella"}}
+{"text": "youtube cat videos", "expect": {"type": "youtube", "query": "cat videos"}}
+{"text": "put on some music videos on youtube", "expect": {"type": "youtube"}}
+{"text": "show me the champions league highlights on youtube", "expect": {"type": "youtube", "query": "the champions league highlights"}}
+{"text": "put ibai on twitch", "expect": {"type": "twitch", "channel": "ibai"}}
+{"text": "watch auronplay on twitch", "expect": {"type": "twitch", "channel": "auronplay"}}
+{"text": "twitch shroud", "expect": {"type": "twitch", "channel": "shroud"}}
+{"text": "open prime video", "expect": {"type": "open_app", "app": "prime"}}
+{"text": "open kodi", "expect": {"type": "open_app", "app": "kodi"}}
+{"text": "launch movistar", "expect": {"type": "open_app", "app": "movistar"}}
+{"text": "go to stremio", "expect": {"type": "open_app", "app": "stremio"}}
+{"text": "open youtube", "expect": {"type": "open_app", "app": "tizentube"}}
+{"text": "twitch", "expect": {"type": "open_app", "app": "twitch"}}
+{"text": "start movistar plus", "expect": {"type": "open_app", "app": "movistar"}}
+{"text": "go home", "expect": {"type": "home"}}
+{"text": "home screen", "expect": {"type": "home"}}
+{"text": "pause", "expect": {"type": "transport", "op": "pause"}}
+{"text": "Pause.", "expect": {"type": "transport", "op": "pause"}}
+{"text": "resume", "expect": {"type": "transport", "op": "resume"}}
+{"text": "play", "expect": {"type": "transport", "op": "resume"}}
+{"text": "stop", "expect": {"type": "transport", "op": "stop"}}
+{"text": "skip forward thirty seconds", "expect": {"type": "transport", "op": "forward", "seconds": 30}}
+{"text": "skip ahead two minutes", "expect": {"type": "transport", "op": "forward", "seconds": 120}}
+{"text": "go back ten seconds", "expect": {"type": "transport", "op": "back", "seconds": 10}}
+{"text": "rewind a minute", "expect": {"type": "transport", "op": "back", "seconds": 60}}
+{"text": "rewind", "expect": {"type": "transport", "op": "back"}}
+{"text": "go to twelve minutes", "expect": {"type": "transport", "op": "seek_to", "seconds": 720}}
+{"text": "jump to one hour five minutes", "expect": {"type": "transport", "op": "seek_to", "seconds": 3900}}
+{"text": "start over", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}}
+{"text": "wait, pause it for a second", "expect": {"type": "transport", "op": "pause"}}
+{"text": "mute", "expect": {"type": "volume", "op": "mute"}}
+{"text": "unmute", "expect": {"type": "volume", "op": "unmute"}}
+{"text": "louder", "expect": {"type": "volume", "op": "up"}}
+{"text": "turn it down a bit", "expect": {"type": "volume", "op": "down", "amount": 3}}
+{"text": "turn it up a lot", "expect": {"type": "volume", "op": "up", "amount": 15}}
+{"text": "volume twenty", "expect": {"type": "volume", "op": "set", "amount": 20}}
+{"text": "set the volume to 15", "expect": {"type": "volume", "op": "set", "amount": 15}}
+{"text": "volume up", "expect": {"type": "volume", "op": "up"}}
+{"text": "it's too loud", "expect": {"type": "volume", "op": "down"}}
+{"text": "I can't hear anything", "expect": {"type": "volume", "op": "up"}}
+{"text": "what's the weather like", "expect": {"type": "none"}}
+{"text": "what time is it", "expect": {"type": "none"}}
+{"text": "thank you", "expect": {"type": "none"}}
+{"text": "uh", "expect": {"type": "none"}}
+{"text": "", "expect": {"type": "none"}}
+{"text": "tell me a joke", "expect": {"type": "none"}}
+{"text": "order a pizza", "expect": {"type": "none"}}
+{"text": "Go back to YouTube.", "expect": {"type": "open_app", "app": "tizentube"}}
+{"text": "Please, please.", "expect": {"type": "transport", "op": "pause"}}
+{"text": "Open Stream U", "expect": {"type": "open_app", "app": "stremio"}}
+{"text": "Open Mobistar Plus", "expect": {"type": "open_app", "app": "movistar"}}
+{"text": "Increase the volume.", "expect": {"type": "volume", "op": "up"}}
+{"text": "Play pluribus.", "expect": {"type": "play_title", "title": "pluribus"}}
+{"text": "Play a game.", "expect": {"type": "none"}}
+{"text": "Go to season 3 episode 4.", "expect": {"type": "play_title", "title": null, "season": 3, "episode": 4}}
+{"text": "go to season 4 episode 2", "expect": {"type": "play_title", "title": null, "season": 4, "episode": 2}}
+{"text": "play episode five", "expect": {"type": "play_title", "title": null, "episode": 5}}
+{"text": "season two", "expect": {"type": "play_title", "title": null, "season": 2}}
+{"text": "jump to episode 3 of this show", "expect": {"type": "play_title", "title": null, "episode": 3}}
+{"text": "previous episode", "expect": {"type": "next_episode", "offset": -1}}
+{"text": "go back one episode", "expect": {"type": "next_episode", "offset": -1}}
+{"text": "Go to the middle of this show.", "expect": {"type": "transport", "op": "seek_to", "percent": 50}}
+{"text": "Got to the beginning.", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}}
+{"text": "go back to the start", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}}
+{"text": "Carry on with the show.", "expect": {"type": "continue_watching", "title": null}}
+{"text": "Continue playing last episode.", "expect": {"type": "continue_watching", "title": null}}
+{"text": "Play Foundation.", "expect": {"type": "play_title", "title": "foundation"}}
+{"text": "Forward 20 minutes.", "expect": {"type": "transport", "op": "forward", "seconds": 1200}}
+{"text": "go to stranger things season 2", "expect": {"type": "play_title", "title": "stranger things", "season": 2}}
+{"text": "Um play", "expect": {"type": "transport", "op": "resume"}}
+{"text": "Increase the volume to fifty.", "expect": {"type": "volume", "op": "set", "amount": 50}}
+{"text": "Pause the movie.", "expect": {"type": "transport", "op": "pause"}}
+{"text": "Open Bait Debate in YouTube.", "expect": {"type": "youtube"}}
+{"text": "Play Community Season 2 Episode 3.", "expect": {"type": "play_title", "title": "community", "season": 2, "episode": 3}}

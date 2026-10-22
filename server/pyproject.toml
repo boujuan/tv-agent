@@ -1,0 +1,57 @@
+[project]
+name = "tv-agent"
+version = "0.1.0"          # released as server-v<version> (see ../RELEASING.md)
+description = "Voice decision agent for an Android TV: mic button -> this computer decides -> the TV plays"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Juan Manuel Boullosa Novo" }]
+requires-python = ">=3.13,<3.14"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: No Input/Output (Daemon)",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Home Automation",
+    "Topic :: Multimedia :: Video",
+]
+dependencies = [
+    "adb-shell==0.4.4",
+    "fastapi",
+    "httpx",
+    "numpy",
+    "pydantic>=2",
+    "rapidfuzz",
+    # sherpa-onnx's sdist metadata omits its runtime package, so uv needs it named (it carries libonnxruntime).
+    "sherpa-onnx==1.13.8",
+    "sherpa-onnx-core==1.13.8",
+    "uvicorn",
+    "yt-dlp",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp>=2.3,<3"]
+
+[project.scripts]
+tv-agent = "tv_agent.cli:main"
+tv-agent-mcp = "tv_agent.mcp_server:main"
+
+[project.urls]
+Repository = "https://github.com/boujuan/tv-agent"
+Changelog = "https://github.com/boujuan/tv-agent/blob/main/CHANGELOG.md"
+
+[dependency-groups]
+dev = ["pytest"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tv_agent"]       # includes decide/default_rules.json
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "eval", "scripts", "systemd", "config.example.toml", "README.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

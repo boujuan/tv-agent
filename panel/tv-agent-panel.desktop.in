@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=TV Agent
+GenericName=TV voice control
+Comment=Status, services, activity, decision rules and settings of the tv-agent voice control
+Exec=@EXEC@
+Icon=@ICON@
+Terminal=false
+Categories=System;Monitor;
+Keywords=tv;voice;agent;kodi;stremio;
+StartupNotify=true
+StartupWMClass=tv-agent-panel

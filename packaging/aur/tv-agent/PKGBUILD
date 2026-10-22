@@ -1,0 +1,32 @@
+# Maintainer: Juan Manuel Boullosa Novo <Jmb0507@gmail.com>
+# Draft, not built yet. Open points before publishing to the AUR:
+#  - the release must be downloadable without login (a public repo); fill in sha256sums (`updpkgsums`)
+#  - pyproject.toml pins Python 3.13 (sherpa-onnx wheels); check python-sherpa-onnx builds for Arch's Python
+#  - python-adb-shell, python-sherpa-onnx and llama.cpp-vulkan come from the AUR
+pkgname=tv-agent
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Voice control for an Android TV, decided on your own computer (daemon, CLI, MCP server)"
+arch=(x86_64)
+url="https://github.com/boujuan/tv-agent"
+license=(MIT)
+depends=(python python-fastapi uvicorn python-httpx python-numpy python-pydantic python-rapidfuzz yt-dlp
+         python-adb-shell python-sherpa-onnx llama.cpp-vulkan ffmpeg avahi)
+optdepends=('python-mcp: MCP server for Claude Code (tv-agent-mcp)')
+makedepends=(python-build python-installer python-hatchling)
+source=("$url/releases/download/server-v$pkgver/tv_agent-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "tv_agent-$pkgver"
+  python -m build --wheel --no-isolation
+}
+
+package() {
+  cd "tv_agent-$pkgver"
+  python -m installer --destdir="$pkgdir" dist/*.whl
+  install -Dm644 systemd/tv-agent.service systemd/llama-d1.service -t "$pkgdir/usr/lib/systemd/user/"
+  install -Dm755 scripts/fetch-models.sh "$pkgdir/usr/share/$pkgname/fetch-models.sh"
+  install -Dm644 config.example.toml "$pkgdir/usr/share/doc/$pkgname/config.example.toml"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

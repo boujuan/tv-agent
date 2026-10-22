@@ -1,0 +1,15 @@
+# User service for a packaged install (/usr/bin/tv-agent). From a checkout, `tv-agent setup services` writes
+# the equivalent for wherever this copy lives.
+[Unit]
+Description=tv-agent: voice control for the TV (listens on this computer's address on the TV's network)
+Wants=llama-d1.service
+After=llama-d1.service network-online.target
+
+[Service]
+ExecStart=/usr/bin/tv-agent serve
+# Away from the TV's network the address doesn't exist and the bind fails: retry slowly instead of spinning.
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=default.target
