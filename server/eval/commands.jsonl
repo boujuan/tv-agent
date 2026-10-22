@@ -652,3 +652,47 @@
 {"text": "good night", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
 {"text": "is it raining", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
 {"text": "send a message to juan", "expect": {"type": "none"}, "cat": "not_a_command", "split": "test"}
+{"text": "binge mode on", "expect": {"type": "binge", "on": true}, "cat": "binge", "split": "test"}
+{"text": "could you turn on binge mode", "expect": {"type": "binge", "on": true}, "cat": "binge", "split": "test"}
+{"text": "Turn off autoplay.", "expect": {"type": "binge", "on": false}, "cat": "binge", "split": "dev"}
+{"text": "autoplay off now", "expect": {"type": "binge", "on": false}, "cat": "binge", "split": "dev"}
+{"text": "enable autoplay", "expect": {"type": "binge", "on": true}, "cat": "binge", "split": "test"}
+{"text": "disable binge mode", "expect": {"type": "binge", "on": false}, "cat": "binge", "split": "dev"}
+{"text": "Stop autoplay.", "expect": {"type": "binge", "on": false}, "cat": "binge", "split": "test"}
+{"text": "binge mode off", "expect": {"type": "binge", "on": false}, "cat": "binge", "split": "dev"}
+{"text": "stop after this episode", "expect": {"type": "timer", "then": "stop", "minutes": null}, "cat": "timer_after", "split": "test"}
+{"text": "stop after this one", "expect": {"type": "timer", "then": "stop", "minutes": null}, "cat": "timer_after", "split": "dev"}
+{"text": "this is the last episode", "expect": {"type": "timer", "then": "stop", "minutes": null}, "cat": "timer_after", "split": "dev"}
+{"text": "turn off the tv after this episode please", "expect": {"type": "timer", "then": "off", "minutes": null}, "cat": "timer_after", "split": "dev"}
+{"text": "Could you turn off after this one.", "expect": {"type": "timer", "then": "off", "minutes": null}, "cat": "timer_after", "split": "dev"}
+{"text": "go to sleep after this episode now", "expect": {"type": "timer", "then": "off", "minutes": null}, "cat": "timer_after", "split": "test"}
+{"text": "turn off in 30 minutes", "expect": {"type": "timer", "then": "off", "minutes": 30}, "cat": "timer_in", "split": "dev"}
+{"text": "turn off the tv in half an hour", "expect": {"type": "timer", "then": "off", "minutes": 30}, "cat": "timer_in", "split": "dev"}
+{"text": "Sleep timer 45 minutes.", "expect": {"type": "timer", "then": "off", "minutes": 45}, "cat": "timer_in", "split": "dev"}
+{"text": "Set a sleep timer for an hour.", "expect": {"type": "timer", "then": "off", "minutes": 60}, "cat": "timer_in", "split": "dev"}
+{"text": "stop in 20 minutes", "expect": {"type": "timer", "then": "stop", "minutes": 20}, "cat": "timer_in", "split": "test"}
+{"text": "okay stop playing in ten minutes", "expect": {"type": "timer", "then": "stop", "minutes": 10}, "cat": "timer_in", "split": "test"}
+{"text": "cancel the sleep timer", "expect": {"type": "timer", "cancel": true}, "cat": "timer_cancel", "split": "dev"}
+{"text": "cancel the timer", "expect": {"type": "timer", "cancel": true}, "cat": "timer_cancel", "split": "dev"}
+{"text": "keep playing after this", "expect": {"type": "timer", "cancel": true}, "cat": "timer_cancel", "split": "test"}
+{"text": "subtitles off", "expect": {"type": "tracks", "subtitles": "off"}, "cat": "subtitles", "split": "dev"}
+{"text": "can you turn off the subtitles", "expect": {"type": "tracks", "subtitles": "off"}, "cat": "subtitles", "split": "dev"}
+{"text": "no subtitles", "expect": {"type": "tracks", "subtitles": "off"}, "cat": "subtitles", "split": "dev"}
+{"text": "Okay turn on subtitles.", "expect": {"type": "tracks", "subtitles": "on"}, "cat": "subtitles", "split": "dev"}
+{"text": "subtitles on", "expect": {"type": "tracks", "subtitles": "on"}, "cat": "subtitles", "split": "dev"}
+{"text": "spanish subtitles", "expect": {"type": "tracks", "subtitles": "spa"}, "cat": "subtitles", "split": "dev"}
+{"text": "put on english subtitles", "expect": {"type": "tracks", "subtitles": "eng"}, "cat": "subtitles", "split": "dev"}
+{"text": "Subtitles in spanish.", "expect": {"type": "tracks", "subtitles": "spa"}, "cat": "subtitles", "split": "dev"}
+{"text": "traditional chinese subtitles", "expect": {"type": "tracks", "subtitles": "cht"}, "cat": "subtitles", "split": "dev"}
+{"text": "switch to simplified chinese subtitles", "expect": {"type": "tracks", "subtitles": "chs"}, "cat": "subtitles", "split": "dev"}
+{"text": "original audio", "expect": {"type": "tracks", "audio": "original"}, "cat": "audio", "split": "dev"}
+{"text": "Switch to the original language.", "expect": {"type": "tracks", "audio": "original"}, "cat": "audio", "split": "dev"}
+{"text": "english audio", "expect": {"type": "tracks", "audio": "eng"}, "cat": "audio", "split": "dev"}
+{"text": "switch to spanish audio please", "expect": {"type": "tracks", "audio": "spa"}, "cat": "audio", "split": "test"}
+{"text": "Play it in spanish.", "expect": {"type": "tracks", "audio": "spa"}, "cat": "audio", "split": "test"}
+{"text": "okay put it in english", "expect": {"type": "tracks", "audio": "eng"}, "cat": "audio", "split": "test"}
+{"text": "what did they say", "expect": {"type": "replay", "seconds": 10}, "cat": "replay", "split": "dev"}
+{"text": "What did he just say.", "expect": {"type": "replay", "seconds": 10}, "cat": "replay", "split": "dev"}
+{"text": "say that again", "expect": {"type": "replay", "seconds": 10}, "cat": "replay", "split": "dev"}
+{"text": "i missed that", "expect": {"type": "replay", "seconds": 10}, "cat": "replay", "split": "dev"}
+{"text": "Repeat that.", "expect": {"type": "replay", "seconds": 10}, "cat": "replay", "split": "dev"}

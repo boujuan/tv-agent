@@ -46,6 +46,7 @@ class Config:
     subtitle_languages: list[str] = field(default_factory=lambda: ["eng", "spa"])
     native_language: str = "spa"
     twitch_favorites: list[str] = field(default_factory=list)
+    binge: bool = True                      # at the end of an episode the next one starts (also by voice)
     log_transcripts: bool = True
     secrets: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -114,6 +115,21 @@ def save_secret(name: str, value: str | None):
         # JSON string escaping is valid TOML basic-string escaping for these values.
         f.writelines(f"{k} = {json.dumps(v)}\n" for k, v in sorted(current.items()))
     os.replace(tmp, SECRETS_FILE)
+
+
+def set_value(cfg: Config, key: str, value):
+    """Change one setting in config.toml (its line, or a new one) and in cfg; the rest of the file is kept."""
+    assert key in Config.__dataclass_fields__ and key != "secrets", key
+    line = f"{key} = {json.dumps(value)}\n"
+    text = CONFIG_FILE.read_text() if CONFIG_FILE.exists() else ""
+    lines = [line if l.split("=", 1)[0].strip() == key else l for l in text.splitlines(keepends=True)]
+    if line not in lines:
+        lines.append(line if not lines or lines[-1].endswith("\n") else "\n" + line)
+    CONFIG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tmp = CONFIG_FILE.with_suffix(".tmp")
+    tmp.write_text("".join(lines))
+    os.replace(tmp, CONFIG_FILE)
+    setattr(cfg, key, value)
 
 
 def new_token() -> str:

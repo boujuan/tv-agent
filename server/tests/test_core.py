@@ -453,3 +453,52 @@ def test_d1_needs_a_clear_lead_to_act():
     assert decide({"next_episode": 0.36, "resume": 0.33, "none": 0.31}).action.type == "none"    # no clear winner
     assert decide({"unmute": 0.63, "none": 0.20, "volume_up": 0.17}).action.type == "none"       # below 0.65
     assert decide({"volume_down": 0.92, "none": 0.05, "mute": 0.03}, "it is way too loud").action.type == "volume"
+
+
+def test_every_action_has_a_handler_no_attribute_hides():
+    import re
+    from pathlib import Path
+    from tv_agent.agent import Agent
+    src = (Path(__file__).parents[1] / "src/tv_agent/agent.py").read_text()
+    attributes = set(re.findall(r"self\.(_\w+)\s*(?::[^=\n]+)?=", src))
+    for kind in A.ACTION_TYPES:
+        name = "_" + kind.replace("none", "unclear")
+        assert callable(getattr(Agent, name, None)), f"no handler for {kind}"
+        assert name not in attributes, f"self.{name} would hide the {kind} handler"
+
+
+def test_end_of_playback_starts_the_next_episode_goes_home_or_turns_off():
+    import asyncio
+    import types
+    from tv_agent.agent import Agent, Outcome
+    from tv_agent.tv import apps
+
+    def ended(kind, last, after=None, binge=True, user_stopped=False):
+        done = []
+
+        async def tv(fn, *args):
+            done.append("home" if fn is apps.home else fn)
+
+        async def next_episode(a):
+            done.append("next")
+            return Outcome(True, "Playing S1E4")
+
+        async def turn_off():
+            done.append("off")
+
+        async def notify(text):
+            pass
+
+        me = types.SimpleNamespace(_user_stopped=user_stopped, dry_run=False, _after_this=after, tv=tv, notify=notify,
+                                   _next_episode=next_episode, _turn_off=turn_off, cfg=types.SimpleNamespace(binge=binge))
+        np = NowPlaying("tt1", kind, "tt1:1:3" if kind == "series" else "tt1", "X")
+        asyncio.run(Agent._ended(me, np, "stopped", last, 3_000_000))
+        return done
+
+    assert ended("movie", 2_995_000) == ["home"]
+    assert ended("series", 2_995_000) == ["next"]
+    assert ended("series", 2_995_000, binge=False) == ["home"]
+    assert ended("series", 2_995_000, after="stop") == ["home"]          # "stop after this one" beats binge mode
+    assert ended("series", 2_995_000, after="off") == ["off"]
+    assert ended("series", 1_000_000) == ["home"]                        # stopped on the remote: Home, not Kodi's menus
+    assert ended("series", 2_995_000, user_stopped=True) == []          # "stop" already went Home

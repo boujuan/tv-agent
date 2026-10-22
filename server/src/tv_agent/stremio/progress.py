@@ -42,12 +42,15 @@ def updated(item: dict | None, np: NowPlaying, offset_ms: int, duration_ms: int,
 
 
 async def track(poll, account: Account, library: Library, np: NowPlaying, meta: dict, every_s: float = 10,
-                write_every_s: float = 120):
+                write_every_s: float = 120) -> tuple[str, int | None, int]:
     """Follow the player until it stops; write on pause, every 2 minutes, and at the end.
-    poll() returns (position ms, duration ms, speed) while something plays, None once it has stopped."""
+    poll() returns (position ms, duration ms, speed) while something plays, None once it has stopped.
+    Returns how it ended ("stopped", or "lost" when the player stopped answering), the last position and the
+    duration; the last 45 s are watched every 2 s, so a stop at the very end can be told from an earlier one."""
     last_write = time.monotonic()
     last_pos, unwritten, paused, misses = None, 0, False, 0
     duration = 0
+    how = "stopped"
 
     async def write():
         nonlocal unwritten, last_write
@@ -61,7 +64,8 @@ async def track(poll, account: Account, library: Library, np: NowPlaying, meta: 
 
     try:
         while True:
-            await asyncio.sleep(every_s)
+            near_end = last_pos is not None and duration and duration - last_pos < 45_000
+            await asyncio.sleep(2 if near_end else every_s)
             try:
                 now = await poll()
                 if now is None:
@@ -72,6 +76,7 @@ async def track(poll, account: Account, library: Library, np: NowPlaying, meta: 
                 misses += 1
                 if misses >= 3:
                     log.warning("progress: the player stopped answering (%s)", type(e).__name__)
+                    how = "lost"
                     break
                 continue
             if last_pos is not None and speed:
@@ -85,3 +90,4 @@ async def track(poll, account: Account, library: Library, np: NowPlaying, meta: 
             await write()
         except Exception as e:
             log.warning("progress: final write failed (%s)", type(e).__name__)
+    return how, last_pos, duration

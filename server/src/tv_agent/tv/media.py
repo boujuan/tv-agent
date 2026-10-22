@@ -13,6 +13,18 @@ def dispatch(adb: Adb, op: str):
     adb.run(["cmd", "media_session", "dispatch", KEYS[op]])
 
 
+def sessions(adb: Adb) -> list[tuple[str, bool, str]]:
+    """(package, active, state) of each media session, e.g. ("tv.twitch.android.app", True, "PAUSED"). ~1 s."""
+    out = adb.run(["dumpsys", "media_session"])
+    found = []
+    for block in re.split(r"\n(?=\s{4}\S.*\n\s{6}ownerPid)", out):
+        pkg, act = re.search(r"package=(\S+)", block), re.search(r"active=(\w+)", block)
+        st = re.search(r"state=PlaybackState \{state=(\w+)", block)
+        if pkg:
+            found.append((pkg.group(1), bool(act and act.group(1) == "true"), st.group(1) if st else ""))
+    return found
+
+
 def get_volume(adb: Adb) -> int | None:
     out = adb.run(["cmd", "media_session", "volume", "--stream", MUSIC, "--get"])
     m = re.search(r"volume is (\d+) in range", out)

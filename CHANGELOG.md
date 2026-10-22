@@ -55,6 +55,11 @@ panel's Decisions tab, then redo your changes.
 - The TV is woken before anything is shown or played, and when the TV app connects: commands from the laptop and
   mic presses on the screensaver opened apps behind it, hidden, frozen and without the microphone.
 - "Clay" at the start is read as "play" (the remote's mic opens a moment late).
+- "stop" stops and goes back to Home. "play" or "resume" with nothing playing resumes Kodi when it's paused in
+  the background, and otherwise continues what you were watching.
+- Kodi is brought to the front when it was left running in the background (a film played behind Home).
+- Audio: commentary and audio-description tracks are never picked, and Spanish prefers Castilian. Subtitles:
+  plain before SDH / hearing-impaired, Castilian before Latin American.
 
 ### Added
 - The TV app's audio stream (port 8767): decided ~0.25-0.3 s after your last word for complete commands
@@ -64,9 +69,21 @@ panel's Decisions tab, then redo your changes.
 - Subtitles from your Stremio subtitle addons in Kodi: asked like Stremio asks (the chosen file's hash, size and
   name), and added with `Player.AddSubtitle` for the languages of your list the file doesn't have, the one to show
   last. The file's own subtitles still come first for a language it has.
-- `eval/commands.jsonl`: 654 generated, labelled commands (476 for tuning, 178 held out) from
+- `eval/commands.jsonl`: 698 generated, labelled commands (508 for tuning, 190 held out) from
   `eval/build_commands.py`; `tv-agent eval --file … --split dev|test` scores them by category. Current rules:
-  654/654, with d1 needed for ~4% of them.
+  698/698, with d1 needed for ~4% of them.
+- Binge mode, on by default ("binge mode on/off", `binge` in config.toml): when an episode ends, the next one
+  starts by itself. It's found, its stream chosen and its link checked 20 s into the episode, so it starts in
+  ~3-4 s (measured: The Office S3E2 → S3E3). After a film or a season's last episode, back to Home instead of
+  Kodi's menus.
+- Sleep timer: "stop after this episode", "turn the TV off after this one", "stop in 30 minutes", "turn off in an
+  hour", "cancel the sleep timer". "After this one" wins over binge mode for that episode.
+- Subtitles and audio on request in Kodi: "subtitles on/off", "Spanish subtitles", "subtitles in English",
+  "original audio", "Spanish audio". A subtitle language the file lacks comes from your subtitle addons.
+- "What did they say?": back 10 s, with subtitles for a moment when they were off.
+- The volume halves while the pill listens (the remote's mic hears the TV) and comes back after: Kodi's own
+  volume while Kodi plays, otherwise the TV's. Nothing is paused; "louder" said meanwhile starts from the level
+  before.
 
 ## server 0.1.0 — 2026-10-22
 

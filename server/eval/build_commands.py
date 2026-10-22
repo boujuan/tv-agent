@@ -249,6 +249,33 @@ for text in ["what's the weather like", "what time is it", "thank you", "tell me
              "play a game", "good night", "is it raining", "send a message to juan"]:
     add(text, {"type": "none"}, "not_a_command")
 
+# ---- binge mode, sleep timer, subtitles and audio, "what did they say?"
+for text, on in [("binge mode on", True), ("turn on binge mode", True), ("turn off autoplay", False),
+                 ("autoplay off", False), ("enable autoplay", True), ("disable binge mode", False),
+                 ("stop autoplay", False), ("binge mode off", False)]:
+    add(maybe_noise(text), {"type": "binge", "on": on}, "binge")
+for text, then in [("stop after this episode", "stop"), ("stop after this one", "stop"),
+                   ("this is the last episode", "stop"), ("turn off the tv after this episode", "off"),
+                   ("turn off after this one", "off"), ("go to sleep after this episode", "off")]:
+    add(maybe_noise(text), {"type": "timer", "then": then, "minutes": None}, "timer_after")
+for text, mins, then in [("turn off in 30 minutes", 30, "off"), ("turn off the tv in half an hour", 30, "off"),
+                         ("sleep timer 45 minutes", 45, "off"), ("set a sleep timer for an hour", 60, "off"),
+                         ("stop in 20 minutes", 20, "stop"), ("stop playing in ten minutes", 10, "stop")]:
+    add(maybe_noise(text), {"type": "timer", "then": then, "minutes": mins}, "timer_in")
+for text in ["cancel the sleep timer", "cancel the timer", "keep playing after this"]:
+    add(text, {"type": "timer", "cancel": True}, "timer_cancel")
+for text, subs in [("subtitles off", "off"), ("turn off the subtitles", "off"), ("no subtitles", "off"),
+                   ("turn on subtitles", "on"), ("subtitles on", "on"), ("spanish subtitles", "spa"),
+                   ("put on english subtitles", "eng"), ("subtitles in spanish", "spa"),
+                   ("traditional chinese subtitles", "cht"), ("switch to simplified chinese subtitles", "chs")]:
+    add(maybe_noise(text), {"type": "tracks", "subtitles": subs}, "subtitles")
+for text, audio in [("original audio", "original"), ("switch to the original language", "original"),
+                    ("english audio", "eng"), ("switch to spanish audio", "spa"), ("play it in spanish", "spa"),
+                    ("put it in english", "eng")]:
+    add(maybe_noise(text), {"type": "tracks", "audio": audio}, "audio")
+for text in ["what did they say", "what did he just say", "say that again", "i missed that", "repeat that"]:
+    add(maybe_noise(text), {"type": "replay", "seconds": 10}, "replay")
+
 for r in rows:
     r["split"] = "test" if int(hashlib.sha1(r["text"].encode()).hexdigest(), 16) % 10 < 3 else "dev"
 seen, unique = set(), []

@@ -16,13 +16,18 @@ playback and progress sync. Also the `tv-agent` command line and the MCP server.
 | Apps | "open Prime Video", "go back to YouTube", "open Movistar", "go home" | |
 | Playback | "pause", "resume", "skip forward thirty seconds", "go back ten seconds", "go to twelve minutes", "go to the middle", "back to the beginning", "stop" | Kodi: exact, over its API. Just Player: media keys for skips, reopening the link at the time for jumps. Other apps: media keys only |
 | Volume | "volume twenty", "louder", "turn it down a bit", "mute", "unmute" | TV volume 0-100 |
+| Binge mode | "binge mode on", "turn off binge mode" | On (default): when an episode ends the next one starts, already found and checked 20 s into the episode. After a film or a season's last episode: Home |
+| Sleep timer | "stop after this episode", "turn the TV off after this one", "stop in 30 minutes", "turn off in an hour", "cancel the sleep timer" | Stops (then Home) or puts the TV to sleep; "after this one" wins over binge mode |
+| Subtitles, audio | "subtitles on", "subtitles off", "Spanish subtitles", "original audio", "audio in English" | Kodi: the file's own track, else your subtitle addons for that release |
+| Missed a line | "what did they say?", "say that again" | Back 10 s, subtitles on for a moment |
 
 Audio and subtitles: a title made in a country that speaks `native_language` plays in it without subtitles;
 anything else plays in `audio_language` (when the file has it) with the first available of `subtitle_languages`
 (English, Spanish, Chinese Simplified/Traditional and others). Dubbed-only releases (French-only, Latino-only) of
 titles from elsewhere are marked down. Kodi applies this per file; Just Player only partly (see below).
 
-Anything it doesn't understand shows "Didn't get that: …" and does nothing.
+Anything it doesn't understand shows "Didn't get that: …" and does nothing. While the pill listens, the volume
+is halved (Kodi's own volume when Kodi plays, else the TV's) and comes back afterwards; nothing is paused.
 
 ## Player: Kodi (default) or Just Player
 

@@ -16,6 +16,9 @@ class NowPlaying:
     url: str = field(default="", repr=False)   # the debrid link (secret; memory only), to reopen it at a time
     runtime_ms: int = 0       # Cinemeta's runtime, for Just Player (its session doesn't give a duration)
     started: float = field(default_factory=time.time)
+    filename: str = ""        # the file's name, size and hash: subtitle addons match on them
+    size: int = 0
+    video_hash: str = ""
 
 
 class Timings:
@@ -36,5 +39,6 @@ class Timings:
 @dataclass
 class State:
     volume_before_mute: int | None = None
+    volume_base: int | None = None     # the level before the pill lowered it (a volume command starts there)
     now_playing: NowPlaying | None = None
     timings: Timings = field(default_factory=Timings)

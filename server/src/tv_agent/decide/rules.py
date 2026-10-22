@@ -31,7 +31,8 @@ DEFAULTS_FILE = Path(__file__).with_name("default_rules.json")
 USER_FILE = CONFIG_DIR / "rules.json"
 BUILTIN_INTENTS = ("play_title", "continue_watching", "next_episode", "previous_episode", "open_in_stremio", "youtube",
                    "twitch", "open_app", "home", "pause", "resume", "stop", "skip_forward", "skip_back", "seek_to",
-                   "restart", "volume_set", "volume_up", "volume_down", "mute", "unmute",
+                   "restart", "volume_set", "volume_up", "volume_down", "mute", "unmute", "binge", "sleep_timer",
+                   "subtitles", "audio_language", "replay",
                    "transport", "volume", "none")    # transport/volume: the broader intents of rules files before v2
 PLACEHOLDER = re.compile(r"^\{(\w+)(?:\|(\w+)(!)?)?\}$")
 PACKAGE = re.compile(r"^[a-zA-Z][\w]*(?:\.[\w]+)+$")
@@ -170,6 +171,26 @@ def _play(v, rules):
     return s
 
 
+LANGUAGE_NAMES = {"english": "eng", "spanish": "spa", "castilian": "spa", "castellano": "spa", "chinese": "chi",
+                  "mandarin": "chi", "simplified chinese": "chs", "chinese simplified": "chs", "traditional chinese": "cht",
+                  "chinese traditional": "cht", "french": "fre", "italian": "ita", "german": "ger",
+                  "portuguese": "por", "japanese": "jpn", "korean": "kor"}
+
+
+def _language(v, _):
+    t = v.strip().lower()
+    if t in ("original", "the original"):
+        return "original"
+    return LANGUAGE_NAMES.get(re.sub(r"^the ", "", t))
+
+
+def _minutes(v, _):
+    s = seconds_in(v)
+    if s is None and (n := to_int(v.strip())) is not None:
+        s = n * 60                      # "in 30": minutes
+    return max(1, round(s / 60)) if s else None
+
+
 CONVERTERS = {
     "text": lambda v, _: v.strip() or None,
     "seconds": lambda v, _: seconds_in(v),
@@ -185,6 +206,8 @@ CONVERTERS = {
     "continue": lambda v, _: T.continue_title(v),
     "app": _app,
     "alias": _alias,
+    "language": _language,
+    "minutes": _minutes,
 }
 CONVERTER_HELP = {
     "text": "the words as said",
@@ -200,6 +223,8 @@ CONVERTER_HELP = {
     "continue": "a title, or nothing for 'the show' / 'where I left off'",
     "app": "an app from the app list, by name",
     "alias": "an app, only by one of its exact spoken names",
+    "language": "a language by name ('spanish', 'traditional chinese') as its code, or 'original'",
+    "minutes": "a duration in minutes ('half an hour', 'in 45')",
 }
 
 

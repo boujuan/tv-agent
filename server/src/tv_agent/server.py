@@ -39,6 +39,7 @@ from .config import Config, lan_address
 from .decide import evaluate
 from .decide import rules as R
 from .decide.router import Decision, Router, normalize
+from .languages import name as language_name
 from .listen_stream import StreamSession
 from .stt import Stt
 
@@ -76,6 +77,23 @@ def describe(a: A.Action) -> str:
             return a.op.replace("_", " ").capitalize()
         case A.Volume():
             return {"mute": "Mute", "unmute": "Sound on", "set": f"Volume {a.amount}"}.get(a.op, f"Volume {a.op}")
+        case A.Binge():
+            return "Binge mode on" if a.on else "Binge mode off"
+        case A.Timer():
+            if a.cancel:
+                return "Sleep timer off"
+            what = "Turning off" if a.then == "off" else "Stopping"
+            return f"{what} in {a.minutes} min" if a.minutes else f"{what} after this one"
+        case A.Tracks():
+            parts = []
+            if a.audio:
+                parts.append("Original audio" if a.audio == "original" else f"{language_name(a.audio)} audio")
+            if a.subtitles:
+                on_off = {"on": "Subtitles on", "off": "Subtitles off"}
+                parts.append(on_off.get(a.subtitles) or f"{language_name(a.subtitles)} subtitles")
+            return ", ".join(parts)
+        case A.Replay():
+            return f"Back {a.seconds} s"
         case _:
             return "Didn't get that"
 
@@ -199,7 +217,11 @@ async def stream_client(svc: "Service", reader: asyncio.StreamReader, writer: as
             log.info("TV app streaming (from %s)", peer)
             # Pressed on the screensaver, the app opens behind it, hidden and without the microphone: wake the TV.
             asyncio.create_task(svc.agent._wake())
-            await stream_session(svc, reader, send)
+            svc.agent.start_duck()              # half volume while you speak (the remote's mic hears the TV)
+            try:
+                await stream_session(svc, reader, send)
+            finally:
+                await svc.agent.unduck()        # no-op once the session restored it
     except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionError, ValueError) as e:
         log.info("audio stream from %s ended: %s", peer, type(e).__name__)
     finally:
@@ -234,6 +256,7 @@ async def stream_session(svc: "Service", reader: asyncio.StreamReader, send):
         sess.feed(data)
     d, text = await sess.finish() or (Decision(A.Unclear(heard=""), "none", 0.0, "", []), "")
     await send({"stop": True})
+    await svc.agent.unduck(d.action)
     if sess.endpoint_ms is not None:
         svc.agent.state.timings.add("endpoint", sess.endpoint_ms)
         log.info("decided %.0f ms after the last word", sess.endpoint_ms)
@@ -269,6 +292,7 @@ def lan_app(svc: Service) -> FastAPI:
         svc.check(request, lan=True)
         log.info("TV app listening (from %s)", request.client.host)
         asyncio.create_task(svc.agent._wake())     # the screensaver would hide the pill (see stream_client)
+        svc.agent.start_duck()
         return {"ok": True}
 
     @app.post("/v1/utterance")
@@ -279,6 +303,7 @@ def lan_app(svc: Service) -> FastAPI:
         async with svc._busy:
             text = await svc.hear(request)
             d = await svc.decide(text)
+            await svc.agent.unduck(d.action)
             if d.action.type != "none":
                 svc.start(d, text, "tv")
             else:

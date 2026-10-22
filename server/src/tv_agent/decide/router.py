@@ -18,7 +18,7 @@ from .. import actions as A
 from . import text as T
 from .d1 import D1
 from .numbers import NUMBER, seconds_in, to_int
-from .rules import BUILTIN_INTENTS, NoMatch, Rules
+from .rules import BUILTIN_INTENTS, LANGUAGE_NAMES, NoMatch, Rules
 
 
 @dataclass
@@ -108,6 +108,26 @@ def from_intent(intent: str, t: str, rules: Rules) -> A.Action | None:
         return A.Volume(op=intent.removeprefix("volume_"), amount=T.amount(m.group(1)) if m else None)
     if intent in ("mute", "unmute"):
         return A.Volume(op=intent)
+    if intent == "binge":
+        return A.Binge(on=not re.search(r"\b(?:off|disable|stop|no|cancel|deactivate)\b", t))
+    if intent == "sleep_timer":
+        if re.search(r"\bcancel\b|\bno (?:sleep )?timer\b|\bkeep (?:playing|going)\b", t):
+            return A.Timer(cancel=True)
+        off = re.search(r"\b(?:turn|switch|shut|power)(?: it| the tv)? (?:off|down)\b|\bsleep\b", t)
+        secs = seconds_in(t)
+        return A.Timer(minutes=max(1, round(secs / 60)) if secs else None, then="off" if off else "stop")
+    if intent in ("subtitles", "audio_language"):
+        lang = next((code for name, code in sorted(LANGUAGE_NAMES.items(), key=lambda kv: -len(kv[0]))
+                     if re.search(rf"\b{name}\b", t)), None)
+        if intent == "subtitles":
+            if lang:
+                return A.Tracks(subtitles=lang)
+            return A.Tracks(subtitles="off" if re.search(r"\b(?:off|no|hide|disable|remove)\b", t) else "on")
+        if re.search(r"\boriginal\b", t):
+            return A.Tracks(audio="original")
+        return A.Tracks(audio=lang) if lang else None
+    if intent == "replay":
+        return A.Replay(seconds=seconds_in(t) or 10)
     if intent in ("play_title", "open_in_stremio"):
         s = T.title_slots(t)
         if (s["title"] or "") in T.CURRENT:

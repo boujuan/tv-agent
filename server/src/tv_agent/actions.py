@@ -71,16 +71,43 @@ class Volume(_Action):
     amount: int | None = Field(None, ge=0, le=100)      # steps for up/down, level for set
 
 
+Lang = Annotated[str, Field(pattern=r"^[a-z]{3}$")]   # ISO 639-2, as languages.py names them (chs/cht: Chinese)
+
+
+class Binge(_Action):
+    type: Literal["binge"] = "binge"
+    on: bool                             # at the end of an episode, the next one starts by itself
+
+
+class Timer(_Action):
+    type: Literal["timer"] = "timer"
+    minutes: int | None = Field(None, ge=1, le=600)   # None: when what's playing ends
+    then: Literal["stop", "off"] = "stop"             # stop and go Home, or turn the TV off
+    cancel: bool = False
+
+
+class Tracks(_Action):
+    type: Literal["tracks"] = "tracks"
+    subtitles: Literal["on", "off"] | Lang | None = None
+    audio: Literal["original"] | Lang | None = None
+
+
+class Replay(_Action):
+    type: Literal["replay"] = "replay"   # "what did they say?": back a little, subtitles on for a moment
+    seconds: int = Field(10, ge=1, le=120)
+
+
 class Unclear(_Action):
     type: Literal["none"] = "none"
     heard: str = ""
 
 
 Action = Annotated[Union[PlayTitle, ContinueWatching, NextEpisode, OpenInStremio, YouTube, Twitch, OpenApp, Home,
-                         Transport, Volume, Unclear], Field(discriminator="type")]
+                         Transport, Volume, Binge, Timer, Tracks, Replay, Unclear], Field(discriminator="type")]
 ACTION = TypeAdapter(Action)
 ACTION_TYPES = {m.model_fields["type"].default: m for m in (PlayTitle, ContinueWatching, NextEpisode, OpenInStremio,
-                                                             YouTube, Twitch, OpenApp, Home, Transport, Volume, Unclear)}
+                                                             YouTube, Twitch, OpenApp, Home, Transport, Volume, Binge,
+                                                             Timer, Tracks, Replay, Unclear)}
 
 
 def parse(data: str | dict) -> Action:

@@ -63,6 +63,13 @@ def matches(track: dict, lang: str) -> bool:
     return True
 
 
+def name(code: str | None) -> str:
+    """'spa' -> 'Spanish' (Kodi's names); unknown codes as they are."""
+    code = (code or "").lower()
+    found = next((key for key, names in ALIASES.items() if code in names), code)
+    return KODI_NAMES.get(found, code)
+
+
 def android_locale(lang: str) -> str:
     return ANDROID_LOCALE.get(lang, lang[:2])
 
@@ -78,10 +85,12 @@ def pick_audio(tracks: list[dict], lang: str) -> dict | None:
 
 
 def pick_subtitle(tracks: list[dict], langs: list[str]) -> dict | None:
-    """First language that has a full (not forced) track; plain before SDH."""
+    """First language that has a full (not forced) track; plain before SDH; Castilian before Latin American."""
     for lang in langs:
         found = [t for t in tracks if matches(t, lang) and not t.get("isforced")]
-        found.sort(key=lambda t: "sdh" in str(t.get("name") or "").lower())
+        found.sort(key=lambda t: ("sdh" in str(t.get("name") or "").lower() or bool(t.get("isimpaired")),
+                                  lang == "spa" and any(w in str(t.get("name") or "").lower()
+                                                        for w in ("latino", "latin", "lat "))))
         if found:
             return found[0]
     return None

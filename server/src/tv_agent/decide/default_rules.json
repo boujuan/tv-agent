@@ -260,6 +260,41 @@
         "op": "up"
       },
       "note": "complaints that mean louder"
+    },
+    {
+      "id": "timer_cancel",
+      "say": [
+        "cancel the sleep timer",
+        "cancel sleep timer",
+        "cancel the timer",
+        "stop the timer",
+        "no sleep timer",
+        "turn off the sleep timer",
+        "keep playing after this",
+        "keep going after this",
+        "don't stop after this episode",
+        "cancel that timer"
+      ],
+      "do": {
+        "type": "timer",
+        "cancel": true
+      }
+    },
+    {
+      "id": "replay",
+      "say": [
+        "say that again",
+        "repeat that",
+        "i missed that",
+        "i didn't catch that",
+        "what did they say",
+        "what did he say",
+        "what did she say"
+      ],
+      "do": {
+        "type": "replay",
+        "seconds": 10
+      }
     }
   ],
   "patterns": [
@@ -403,6 +438,146 @@
         "op": "down",
         "amount": "{how|amount}"
       }
+    },
+    {
+      "id": "binge_on",
+      "stage": "grammar",
+      "do": {
+        "type": "binge",
+        "on": true
+      },
+      "match": "^(?:(?:turn|switch) on|enable|start|activate|put on)\\s+(?:the\\s+)?(?:binge(?:[ -]?(?:mode|watching|watch))?|auto ?play(?:ing)?(?:\\s+mode)?)$|^(?:binge(?:[ -]?(?:mode|watching|watch))?|auto ?play(?:ing)?(?:\\s+mode)?)(?:\\s+on)?$"
+    },
+    {
+      "id": "binge_off",
+      "stage": "grammar",
+      "do": {
+        "type": "binge",
+        "on": false
+      },
+      "match": "^(?:(?:turn|switch) off|disable|stop|deactivate|no(?: more)?|cancel)\\s+(?:the\\s+)?(?:binge(?:[ -]?(?:mode|watching|watch))?|auto ?play(?:ing)?(?:\\s+mode)?)$|^(?:binge(?:[ -]?(?:mode|watching|watch))?|auto ?play(?:ing)?(?:\\s+mode)?)\\s+off$"
+    },
+    {
+      "id": "stop_after_this",
+      "stage": "grammar",
+      "do": {
+        "type": "timer",
+        "then": "stop"
+      },
+      "match": "^(?:stop|end|finish|stop playing|go home)\\s+(?:after|at the end of|when)\\s+(?:this|the|that)\\s*(?:episode|one|movie|film|show|chapter)?(?:\\s+(?:ends|is over|finishes))?$|^this is the last (?:one|episode)(?: for (?:today|tonight|now))?$|^(?:no more|don't play (?:the )?next) episodes?(?: after this(?: one)?)?$",
+      "note": "at the end of what's playing: no next episode, back to Home"
+    },
+    {
+      "id": "off_after_this",
+      "stage": "grammar",
+      "do": {
+        "type": "timer",
+        "then": "off"
+      },
+      "match": "^(?:turn off|switch off|turn the tv off|turn it off|shut (?:it )?down|power off|sleep|go to sleep)\\s+(?:the\\s+tv\\s+)?(?:after|at the end of|when)\\s+(?:this|the|that)\\s*(?:episode|one|movie|film|show|chapter)?(?:\\s+(?:ends|is over|finishes))?$"
+    },
+    {
+      "id": "off_in",
+      "stage": "grammar",
+      "do": {
+        "type": "timer",
+        "minutes": "{m|minutes!}",
+        "then": "off"
+      },
+      "match": "^(?:turn off|switch off|turn the tv off|turn it off|shut (?:it )?down|power off|sleep|go to sleep)\\s+(?:the\\s+tv\\s+)?(?:in|after)\\s+(?P<m>.+)$"
+    },
+    {
+      "id": "sleep_timer_for",
+      "stage": "grammar",
+      "do": {
+        "type": "timer",
+        "minutes": "{m|minutes!}",
+        "then": "off"
+      },
+      "match": "^(?:set\\s+(?:a|the)\\s+)?sleep timer\\s+(?:for\\s+|to\\s+|of\\s+|in\\s+)?(?P<m>.+)$"
+    },
+    {
+      "id": "stop_in",
+      "stage": "grammar",
+      "do": {
+        "type": "timer",
+        "minutes": "{m|minutes!}",
+        "then": "stop"
+      },
+      "match": "^(?:stop|stop playing|end it)\\s+(?:in|after)\\s+(?P<m>.+)$"
+    },
+    {
+      "id": "subtitles_off",
+      "stage": "grammar",
+      "do": {
+        "type": "tracks",
+        "subtitles": "off"
+      },
+      "match": "^(?:(?:turn|switch) off|disable|hide|remove|no|stop)\\s+(?:the\\s+)?(?:subtitles|subtitle|subs|captions)$|^(?:subtitles|subtitle|subs|captions)\\s+off$"
+    },
+    {
+      "id": "subtitles_on",
+      "stage": "grammar",
+      "do": {
+        "type": "tracks",
+        "subtitles": "on"
+      },
+      "match": "^(?:(?:turn|switch) on|enable|show|put on|activate|i want|give me)\\s+(?:the\\s+)?(?:subtitles|subtitle|subs|captions)$|^(?:subtitles|subtitle|subs|captions)(?:\\s+on)?$"
+    },
+    {
+      "id": "subtitles_language",
+      "stage": "grammar",
+      "do": {
+        "type": "tracks",
+        "subtitles": "{lang|language!}"
+      },
+      "match": "^(?:(?:turn on|switch to|put on|put|show|use|change to|set|i want|give me)\\s+)?(?:the\\s+)?(?P<lang>(?:simplified |traditional )?[a-z]+(?: (?:simplified|traditional))?)\\s+(?:subtitles|subtitle|subs|captions)(?:\\s+on)?$"
+    },
+    {
+      "id": "subtitles_in",
+      "stage": "grammar",
+      "do": {
+        "type": "tracks",
+        "subtitles": "{lang|language!}"
+      },
+      "match": "^(?:(?:turn on|switch|change|put|set)\\s+)?(?:the\\s+)?(?:subtitles|subtitle|subs|captions)\\s+(?:in|to|into)\\s+(?P<lang>(?:simplified |traditional )?[a-z]+(?: (?:simplified|traditional))?)$"
+    },
+    {
+      "id": "audio_original",
+      "stage": "grammar",
+      "do": {
+        "type": "tracks",
+        "audio": "original"
+      },
+      "match": "^(?:(?:switch|change|go) (?:back )?to |play (?:it )?in |put (?:it )?in |watch (?:it )?in |use )?(?:the )?original (?:audio|language|version|voices|soundtrack)$"
+    },
+    {
+      "id": "audio_language",
+      "stage": "grammar",
+      "do": {
+        "type": "tracks",
+        "audio": "{lang|language!}"
+      },
+      "match": "^(?:(?:switch to|change to|put on|put|use|set|i want)\\s+)?(?:the\\s+)?(?P<lang>(?:simplified |traditional )?[a-z]+(?: (?:simplified|traditional))?)\\s+(?:audio|dub|dubbing|voices|soundtrack|audio track)$"
+    },
+    {
+      "id": "audio_in",
+      "stage": "grammar",
+      "do": {
+        "type": "tracks",
+        "audio": "{lang|language!}"
+      },
+      "match": "^(?:(?:play|put|switch|change|watch)(?: it)?|audio|sound)\\s+(?:in|to|into)\\s+(?P<lang>(?:simplified |traditional )?[a-z]+(?: (?:simplified|traditional))?)$"
+    },
+    {
+      "id": "what_did_they_say",
+      "stage": "grammar",
+      "do": {
+        "type": "replay",
+        "seconds": 10
+      },
+      "match": "^what (?:did|was|were) (?:he|she|they|it|that|you) (?:just )?(?:say|saying)$",
+      "note": "back 10 seconds with subtitles on for a moment"
     },
     {
       "id": "youtube_on",
@@ -568,6 +743,21 @@
       },
       "unmute": {
         "describe": "unmute the sound (e.g. 'unmute')"
+      },
+      "binge": {
+        "describe": "turn binge mode on or off: the next episode starting by itself (e.g. 'turn off autoplay')"
+      },
+      "sleep_timer": {
+        "describe": "stop or turn the TV off later, or after what is playing (e.g. 'turn off in 30 minutes')"
+      },
+      "subtitles": {
+        "describe": "turn subtitles on or off, or change their language (e.g. 'spanish subtitles')"
+      },
+      "audio_language": {
+        "describe": "change the language of the audio (e.g. 'switch to the original audio')"
+      },
+      "replay": {
+        "describe": "go back a few seconds to hear something again (e.g. 'what did they say')"
       },
       "none": {
         "describe": "not a TV command, or not understandable (e.g. 'what time is it')"
