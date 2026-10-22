@@ -1294,3 +1294,21 @@ def test_a_recording_that_cant_be_saved_loses_only_the_recording(monkeypatch, tm
     monkeypatch.setattr(stt, "save_recording", full)
     assert asyncio.run(svc.keep_recording(b"\1\0" * 16000)) is None
     assert stt.delete_recordings() == 1 and not stt.recordings()         # the temporary folder's one
+
+
+def test_this_laptop_first_asks_the_hosted_model_when_it_hears_nothing(monkeypatch, tmp_path):
+    import asyncio
+    svc, server, stt = _bare_service(monkeypatch, tmp_path)
+    svc.cfg.stt_where = "local-first"
+    svc.stt, svc._stt_name = types_stt(""), "a"            # the laptop's model heard nothing
+
+    async def hosted(*a, **k):
+        return "pause", 0.0001
+    monkeypatch.setattr(stt, "hosted_transcribe", hosted)
+    text, info = asyncio.run(svc.transcribe(b"\0" * 32000))
+    assert text == "pause" and info["stt"] == "x/y" and info["stt_error"] == "this laptop heard nothing"
+    text, info = asyncio.run(svc.transcribe(b"\0" * 8000))   # a quarter second: nothing to hear, no hosted call
+    assert text == "" and info["stt"] == "local"
+    svc.stt = types_stt("volume up")
+    text, info = asyncio.run(svc.transcribe(b"\0" * 32000))
+    assert text == "volume up" and info["stt"] == "local" and "stt_error" not in info

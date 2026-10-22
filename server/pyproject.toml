@@ -1,6 +1,6 @@
 [project]
 name = "tv-agent"
-version = "0.1.0"          # released as server-v<version> (see ../RELEASING.md)
+version = "0.2.0"          # released as server-v<version> (see ../RELEASING.md)
 description = "Voice decision agent for an Android TV: mic button -> this computer decides -> the TV plays"
 readme = "README.md"
 license = "MIT"

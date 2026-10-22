@@ -37,7 +37,7 @@ class Config:
     d1_model: Path = DATA_DIR / "models/d1-3B/d1-3B-Q4_K_M.gguf"
     llama_server: str = ""                  # llama.cpp's llama-server; empty: on PATH or under ~/.local/opt
     stt_model: str = "parakeet-v2"          # speech model: "parakeet-v2" (English), "parakeet-v3" (25 languages), a path
-    stt_where: str = "local"                # "local", "hosted" (OpenRouter) or "hosted-first" (the local one if it fails)
+    stt_where: str = "local"                # "local", "hosted" (OpenRouter), or "local-first" / "hosted-first" (the other if it fails)
     stt_hosted_model: str = "mistralai/voxtral-mini-transcribe-3-0"   # an OpenRouter transcription model
     keep_recordings: bool = False           # each command's audio kept (the last 300), playable in the Activity tab
     kodi_port: int = 8080
@@ -105,8 +105,8 @@ def load() -> Config:
     if not set(cfg.decide_steps) | set(cfg.decide_off) <= set(STEPS):
         raise SystemExit(f"{CONFIG_FILE}: decide_steps and decide_off take {', '.join(STEPS)}")
     cfg.decide_steps = [s for s in cfg.decide_steps if s in STEPS] + [s for s in STEPS if s not in cfg.decide_steps]
-    if cfg.stt_where not in ("local", "hosted", "hosted-first"):
-        raise SystemExit(f"{CONFIG_FILE}: stt_where must be local, hosted or hosted-first")
+    if cfg.stt_where not in ("local", "hosted", "local-first", "hosted-first"):
+        raise SystemExit(f"{CONFIG_FILE}: stt_where must be local, hosted, local-first or hosted-first")
     if cfg.d1_where not in D1_WHERE:
         raise SystemExit(f"{CONFIG_FILE}: d1_where must be one of {', '.join(D1_WHERE)}")
     if SECRETS_FILE.exists():

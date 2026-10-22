@@ -80,8 +80,8 @@ a season often follows). If you go on talking, the early result is dropped. Meas
 what it has understood so far. Pressing the mic again sends at once; without the stream the app falls back to
 recording until 0.7 s of quiet and sending it all. Logic: `listen_stream.py`; protocol: `server.py`.
 
-Speech-to-text can also be hosted (`stt_where = "hosted"`, or `"hosted-first"` with this laptop's model as
-backup): an OpenRouter transcription model (`stt_hosted_model`, Voxtral Mini Transcribe 3 by default) gets the
+Speech-to-text can also be hosted (`stt_where = "hosted"`, or `"hosted-first"` with this laptop's model as backup,
+or `"local-first"`, hosted only when this laptop's model fails or hears nothing): an OpenRouter transcription model (`stt_hosted_model`, Voxtral Mini Transcribe 3 by default) gets the
 recording at the same checkpoints, which adds ~0.4-1 s and a small cost per command (about $0.0003 for a 5 s
 command); the local model then isn't loaded (~1 GB less memory). `keep_recordings = true` keeps each spoken
 command's audio (the last 300, in `~/.local/share/tv-agent/recordings/`, mode 600) for the panel's Activity tab
@@ -231,6 +231,8 @@ Localhost (127.0.0.1:8766), for the panel, the CLI and the MCP server, same toke
 | `GET /v1/tv/status`; `POST /v1/tv/speedtest`, `/diagnose`, `/reconnect` | the TV, its network and the ADB link |
 | `POST /v1/tv/key` `{"key"}`; `GET /v1/tv/screenshot` | a key from a fixed list; the screen as PNG |
 | `GET /v1/now-playing/link`; `POST /v1/tv/play-link` `{"url"}` | the stream the agent plays; play any http(s) link |
+| `GET /v1/tv/packages` | the TV app, Kodi and Just Player on the TV: installed, version, enabled; the app's APK SHA-256 |
+| `GET /v1/about` | this agent's version, Python, start time and the models it uses |
 
 ## Security
 

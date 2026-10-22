@@ -27,6 +27,8 @@ import asyncio
 import hmac
 import json
 import logging
+import os
+import platform
 import re
 import time
 from pathlib import Path
@@ -37,6 +39,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError
 
+from . import __version__
 from . import actions as A
 from . import activity
 from .agent import Agent
@@ -133,6 +136,12 @@ def describe(a: A.Action) -> str:
                     "watched": f"Marking {what} as watched", "unwatched": f"Marking {what} as not watched"}[a.op]
         case _:
             return "Didn't get that"
+
+
+STT_ORDER = {"local": ("local",), "hosted": ("hosted",), "local-first": ("local", "hosted"),
+             "hosted-first": ("hosted", "local")}
+HALF_SECOND = 16000             # bytes of 16 kHz 16-bit mono audio
+STARTED = time.time()
 
 
 class Service:
@@ -297,35 +306,49 @@ class Service:
 
     async def transcribe(self, pcm: bytes, where: str | None = None, model: str | None = None,
                          fallback: bool = True) -> tuple[str, dict]:
-        """The text of some audio, hosted or here as stt_where says ("hosted-first", or "hosted" with the local
-        model loaded: here when the hosted model fails, unless fallback=False), and how it went: where, how long,
-        what it cost, and a hosted failure."""
+        """The text of some audio, where stt_where says: "local-first" / "hosted-first" try the other when the
+        first fails (or this laptop's model hears nothing in half a second or more of audio); "hosted" falls back
+        to the local model when it's loaded. fallback=False: the first only (the panel comparing models). Also
+        how it went: where, how long, what it cost, and what failed before."""
         where = where or self.cfg.stt_where
+        order = list(STT_ORDER.get(where, ("local",)))
+        if where == "hosted" and self.stt is not None:
+            order.append("local")
+        if not fallback:
+            order = order[:1]
         key = self.cfg.secret("openrouter_api_key")
+        model = model or self.cfg.stt_hosted_model
         failed: dict = {}
-        if where in ("hosted", "hosted-first") and key:
-            model = model or self.cfg.stt_hosted_model
+        for i, how in enumerate(order):
             t = time.perf_counter()
-            try:
-                text, cost = await stt_mod.hosted_transcribe(self.agent.http, key, model, pcm)
-                ms = (time.perf_counter() - t) * 1000
-                self.agent.state.timings.add("stt", ms)
-                return text, {"stt": model, "stt_ms": round(ms), "stt_cost": cost}
-            except (httpx.HTTPError, ValueError, KeyError) as e:
-                log.warning("hosted speech-to-text (%s) didn't answer: %s", model, type(e).__name__)
-                failed = {"stt_error": f"{model}: {type(e).__name__}",
-                          "stt_failed_ms": round((time.perf_counter() - t) * 1000)}
-                if not fallback or (where == "hosted" and self.stt is None):
-                    return "", {"stt": model, **failed}
-        # the panel asking for this laptop's text while hosted only: loaded for this once, not kept
-        local = await self.local_stt(keep=fallback or self.cfg.stt_where != "hosted")
-        if local is None:
-            return "", {"stt": "local", "stt_error": "no local speech model", **failed}
-        t = time.perf_counter()
-        text = await asyncio.to_thread(local.transcribe, pcm)
-        ms = (time.perf_counter() - t) * 1000
-        self.agent.state.timings.add("stt", ms)
-        return text, {**failed, "stt": "local", "stt_ms": round(ms)}
+            if how == "hosted":
+                if not key:
+                    failed = {"stt_error": "no OpenRouter key"}
+                    continue
+                try:
+                    text, cost = await stt_mod.hosted_transcribe(self.agent.http, key, model, pcm)
+                except (httpx.HTTPError, ValueError, KeyError) as e:
+                    log.warning("hosted speech-to-text (%s) didn't answer: %s", model, type(e).__name__)
+                    failed = {"stt_error": f"{model}: {type(e).__name__}",
+                              "stt_failed_ms": round((time.perf_counter() - t) * 1000)}
+                    continue
+                info = {"stt": model, "stt_cost": cost}
+            else:
+                # the panel asking for this laptop's text while hosted only: loaded for this once, not kept
+                local = await self.local_stt(keep=fallback or self.cfg.stt_where != "hosted")
+                if local is None:
+                    failed = {"stt_error": "no local speech model"}
+                    continue
+                text = await asyncio.to_thread(local.transcribe, pcm)
+                info = {"stt": "local"}
+                if not text.strip() and i < len(order) - 1 and len(pcm) >= HALF_SECOND:
+                    failed = {"stt_error": "this laptop heard nothing",
+                              "stt_failed_ms": round((time.perf_counter() - t) * 1000)}
+                    continue
+            ms = (time.perf_counter() - t) * 1000
+            self.agent.state.timings.add("stt", ms)
+            return text, {**failed, **info, "stt_ms": round(ms)}
+        return "", {"stt": model if order[0] == "hosted" else "local", **failed}
 
 
 async def stream_client(svc: "Service", reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
@@ -653,8 +676,8 @@ def local_app(svc: Service) -> FastAPI:
         if "llm_private" in body:
             new["llm_private"] = bool(body["llm_private"])
         if "stt_where" in body:
-            if body["stt_where"] not in ("local", "hosted", "hosted-first"):
-                raise HTTPException(422, "stt_where: local, hosted or hosted-first")
+            if body["stt_where"] not in STT_ORDER:
+                raise HTTPException(422, f"stt_where: one of {', '.join(STT_ORDER)}")
             new["stt_where"] = body["stt_where"]
         if "stt_hosted_model" in body:
             model = str(body["stt_hosted_model"]).strip()
@@ -731,6 +754,25 @@ def local_app(svc: Service) -> FastAPI:
         info["foreground_label"] = next((a.label for a in svc.agent.rules.apps.values()
                                          if a.package == info.get("foreground")), None)
         return info
+
+    @app.get("/v1/tv/packages")
+    async def tv_packages(request: Request):
+        """The TV app and the players: installed, version, enabled (the panel's Settings and About)."""
+        svc.check(request, lan=False)
+        try:
+            return await asyncio.to_thread(tv_status.packages, svc.panel_adb)
+        except TvUnreachable as e:
+            return JSONResponse({"error": str(e)}, status_code=503)
+
+    @app.get("/v1/about")
+    async def about(request: Request):
+        """This running agent: its version, Python, since when, and the models it uses."""
+        svc.check(request, lan=False)
+        c = svc.cfg
+        return {"version": __version__, "python": platform.python_version(), "started": STARTED,
+                "pid": os.getpid(), "stt_model": c.stt_model, "stt_where": c.stt_where,
+                "stt_hosted_model": c.stt_hosted_model, "d1_model": str(c.d1_model), "d1_where": c.d1_where,
+                "hosted_d1_model": c.hosted_d1_model, "llm_model": c.llm_model, "player": c.player}
 
     @app.post("/v1/tv/speedtest")
     async def tv_speed(request: Request):

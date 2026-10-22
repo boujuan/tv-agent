@@ -66,6 +66,29 @@ def status(adb: Adb) -> dict:
     return out
 
 
+PACKAGES = {"tvagent": APP, "kodi": "org.xbmc.kodi", "just": "com.brouken.player"}
+
+
+def packages(adb: Adb) -> dict:
+    """The TV app and the two players: installed, version, enabled; the TV app's APK SHA-256 too (to match a
+    GitHub release's)."""
+    script = "; echo @@; ".join(f"dumpsys package {pkg} | grep -m3 -E 'versionName|versionCode|User 0:'"
+                                for pkg in PACKAGES.values())
+    script += f"; echo @@; sha256sum $(pm path {APP} | head -1 | cut -d: -f2) 2>/dev/null"
+    parts = adb.run(["sh", "-c", script], timeout=20).split("@@")
+    parts += [""] * (len(PACKAGES) + 1 - len(parts))
+    out = {}
+    for (key, pkg), text in zip(PACKAGES.items(), parts):
+        name = re.search(r"versionName=(\S+)", text)
+        state = re.search(r"User 0:.*?\benabled=(\d)", text)
+        out[key] = {"package": pkg, "installed": bool(name), "version": name.group(1) if name else None,
+                    "code": int(m.group(1)) if (m := re.search(r"versionCode=(\d+)", text)) else None,
+                    "enabled": state is None or state.group(1) in ("0", "1")}     # 2, 3, 4: disabled
+    if out["tvagent"]["installed"] and (m := re.match(r"\s*([0-9a-f]{64})\s", parts[len(PACKAGES)])):
+        out["tvagent"]["sha256"] = m.group(1)
+    return out
+
+
 def ping(host: str, count: int = 3) -> float | None:
     """The laptop's round trip to the TV, in ms (system ping; None if it doesn't answer)."""
     try:

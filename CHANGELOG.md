@@ -25,7 +25,7 @@ com.boujuan.tvagent`), then `tv-agent tv install tv-agent-android-<version>.apk`
   one. Local builds use it when `~/.gradle/gradle.properties` has it and the debug key otherwise;
   `build-and-install.sh` prints which.
 
-## server — unreleased
+## server 0.2.0 — 2026-10-22
 
 Rules version 2. A `rules.json` you saved before keeps working but doesn't get these: Reset to defaults in the
 panel's Decisions tab, then redo your changes. Saving rules identical to the defaults now removes `rules.json`, so
@@ -136,6 +136,10 @@ they keep following the defaults as these improve.
   `POST /v1/pipeline`).
 - `keep_recordings`: each spoken command's audio kept (the last 300, mode 600) and linked from its history entry;
   `POST /v1/transcribe` transcribes one again, locally or with any hosted model.
+- `stt_where = "local-first"`: this laptop's model, and the hosted one when it fails or hears nothing in half a
+  second or more of audio.
+- `GET /v1/tv/packages` (the TV app, Kodi, Just Player: installed, version, enabled; the app's APK SHA-256, to
+  match a release's) and `GET /v1/about` (version, Python, start time, models in use), for the panel.
 - History entries carry their timings and costs: speech-to-text (where, ms, cost), deciding (ms, the models'
   cost), time from your last word, audio length.
 - The TV over the local API: `GET /v1/tv/status` (model, Android, the TV app's version, network and Wi-Fi signal,
