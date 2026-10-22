@@ -8,7 +8,7 @@ playback and progress sync. Also the `tv-agent` command line and the MCP server.
 
 | Kind | Examples | What happens |
 |---|---|---|
-| Films and series | "play The Bear season 3 episode 2", "put on Dune Part Two", "play Severance from the start", "play la casa de papel" | Your Stremio library first, then Cinemeta (d1 picks between close candidates: *la casa de papel* is Money Heist). Plays from your addons; resumes where you stopped unless you say "from the start" |
+| Films and series | "play The Bear season 3 episode 2", "put on Dune Part Two", "play Severance from the start", "play la casa de papel", "play el hoyo" | Your Stremio library first, then Cinemeta and your metadata addons side by side (AIOMetadata knows Spanish names: *el hoyo* is The Platform); Cinemeta's popularity, then d1, settle close calls. Plays from your addons; resumes where you stopped unless you say "from the start" |
 | Continue / next | "continue The Bear", "keep watching", "carry on with the show", "next episode", "previous episode" | Stremio's Continue Watching; past 90% it goes on to the next episode. With the player open, "continue" just unpauses |
 | Same show, other episode | "go to season 4 episode 2", "play episode five", "season two" | No title: the series that's on (the one the agent started, else your latest in Continue Watching) |
 | Stremio page | "show me The Office in Stremio" | Opens the title (or episode) in Stremio without playing |
@@ -20,6 +20,9 @@ playback and progress sync. Also the `tv-agent` command line and the MCP server.
 | Sleep timer | "stop after this episode", "turn the TV off after this one", "stop in 30 minutes", "turn off in an hour", "cancel the sleep timer" | Stops (then Home) or puts the TV to sleep; "after this one" wins over binge mode |
 | Subtitles, audio | "subtitles on", "subtitles off", "Spanish subtitles", "original audio", "audio in English" | Kodi: the file's own track, else your subtitle addons for that release |
 | Missed a line | "what did they say?", "say that again" | Back 10 s, subtitles on for a moment |
+| Lists | "what was I watching?", "what's new?", "new films", then "number 2" / "the second one" | A numbered list on the TV (posters); the remote's OK or number keys pick too |
+| Newest episode | "play the latest episode of The Bear" | The newest episode out |
+| Your library | "add this to my library", "remove Friends from my library", "mark this as watched", "mark The Bear season 3 as watched", "mark it as unwatched" | Written to your Stremio library, with Stremio's own per-episode watched marks |
 
 Audio and subtitles: a title made in a country that speaks `native_language` plays in it without subtitles;
 anything else plays in `audio_language` (when the file has it) with the first available of `subtitle_languages`

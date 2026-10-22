@@ -29,6 +29,17 @@
             </intent-filter>
         </activity>
 
+        <!-- A numbered list from tv-agent ("what was I watching?"): "number 2" or OK picks. Opened over adb only,
+             like the screens below. -->
+        <activity
+            android:name=".ChoicesActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:permission="android.permission.DUMP"
+            android:theme="@style/Choices" />
+
         <!-- Phase 0 microphone probe and the agent's on-screen messages: only shell (adb) can reach these,
              since it holds DUMP and ordinary apps can't. -->
         <activity

@@ -7,15 +7,15 @@ computer on the same network turns the speech into text, decides what you meant 
 your **Stremio** account and addons played straight into Just Player or Kodi, without opening Stremio.
 
 ```
-Remote mic button ─► TV app ("Listening…", records until you stop talking)
-      │ 16 kHz audio over the LAN, with a token
+Remote mic button ─► TV app ("Listening…", streams the mic while you speak)
+      │ 16 kHz audio over the LAN, with a token; decided in your pause (~0.3 s after the last word)
       ▼
 This computer: tv-agent daemon
    speech-to-text   Parakeet TDT 0.6B v2 (CPU, ~0.1-0.2 s)
-   decide           clean-up → fixed phrases → pattern rules → d1-3B (GPU, ~0.65 s, ~4% of commands) → one typed action
-   do it            ADB: apps, deep links, media keys, volume
-                    Stremio account + Cinemeta + your addons → best cached debrid link → Just Player or Kodi
-   afterwards       the player's position → your Stremio library (Continue Watching)
+   decide           clean-up → fixed phrases → pattern rules → d1-3B (GPU, ~0.9 s, ~4% of commands) → one typed action
+   do it            ADB: apps, deep links, media keys, volume, numbered lists on screen
+                    Stremio account + Cinemeta/AIOMetadata + your addons → best cached debrid link → Kodi (or Just Player)
+   afterwards       the player's position and watched marks → your Stremio library; binge mode, sleep timer
 ```
 
 Built and measured on a TCL 65Q6C (Google TV, Android 14) with a Ryzen 7 8845HS / Radeon 780M laptop running
@@ -27,7 +27,7 @@ CachyOS (KDE Plasma). Anything it doesn't understand does nothing ("Didn't get t
 |---|---|---|---|
 | [`server/`](server/README.md) | The daemon (`tv-agent serve`), the CLI, the decision rules and the MCP server for Claude | Linux (systemd user services) | `server-vX.Y.Z` |
 | [`panel/`](panel/README.md) | Desktop app with a tray icon: status, services, resource use, activity, decision rules, settings, laptop mic | Linux (Qt 6 / PySide6) | `panel-vX.Y.Z` |
-| [`android/`](android/README.md) | The TV app the mic button opens (records, sends, shows the reply) | Android TV 14 (API 34) | `android-vX.Y.Z` |
+| [`android/`](android/README.md) | The TV app the mic button opens (streams the mic, shows the reply) and its on-screen lists | Android TV 14 (API 34) | `android-vX.Y.Z` |
 | [`packaging/`](packaging/README.md) | Package recipes (AUR drafts for now) | | |
 | `docs/` | [Phase 0](docs/phase0/README.md) measurements (mic path, models); [research and decisions, 2026-10-22](docs/research-2026-10-22.md) (players, decision model, speech-to-text, add-on data, roadmap) | | |
 

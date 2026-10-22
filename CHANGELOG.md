@@ -10,6 +10,9 @@ Upgrading from 0.3.0, which was signed with a debug key: uninstall it once (`tv-
 com.boujuan.tvagent`), then `tv-agent tv install tv-agent-android-<version>.apk`, which pairs again.
 
 ### Added
+- A numbered list on the TV for "what was I watching?", "what's new?" and "new films", with posters: say "number
+  2", or pick with OK or a number key. It stays visible behind the listening pill and closes when playback starts,
+  on BACK, or after 90 s (`ChoicesActivity`, opened over adb only).
 - Streams the remote's microphone to tv-agent while you speak (TCP, `stream_port`, sent at pairing) and shows
   what it has understood so far; tv-agent decides during your pause and tells the app to stop. Falls back to
   sending the recording at the end when the stream isn't available (an older agent, a dropped connection).
@@ -60,6 +63,9 @@ panel's Decisions tab, then redo your changes.
 - Kodi is brought to the front when it was left running in the background (a film played behind Home).
 - Audio: commentary and audio-description tracks are never picked, and Spanish prefers Castilian. Subtitles:
   plain before SDH / hearing-impaired, Castilian before Latin American.
+- A title said has to match a library item's whole name (or the name before its subtitle): "dune parte dos" no
+  longer plays your "Dune".
+- d1 chooses between 32 intents (~0.88 s instead of ~0.74 s, for the ~4% of commands that reach it).
 
 ### Added
 - The TV app's audio stream (port 8767): decided ~0.25-0.3 s after your last word for complete commands
@@ -69,9 +75,9 @@ panel's Decisions tab, then redo your changes.
 - Subtitles from your Stremio subtitle addons in Kodi: asked like Stremio asks (the chosen file's hash, size and
   name), and added with `Player.AddSubtitle` for the languages of your list the file doesn't have, the one to show
   last. The file's own subtitles still come first for a language it has.
-- `eval/commands.jsonl`: 698 generated, labelled commands (508 for tuning, 190 held out) from
+- `eval/commands.jsonl`: 761 generated, labelled commands (551 for tuning, 210 held out) from
   `eval/build_commands.py`; `tv-agent eval --file … --split dev|test` scores them by category. Current rules:
-  698/698, with d1 needed for ~4% of them.
+  761/761, with d1 needed for ~4% of them.
 - Binge mode, on by default ("binge mode on/off", `binge` in config.toml): when an episode ends, the next one
   starts by itself. It's found, its stream chosen and its link checked 20 s into the episode, so it starts in
   ~3-4 s (measured: The Office S3E2 → S3E3). After a film or a season's last episode, back to Home instead of
@@ -81,6 +87,19 @@ panel's Decisions tab, then redo your changes.
 - Subtitles and audio on request in Kodi: "subtitles on/off", "Spanish subtitles", "subtitles in English",
   "original audio", "Spanish audio". A subtitle language the file lacks comes from your subtitle addons.
 - "What did they say?": back 10 s, with subtitles for a moment when they were off.
+- Lists on the TV: "what was I watching?" (Continue Watching), "what's new?" (the newest episode of each of your
+  shows that you haven't got to), "new films" (your addons' "Latest" list); "number 2", "the second one" or the
+  remote plays from it (`/v1/choose` for the TV app).
+- "Play the latest episode of The Bear": the newest episode out.
+- Your Stremio library by voice: "add this to my library", "remove Friends from my library", "mark this as
+  watched", "mark The Bear season 3 as watched", "mark it as unwatched". Episodes get Stremio's own watched marks,
+  lined up with the episode list your Stremio uses (its first metadata addon); marks that can't be lined up are
+  left alone. Episodes watched past 90% get their mark too.
+- Title search also asks your metadata addons (AIOMetadata), which know Spanish and other names and leave out
+  obscure namesakes: "el hoyo", "padre de familia", "las chicas del cable" and "dune parte dos" now play the right
+  title (27/27 Spanish and 34/34 English test titles). A slow Cinemeta search (4-8 s when its cache misses) no
+  longer holds a play up when another source has the exact name; Cinemeta's popularity settles films against
+  series of the same name ("regreso al futuro" is the 1985 film).
 - The volume halves while the pill listens (the remote's mic hears the TV) and comes back after: Kodi's own
   volume while Kodi plays, otherwise the TV's. Nothing is paused; "louder" said meanwhile starts from the level
   before.

@@ -19,6 +19,7 @@ class PlayTitle(_Action):
     episode: int | None = Field(None, ge=0, le=2000)
     kind: Literal["movie", "series"] | None = None
     restart: bool = False
+    latest: bool = False                 # "the latest episode of …": the newest one out
 
 
 class ContinueWatching(_Action):
@@ -97,17 +98,38 @@ class Replay(_Action):
     seconds: int = Field(10, ge=1, le=120)
 
 
+class ShowList(_Action):
+    type: Literal["show_list"] = "show_list"   # a numbered list on the TV; "number 2" plays from it
+    list: Literal["recent", "new", "movies"]   # what you were watching; new episodes of your shows; new films
+
+
+class Pick(_Action):
+    type: Literal["pick"] = "pick"             # "number 2": from the list on screen
+    number: int = Field(ge=1, le=20)
+
+
+class LibraryEdit(_Action):
+    type: Literal["library"] = "library"
+    op: Literal["add", "remove", "watched", "unwatched"]
+    title: Title | None = None                 # None: what's playing, else what you watched last
+    season: int | None = Field(None, ge=0, le=100)
+    episode: int | None = Field(None, ge=0, le=2000)
+    kind: Literal["movie", "series"] | None = None
+
+
 class Unclear(_Action):
     type: Literal["none"] = "none"
     heard: str = ""
 
 
 Action = Annotated[Union[PlayTitle, ContinueWatching, NextEpisode, OpenInStremio, YouTube, Twitch, OpenApp, Home,
-                         Transport, Volume, Binge, Timer, Tracks, Replay, Unclear], Field(discriminator="type")]
+                         Transport, Volume, Binge, Timer, Tracks, Replay, ShowList, Pick, LibraryEdit, Unclear],
+                   Field(discriminator="type")]
 ACTION = TypeAdapter(Action)
 ACTION_TYPES = {m.model_fields["type"].default: m for m in (PlayTitle, ContinueWatching, NextEpisode, OpenInStremio,
                                                              YouTube, Twitch, OpenApp, Home, Transport, Volume, Binge,
-                                                             Timer, Tracks, Replay, Unclear)}
+                                                             Timer, Tracks, Replay, ShowList, Pick, LibraryEdit,
+                                                             Unclear)}
 
 
 def parse(data: str | dict) -> Action:

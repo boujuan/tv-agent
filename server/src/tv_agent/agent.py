@@ -6,20 +6,22 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 import httpx
-from rapidfuzz import fuzz
 
 from . import __version__, languages, twitch, youtube
-from .actions import (Action, Binge, ContinueWatching, Home, NextEpisode, OpenApp, OpenInStremio, PlayTitle,
-                      Replay, Timer, Tracks, Transport, Twitch, Unclear, Volume, YouTube)
+from .actions import (Action, Binge, ContinueWatching, Home, LibraryEdit, NextEpisode, OpenApp, OpenInStremio, Pick,
+                      PlayTitle, Replay, ShowList, Timer, Tracks, Transport, Twitch, Unclear, Volume, YouTube)
 from .config import CONFIG_DIR, Config, set_value
 from .decide import rules as rules_mod
 from .decide.d1 import D1
 from .state import NowPlaying, State
-from .stremio import cinemeta, progress, streams, subtitles
-from .stremio.account import Account, Addon
+from .stremio import cinemeta, progress, streams, subtitles, watched
+from .stremio import search as title_search
+from .stremio.account import Account, Addon, now_iso
+from .stremio import library as library_mod
 from .stremio.library import Library
 from .tv import apps, justplayer, media
 from .tv.adb import Adb
@@ -27,6 +29,9 @@ from .tv.kodi import Kodi, KodiError
 
 log = logging.getLogger(__name__)
 SAY_RECEIVER = "com.boujuan.tvagent/.SayReceiver"
+CHOICES = "com.boujuan.tvagent/.ChoicesActivity"
+LIST_SIZE = 6                # rows that fit the TV app's list
+LIST_TTL = 300              # "number 2" refers to a list shown in the last 5 minutes
 NOW_PLAYING_FILE = CONFIG_DIR / "now-playing.json"
 
 
@@ -34,6 +39,24 @@ NOW_PLAYING_FILE = CONFIG_DIR / "now-playing.json"
 class Outcome:
     ok: bool
     say: str
+
+
+@dataclass(frozen=True)
+class ListItem:
+    imdb: str
+    kind: str
+    name: str
+    label: str                # "The Bear · S3E2"
+    detail: str               # "12 min left", "2 days ago · Doors"
+    poster: str = ""
+    video: str | None = None  # the episode to play; None: carry on where you were (or the film)
+
+
+@dataclass(frozen=True)
+class Shown:
+    title: str
+    items: list[ListItem]
+    at: float
 
 
 class DryAdb:
@@ -65,6 +88,17 @@ def _runtime_min(meta: dict) -> int | None:
     return int(m.group(1)) if m else None
 
 
+def _ago(when: datetime, now: datetime) -> str:
+    days = (now.date() - when.date()).days
+    if days <= 0:
+        return "Today"
+    if days == 1:
+        return "Yesterday"
+    if days < 14:
+        return f"{days} days ago"
+    return f"{days // 7} weeks ago" if days < 60 else when.strftime("%-d %b")
+
+
 def _episode_label(name: str, v: dict) -> str:
     return f"{name} · S{v['season']}E{v.get('episode', 0)}"
 
@@ -94,6 +128,7 @@ class Agent:
         self._next_up: tuple[str, str, streams.Stream, float] | None = None   # (video id, label, stream, when)
         self._after_this: str | None = None      # "stop" / "off" when what's playing ends (sleep timer)
         self._sleep: asyncio.Task | None = None   # "turn off in 30 minutes"
+        self._shown: Shown | None = None         # the list on the TV, for "number 2"
         self._user_stopped = False               # a stop that was asked for isn't the end of an episode
         self._duck: asyncio.Task | None = None
         self._ducked: tuple[str, int] | None = None   # ("kodi" or "tv", the volume before listening)
@@ -263,19 +298,30 @@ class Agent:
 
     async def find_title(self, title: str, kind: str | None, season: int | None = None,
                          utterance: str | None = None) -> cinemeta.Meta | None:
-        """Cinemeta's candidates of both kinds; d1 picks one unless a candidate clearly wins on its own."""
+        """Candidates of both kinds from Cinemeta and your metadata addons (search.py); d1 picks one unless a
+        candidate clearly wins on its own."""
         if kind is None and season is not None:
             kind = "series"   # "the bear season 3" is the 2022 series, not the 1989 film
-        hits = cinemeta.ranked(title, await cinemeta.search(self.http, title), kind)
+        try:
+            addons = await self.addons()
+        except Exception as e:
+            log.info("addons unavailable for the title search (%s); Cinemeta only", type(e).__name__)
+            addons = []
+        hits = cinemeta.ranked(title, await title_search.search(self.http, title, addons), kind)
         if kind:
             hits = [h for h in hits if h[1].type == kind] or hits
-        if not hits or (hits[0][1].rank > 0 and fuzz.WRatio(title.lower(), hits[0][1].name.lower()) < 70):
+        if not hits or (min(hits[0][1].rank, hits[0][1].extra_rank) > 0 and cinemeta.similarity(title, hits[0][1]) < 70):
             return None
-        if len(hits) == 1 or (hits[0][0] - hits[1][0] >= 20 and hits[0][1].name.lower() == title.lower()):
+        if self._decisive(title, hits):
             return hits[0][1]
-        # Candidates: Cinemeta's own top hit of each kind (its search knows alternate titles: "la casa de papel"
-        # is Money Heist) plus the best name matches. Those top hits go first, since d1 leans to the first option.
-        firsts = [h for h in hits if h[1].rank == 0]
+        # A close call: Cinemeta's popularity of the leading few tells a famous title from its namesakes.
+        pops = await self._popularity([m for _, m in hits[:4]])
+        hits = cinemeta.ranked(title, [m for _, m in hits], kind, pops)
+        if self._decisive(title, hits):
+            return hits[0][1]
+        # Candidates: each source's top hit of each kind (Cinemeta's search knows alternate titles: "la casa de
+        # papel" is Money Heist) plus the best name matches. Those top hits go first, since d1 leans to the first.
+        firsts = [h for h in hits if h[1].rank == 0 or h[1].extra_rank == 0]
         top = (firsts + [h for h in hits if h not in firsts])[:self.rules.title_candidates]
         try:
             pick = await self.d1.choice(utterance or f"play {title}", self.rules.title_question,
@@ -285,6 +331,19 @@ class Agent:
         except (httpx.HTTPError, KeyError, ValueError, IndexError) as e:
             log.warning("d1 unavailable for title choice (%s); using the best match", type(e).__name__)
             return top[0][1]
+
+    @staticmethod
+    def _decisive(title: str, hits: list[tuple[float, cinemeta.Meta]]) -> bool:
+        return len(hits) == 1 or (hits[0][0] - hits[1][0] >= 20 and title_search.said_exactly(title, hits[0][1]))
+
+    async def _popularity(self, metas: list[cinemeta.Meta]) -> dict[str, float]:
+        async def one(m: cinemeta.Meta) -> tuple[str, float]:
+            try:
+                found = await asyncio.wait_for(cinemeta.meta(self.http, m.type, m.id), 1.5)
+                return m.id, float(found.get("popularity") or 0)
+            except Exception:
+                return m.id, 0.0
+        return dict(await asyncio.gather(*(one(m) for m in metas)))
 
     async def resolve(self, title: str, kind: str | None, season: int | None) -> tuple[str, str, str] | None:
         """(imdb id, type, name): your library first (what you watch), then Cinemeta."""
@@ -466,8 +525,10 @@ class Agent:
 
         async def follow():
             try:
+                videos = await self.stremio_videos(np.imdb_id) if np.kind == "series" else None
                 how, last, duration = await progress.track(just_poll if np.player == "just" else kodi_poll,
-                                                           self.account, self.library, np, meta)
+                                                           self.account, self.library, np, meta,
+                                                           video_ids=[v["id"] for v in videos or []])
                 # Its own task: starting the next episode ends this follower.
                 self._end_task = asyncio.create_task(self._ended(np, how, last, duration))
             finally:
@@ -731,6 +792,9 @@ class Agent:
                 if not match:
                     return Outcome(False, f"{name} has no season {season}" + (f" episode {a.episode}" if a.episode else ""))
                 v = match[0]
+            elif a.latest:
+                now = datetime.now(timezone.utc)
+                v = ([x for x in eps if (when := cinemeta.released(x)) and when <= now] or eps)[-1]
             elif state.get("video_id") and not a.restart:
                 v = next((x for x in eps if x["id"] == state["video_id"]), eps[0])   # "play the bear": where you were
             else:
@@ -753,6 +817,10 @@ class Agent:
             item = row[0] if row else None
         if not item:
             return Outcome(False, f"Nothing to continue{' for ' + a.title if a.title else ''}")
+        return await self._continue_item(item)
+
+    async def _continue_item(self, item: dict) -> Outcome:
+        """Where you stopped in this library item, or the next episode when you'd finished that one."""
         imdb, kind, name = item["_id"], item["type"], item.get("name", "")
         st = item.get("state") or {}
         meta = await cinemeta.meta(self.http, kind, imdb)
@@ -790,6 +858,203 @@ class Agent:
         self._next_up = None
         return await self.play(imdb, "series", name, eps[i]["id"], _episode_label(name, eps[i]), meta,
                                prepared=prepared)
+
+    # ---- lists on the TV: what you were watching, what's new; "number 2" ----
+
+    async def _show_list(self, a: ShowList) -> Outcome:
+        if a.list == "recent":
+            title, items = "Continue watching", await self._recent_items()
+        elif a.list == "new":
+            title, items = "New episodes of your shows", await self._new_episode_items()
+        else:
+            title, items = "New films", await self._new_film_items()
+        if not items:
+            return Outcome(False, {"recent": "Nothing to continue", "new": "No new episodes of your shows lately",
+                                   "movies": "None of your addons has a list of new films"}[a.list])
+        self._shown = Shown(title, items, time.monotonic())
+        await self._show_on_tv(self._shown)
+        return Outcome(True, f"{title}: say a number")
+
+    async def _show_on_tv(self, shown: Shown):
+        """The TV app's numbered list (ChoicesActivity); the remote's OK or number keys pick too."""
+        data = json.dumps({"title": shown.title, "items": [{"label": i.label, "detail": i.detail, "poster": i.poster}
+                                                           for i in shown.items]})
+        try:
+            out = await self.tv(lambda adb: adb.run(["am", "start", "-n", CHOICES, "--es", "list", data], timeout=6))
+        except Exception as e:
+            out = f"Error: {type(e).__name__}"
+        if "Error" in out:                       # a TV app from before lists: the list as a message
+            log.info("list on the TV: %s", out.strip()[:120])
+            await self.notify("  ".join(f"{n}. {i.label}" for n, i in enumerate(shown.items, 1)))
+
+    async def _recent_items(self) -> list[ListItem]:
+        out = []
+        for item in (await self.library.continue_watching())[:LIST_SIZE]:
+            st = item.get("state") or {}
+            label = item.get("name", "")
+            if item.get("type") == "series" and (m := re.match(r"^tt\d+:(\d+):(\d+)$", st.get("video_id") or "")):
+                label += f" · S{m.group(1)}E{m.group(2)}"
+            left = (st.get("duration") or 0) - (st.get("timeOffset") or 0)
+            detail = f"{round(left / 60000)} min left" if left >= 60000 else "Nearly done"
+            out.append(ListItem(item["_id"], item.get("type", "movie"), item.get("name", ""), label, detail,
+                                item.get("poster") or ""))
+        return out
+
+    async def _new_episode_items(self, days: int = 120) -> list[ListItem]:
+        """The newest episode out of each show in your library, newest first, unless you've got to it already."""
+        shows = {i["_id"]: i for i in await self.library.items() if i.get("type") == "series"
+                 and cinemeta.IMDB_ID.match(i.get("_id", "")) and (not i.get("removed") or i.get("temp"))}
+        now = datetime.now(timezone.utc)
+        rows = []
+        for m in await cinemeta.last_videos(self.http, list(shows)):
+            item = shows.get(m.get("id"))
+            out = [(when, v) for v in m.get("videos") or [] if v.get("season") and cinemeta.VIDEO_ID.match(v.get("id", ""))
+                   and (when := cinemeta.released(v)) and when <= now]
+            if not item or not out:
+                continue
+            when, v = max(out, key=lambda x: (x[0], x[1]["season"], x[1].get("episode") or 0))
+            on = re.match(r"^tt\d+:(\d+):(\d+)$", (item.get("state") or {}).get("video_id") or "")
+            if (now - when).days > days or (on and (int(on.group(1)), int(on.group(2))) >= (v["season"], v.get("episode") or 0)):
+                continue
+            name = item.get("name") or m.get("name", "")
+            detail = _ago(when, now) + (f" · {v['name']}" if v.get("name") and v["name"] != "TBA" else "")
+            rows.append((when, ListItem(item["_id"], "series", name, _episode_label(name, v), detail,
+                                        m.get("poster") or item.get("poster") or "", v["id"])))
+        rows.sort(key=lambda r: r[0], reverse=True)
+        return [item for _, item in rows[:LIST_SIZE]]
+
+    async def _new_film_items(self) -> list[ListItem]:
+        """The first film catalog of your addons named like "Latest", else "Trending" / "Popular"."""
+        found = []
+        for a in await self.addons():
+            for c in a.manifest.get("catalogs", []):
+                name = (c.get("name") or "").lower()
+                if c.get("type") != "movie" or any(e.get("isRequired") for e in c.get("extra", [])):
+                    continue
+                pref = 0 if re.search(r"\b(?:latest|new|recent)\b", name) else (
+                    1 if re.search(r"\b(?:trending|popular)\b", name) else None)
+                if pref is not None:
+                    found.append((pref, a, c["id"]))
+        if not found:
+            return []
+        _, addon, catalog = min(found, key=lambda f: f[0])
+        r = await self.http.get(f"{addon.base}/catalog/movie/{catalog}.json", timeout=10)
+        r.raise_for_status()
+        out = []
+        for m in r.json().get("metas") or []:
+            mid = m.get("imdb_id") or m.get("id") or ""
+            if not cinemeta.IMDB_ID.match(mid):
+                continue
+            year = str(m.get("releaseInfo") or m.get("year") or "")[:4]
+            genres = ", ".join((m.get("genres") or m.get("genre") or [])[:2])
+            rating = f"★ {m['imdbRating']}" if m.get("imdbRating") not in (None, "", "N/A") else ""
+            out.append(ListItem(mid, "movie", m.get("name", ""), f"{m.get('name', '')} ({year})" if year else
+                                m.get("name", ""), " · ".join(x for x in (rating, genres) if x), m.get("poster") or ""))
+            if len(out) == LIST_SIZE:
+                break
+        return out
+
+    async def _pick(self, a: Pick) -> Outcome:
+        shown = self._shown
+        if not shown or time.monotonic() - shown.at > LIST_TTL:
+            return Outcome(False, "No list on screen")
+        if a.number > len(shown.items):
+            return Outcome(False, f"The list goes up to {len(shown.items)}")
+        it = shown.items[a.number - 1]
+        if it.video is None and (item := await self.library.get(it.imdb)) and library_mod.in_continue_watching(item):
+            return await self._continue_item(item)
+        meta = await cinemeta.meta(self.http, it.kind, it.imdb)
+        state = ((await self.library.get(it.imdb)) or {}).get("state") or {}
+        video = it.video or it.imdb
+        resume = state.get("timeOffset", 0) if state.get("video_id") == video else 0
+        return await self.play(it.imdb, it.kind, it.name, video, it.label, meta, resume)
+
+    # ---- your Stremio library: add, remove, mark watched ----
+
+    async def stremio_videos(self, imdb: str) -> list[dict] | None:
+        """The show's videos in the order your Stremio lists them (its first addon with metadata for the title,
+        else Cinemeta): watched marks are bits in that order. None when it can't be had."""
+        try:
+            for a in await self.addons():
+                if a.serves("meta", "series", imdb):
+                    r = await self.http.get(f"{a.base}/meta/series/{imdb}.json", timeout=8, follow_redirects=True)
+                    r.raise_for_status()
+                    return [v for v in (r.json().get("meta") or {}).get("videos") or []
+                            if isinstance(v, dict) and v.get("id")] or None
+            return (await cinemeta.meta(self.http, "series", imdb)).get("videos") or None
+        except Exception as e:
+            log.info("episode list for watched marks: %s", type(e).__name__)
+            return None
+
+    async def _subject(self, a: LibraryEdit) -> tuple[str, str, str, int | None, int | None] | None:
+        """(imdb id, kind, name, season, episode) a library command is about: the title said, else what's
+        playing, else what you watched last. No season: the whole title."""
+        if a.title:
+            found = await self.resolve(a.title, a.kind, a.season)
+            return (*found, a.season, a.episode) if found else None
+        np = self.state.now_playing
+        if np:
+            m = re.match(r"^tt\d+:(\d+):(\d+)$", np.video_id)
+            return np.imdb_id, np.kind, np.name, *((int(m.group(1)), int(m.group(2))) if m else (None, None))
+        row = await self.library.continue_watching()
+        if not row:
+            return None
+        m = re.match(r"^tt\d+:(\d+):(\d+)$", (row[0].get("state") or {}).get("video_id") or "")
+        return (row[0]["_id"], row[0]["type"], row[0].get("name", ""),
+                *((int(m.group(1)), int(m.group(2))) if m else (None, None)))
+
+    async def _library(self, a: LibraryEdit) -> Outcome:
+        if not self.account:
+            return Outcome(False, "Not signed in to Stremio (tv-agent setup stremio)")
+        found = await self._subject(a)
+        if not found:
+            return Outcome(False, f"Couldn't find “{a.title}”" if a.title else "Nothing playing or watched lately")
+        imdb, kind, name, season, episode = found
+        now = now_iso()
+        item = await self.library.get(imdb)
+        if item is None:
+            if a.op in ("remove", "unwatched"):
+                return Outcome(False, f"{name} isn't in your library")
+            meta = await cinemeta.meta(self.http, kind, imdb)
+            item = {"_id": imdb, "name": name, "type": kind, "poster": meta.get("poster"), "posterShape": "poster",
+                    "removed": True, "temp": True, "_ctime": now, "behaviorHints": {}, "state": {}}
+        item = {**item, "state": dict(item.get("state") or {}), "_mtime": now}
+        st, on = item["state"], a.op == "watched"
+        what = name
+        if a.op == "add":
+            item.update(removed=False, temp=False)
+            say = f"Added {name} to your library"
+        elif a.op == "remove":
+            item.update(removed=True, temp=False)
+            say = f"Removed {name} from your library"
+        elif kind == "movie":
+            st.update(flaggedWatched=int(on), timesWatched=max(1, st.get("timesWatched") or 0) if on else 0)
+            if on:
+                st.update(timeOffset=0, lastWatched=now)
+            say = f"{name}: marked as {'watched' if on else 'not watched'}"
+        else:
+            videos = await self.stremio_videos(imdb)
+            if not videos:
+                return Outcome(False, "Couldn't get the episode list; nothing changed")
+            ids = [v["id"] for v in videos]
+            if season is not None and episode is not None:
+                chosen = [f"{imdb}:{season}:{episode}"]
+                what = f"{name} S{season}E{episode}"
+            else:                              # a season, or the whole show: the episodes out so far
+                today = datetime.now(timezone.utc)
+                chosen = [v["id"] for v in videos if v.get("season") and (season is None or v["season"] == season)
+                          and (when := cinemeta.released(v)) and when <= today]
+                what = f"{name} season {season}" if season is not None else name
+            marks = watched.mark(st.get("watched"), ids, chosen, on)
+            if not chosen or marks is None:
+                return Outcome(False, f"Couldn't line up Stremio's watched marks for {what}; nothing changed")
+            st["watched"] = marks
+            if on and st.get("video_id") in chosen:
+                st["timeOffset"] = 0
+            say = f"{what}: marked as {'watched' if on else 'not watched'}"
+        await self.account.put([item])
+        self.library.invalidate()
+        return Outcome(True, say)
 
     # ---- executors: apps, links, transport, volume ----
 

@@ -696,3 +696,66 @@
 {"text": "say that again", "expect": {"type": "replay", "seconds": 10}, "cat": "replay", "split": "dev"}
 {"text": "i missed that", "expect": {"type": "replay", "seconds": 10}, "cat": "replay", "split": "dev"}
 {"text": "Repeat that.", "expect": {"type": "replay", "seconds": 10}, "cat": "replay", "split": "dev"}
+{"text": "What was i watching.", "expect": {"type": "show_list", "list": "recent"}, "cat": "list_recent", "split": "test"}
+{"text": "could you what were we watching", "expect": {"type": "show_list", "list": "recent"}, "cat": "list_recent", "split": "dev"}
+{"text": "what have i been watching lately", "expect": {"type": "show_list", "list": "recent"}, "cat": "list_recent", "split": "dev"}
+{"text": "can you show me what i was watching", "expect": {"type": "show_list", "list": "recent"}, "cat": "list_recent", "split": "dev"}
+{"text": "show my continue watching", "expect": {"type": "show_list", "list": "recent"}, "cat": "list_recent", "split": "dev"}
+{"text": "Open continue watching.", "expect": {"type": "show_list", "list": "recent"}, "cat": "list_recent", "split": "test"}
+{"text": "what did we watch last please", "expect": {"type": "show_list", "list": "recent"}, "cat": "list_recent", "split": "test"}
+{"text": "could you recently watched", "expect": {"type": "show_list", "list": "recent"}, "cat": "list_recent", "split": "dev"}
+{"text": "could you what's new", "expect": {"type": "show_list", "list": "new"}, "cat": "list_new", "split": "dev"}
+{"text": "Anything new.", "expect": {"type": "show_list", "list": "new"}, "cat": "list_new", "split": "test"}
+{"text": "is there anything new on my shows", "expect": {"type": "show_list", "list": "new"}, "cat": "list_new", "split": "dev"}
+{"text": "any new episodes", "expect": {"type": "show_list", "list": "new"}, "cat": "list_new", "split": "dev"}
+{"text": "uh new episodes", "expect": {"type": "show_list", "list": "new"}, "cat": "list_new", "split": "test"}
+{"text": "show me new episodes", "expect": {"type": "show_list", "list": "new"}, "cat": "list_new", "split": "test"}
+{"text": "what's new this week", "expect": {"type": "show_list", "list": "new"}, "cat": "list_new", "split": "dev"}
+{"text": "Are there any new episodes of my shows.", "expect": {"type": "show_list", "list": "new"}, "cat": "list_new", "split": "test"}
+{"text": "new movies", "expect": {"type": "show_list", "list": "movies"}, "cat": "list_movies", "split": "dev"}
+{"text": "Show me new films.", "expect": {"type": "show_list", "list": "movies"}, "cat": "list_movies", "split": "test"}
+{"text": "What new movies are there.", "expect": {"type": "show_list", "list": "movies"}, "cat": "list_movies", "split": "dev"}
+{"text": "latest movies", "expect": {"type": "show_list", "list": "movies"}, "cat": "list_movies", "split": "dev"}
+{"text": "Any new films now.", "expect": {"type": "show_list", "list": "movies"}, "cat": "list_movies", "split": "test"}
+{"text": "number one", "expect": {"type": "pick", "number": 1}, "cat": "pick", "split": "dev"}
+{"text": "the first one now", "expect": {"type": "pick", "number": 1}, "cat": "pick", "split": "dev"}
+{"text": "Two.", "expect": {"type": "pick", "number": 2}, "cat": "pick", "split": "dev"}
+{"text": "option two", "expect": {"type": "pick", "number": 2}, "cat": "pick", "split": "dev"}
+{"text": "hey tv three", "expect": {"type": "pick", "number": 3}, "cat": "pick", "split": "dev"}
+{"text": "could you the third one", "expect": {"type": "pick", "number": 3}, "cat": "pick", "split": "dev"}
+{"text": "Play number four.", "expect": {"type": "pick", "number": 4}, "cat": "pick", "split": "test"}
+{"text": "option four", "expect": {"type": "pick", "number": 4}, "cat": "pick", "split": "dev"}
+{"text": "option five", "expect": {"type": "pick", "number": 5}, "cat": "pick", "split": "test"}
+{"text": "Number 5.", "expect": {"type": "pick", "number": 5}, "cat": "pick", "split": "test"}
+{"text": "pick the sixth one", "expect": {"type": "pick", "number": 6}, "cat": "pick", "split": "dev"}
+{"text": "Play number six.", "expect": {"type": "pick", "number": 6}, "cat": "pick", "split": "test"}
+{"text": "Number seven.", "expect": {"type": "pick", "number": 7}, "cat": "pick", "split": "dev"}
+{"text": "option seven please", "expect": {"type": "pick", "number": 7}, "cat": "pick", "split": "test"}
+{"text": "Eight.", "expect": {"type": "pick", "number": 8}, "cat": "pick", "split": "dev"}
+{"text": "number 8", "expect": {"type": "pick", "number": 8}, "cat": "pick", "split": "dev"}
+{"text": "play the latest episode of peaky blinders", "expect": {"type": "play_title", "title": "peaky blinders", "latest": true}, "cat": "latest_episode", "split": "dev"}
+{"text": "play the latest episode of the crown", "expect": {"type": "play_title", "title": "the crown", "latest": true}, "cat": "latest_episode", "split": "dev"}
+{"text": "Can you play the latest episode of the expanse.", "expect": {"type": "play_title", "title": "the expanse", "latest": true}, "cat": "latest_episode", "split": "dev"}
+{"text": "watch the most recent episode of attack on titan", "expect": {"type": "play_title", "title": "attack on titan", "latest": true}, "cat": "latest_episode", "split": "dev"}
+{"text": "put on the new episode of arcane please", "expect": {"type": "play_title", "title": "arcane", "latest": true}, "cat": "latest_episode", "split": "dev"}
+{"text": "Play the latest episode of slow horses.", "expect": {"type": "play_title", "title": "slow horses", "latest": true}, "cat": "latest_episode", "split": "dev"}
+{"text": "Put on the new episode of severance.", "expect": {"type": "play_title", "title": "severance", "latest": true}, "cat": "latest_episode", "split": "test"}
+{"text": "could you play the latest episode of community", "expect": {"type": "play_title", "title": "community", "latest": true}, "cat": "latest_episode", "split": "dev"}
+{"text": "add this to my library", "expect": {"type": "library", "op": "add", "title": null}, "cat": "library", "split": "dev"}
+{"text": "Save this.", "expect": {"type": "library", "op": "add", "title": null}, "cat": "library", "split": "dev"}
+{"text": "Add it to my list.", "expect": {"type": "library", "op": "add", "title": null}, "cat": "library", "split": "dev"}
+{"text": "add the bear to my library", "expect": {"type": "library", "op": "add", "title": "the bear"}, "cat": "library", "split": "dev"}
+{"text": "Put dune part two in my watchlist.", "expect": {"type": "library", "op": "add", "title": "dune part two"}, "cat": "library", "split": "test"}
+{"text": "Remove friends from my library now.", "expect": {"type": "library", "op": "remove", "title": "friends"}, "cat": "library", "split": "dev"}
+{"text": "Take this off my list.", "expect": {"type": "library", "op": "remove", "title": null}, "cat": "library", "split": "dev"}
+{"text": "Um mark this as watched.", "expect": {"type": "library", "op": "watched", "title": null}, "cat": "library", "split": "test"}
+{"text": "mark as watched", "expect": {"type": "library", "op": "watched", "title": null}, "cat": "library", "split": "dev"}
+{"text": "i've already seen this", "expect": {"type": "library", "op": "watched", "title": null}, "cat": "library", "split": "dev"}
+{"text": "mark the bear season 3 as watched", "expect": {"type": "library", "op": "watched", "title": "the bear", "season": 3}, "cat": "library", "split": "dev"}
+{"text": "Mark severance season two episode four as watched.", "expect": {"type": "library", "op": "watched", "title": "severance", "season": 2, "episode": 4}, "cat": "library", "split": "test"}
+{"text": "mark it as unwatched", "expect": {"type": "library", "op": "unwatched", "title": null}, "cat": "library", "split": "test"}
+{"text": "Mark the office as not watched.", "expect": {"type": "library", "op": "unwatched", "title": "the office"}, "cat": "library", "split": "dev"}
+{"text": "no one", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "one more thing", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "two people walked in", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "number one fan", "expect": {"type": "none"}, "cat": "not_a_command", "split": "test"}

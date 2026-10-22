@@ -128,6 +128,25 @@ def from_intent(intent: str, t: str, rules: Rules) -> A.Action | None:
         return A.Tracks(audio=lang) if lang else None
     if intent == "replay":
         return A.Replay(seconds=seconds_in(t) or 10)
+    if intent in ("show_recent", "show_new"):
+        return A.ShowList(list="recent" if intent == "show_recent" else "new")
+    if intent == "pick_number":
+        m = re.search(rf"\b(\d+|{NUMBER}|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\b", t)
+        n = to_int(m.group(1)) if m else None
+        return A.Pick(number=n) if n and 1 <= n <= 20 else None
+    if intent == "latest_episode":
+        rest = re.sub(r"\b(?:the )?(?:latest|newest|most recent|new|last)(?: released)? episode(?: of| from| in)?\b", " ", t)
+        s = T.title_slots(rest)
+        return A.PlayTitle(title=s["title"], latest=True, kind="series") if s["title"] else None
+    if intent == "library":
+        op = ("remove" if re.search(r"\b(?:remove|delete|take off|drop)\b", t) else
+              "unwatched" if re.search(r"\b(?:unwatched|not (?:watched|seen)|unseen)\b", t) else
+              "watched" if re.search(r"\b(?:watched|seen)\b", t) else "add")
+        rest = re.sub(r"\b(?:add|save|put|remove|delete|take|drop|mark|set|flag|as|to|from|off|out of|in|into|on|my|our|"
+                      r"the library|library|watch ?list|list|unwatched|not watched|watched|seen|unseen)\b", " ", t)
+        s = T.title_slots(re.sub(r"\s+", " ", rest).strip())
+        title = None if (s["title"] or "") in T.CURRENT or re.match(r"^(?:this|that|it)\b", s["title"] or "") else s["title"]
+        return A.LibraryEdit(op=op, title=title, season=s["season"], episode=s["episode"], kind=s["kind"])
     if intent in ("play_title", "open_in_stremio"):
         s = T.title_slots(t)
         if (s["title"] or "") in T.CURRENT:

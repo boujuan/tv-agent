@@ -58,6 +58,8 @@ def describe(a: A.Action) -> str:
                 parts = ([f"season {a.season}"] if a.season is not None else []) + \
                         ([f"episode {a.episode}"] if a.episode is not None else [])
                 return f"Going to {' '.join(parts)}…"
+            if a.latest:
+                return f"Finding the latest {a.title.title()}…"
             return f"Finding {a.title.title()}{ep}…"
         case A.ContinueWatching():
             return f"Continuing {a.title.title()}…" if a.title else "Continuing…"
@@ -94,6 +96,14 @@ def describe(a: A.Action) -> str:
             return ", ".join(parts)
         case A.Replay():
             return f"Back {a.seconds} s"
+        case A.ShowList():
+            return {"recent": "What you were watching…", "new": "New episodes…", "movies": "New films…"}[a.list]
+        case A.Pick():
+            return f"Number {a.number}…"
+        case A.LibraryEdit():
+            what = a.title.title() if a.title else "this"
+            return {"add": f"Adding {what} to your library", "remove": f"Removing {what} from your library",
+                    "watched": f"Marking {what} as watched", "unwatched": f"Marking {what} as not watched"}[a.op]
         case _:
             return "Didn't get that"
 
@@ -164,7 +174,8 @@ class Service:
     async def run(self, d: Decision, heard: str, source: str):
         """Execute in the background so the pill can close; the result arrives on the TV as a toast."""
         out = await self.execute(d, heard, source)
-        if d.action.type in ("play_title", "continue_watching", "next_episode", "youtube", "twitch") or not out.ok:
+        if d.action.type in ("play_title", "continue_watching", "next_episode", "youtube", "twitch", "pick",
+                             "library") or not out.ok:
             await self.agent.notify(out.say)
 
     def start(self, d: Decision, heard: str, source: str):
@@ -293,6 +304,17 @@ def lan_app(svc: Service) -> FastAPI:
         log.info("TV app listening (from %s)", request.client.host)
         asyncio.create_task(svc.agent._wake())     # the screensaver would hide the pill (see stream_client)
         svc.agent.start_duck()
+        return {"ok": True}
+
+    @app.post("/v1/choose")
+    async def choose(request: Request):
+        """An item of the TV app's list, picked with the remote (OK or a number key)."""
+        svc.check(request, lan=True)
+        try:
+            a = A.Pick(number=int((await request.json()).get("number", 0)))
+        except (ValueError, TypeError, AttributeError, ValidationError):
+            raise HTTPException(422) from None
+        svc.start(Decision(a, "remote", 1.0, "list"), f"number {a.number}", "tv")
         return {"ok": True}
 
     @app.post("/v1/utterance")

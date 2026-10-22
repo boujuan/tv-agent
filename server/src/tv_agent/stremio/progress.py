@@ -2,13 +2,15 @@
 phone, anywhere) shows where you stopped. Runs only while something the agent started is playing in Kodi.
 
 Each write is read-modify-write of one library item with a new _mtime, the way stremio-core syncs. At 90% the
-item counts as watched (offset back to 0, timesWatched + 1). The per-episode `watched` bitfield is left alone.
+item counts as watched (offset back to 0, timesWatched + 1), and an episode gets its watched mark (watched.py) when
+its show's episode list is known.
 """
 import asyncio
 import logging
 import time
 
 from ..state import NowPlaying
+from . import watched
 from .account import Account, now_iso
 from .library import Library
 
@@ -16,8 +18,10 @@ log = logging.getLogger(__name__)
 WATCHED_AT = 0.9
 
 
-def updated(item: dict | None, np: NowPlaying, offset_ms: int, duration_ms: int, watched_ms: int, meta: dict) -> dict:
-    """The library item after watching np up to offset_ms (a new temp item if it wasn't in the library)."""
+def updated(item: dict | None, np: NowPlaying, offset_ms: int, duration_ms: int, watched_ms: int, meta: dict,
+            video_ids: list[str] | None = None) -> dict:
+    """The library item after watching np up to offset_ms (a new temp item if it wasn't in the library).
+    video_ids: the show's episodes in your Stremio's order, for the episode's watched mark."""
     now = now_iso()
     if item is None:
         item = {"_id": np.imdb_id, "name": np.name, "type": np.kind, "poster": meta.get("poster"),
@@ -38,11 +42,14 @@ def updated(item: dict | None, np: NowPlaying, offset_ms: int, duration_ms: int,
     if done:
         state["timesWatched"] = state.get("timesWatched", 0) + 1
         state["flaggedWatched"] = 1
+        if np.kind == "series" and video_ids and (marks := watched.mark(state.get("watched"), video_ids,
+                                                                         [np.video_id])):
+            state["watched"] = marks
     return {**item, "state": state, "_mtime": now}
 
 
 async def track(poll, account: Account, library: Library, np: NowPlaying, meta: dict, every_s: float = 10,
-                write_every_s: float = 120) -> tuple[str, int | None, int]:
+                write_every_s: float = 120, video_ids: list[str] | None = None) -> tuple[str, int | None, int]:
     """Follow the player until it stops; write on pause, every 2 minutes, and at the end.
     poll() returns (position ms, duration ms, speed) while something plays, None once it has stopped.
     Returns how it ended ("stopped", or "lost" when the player stopped answering), the last position and the
@@ -57,7 +64,7 @@ async def track(poll, account: Account, library: Library, np: NowPlaying, meta: 
         if last_pos is None:
             return
         item = await library.get(np.imdb_id)
-        await account.put([updated(item, np, last_pos, duration, unwritten, meta)])
+        await account.put([updated(item, np, last_pos, duration, unwritten, meta, video_ids)])
         library.invalidate()
         unwritten, last_write = 0, time.monotonic()
         log.info("progress saved: %s at %d s of %d s", np.video_id, last_pos // 1000, duration // 1000)

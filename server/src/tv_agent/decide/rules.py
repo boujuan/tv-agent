@@ -32,7 +32,8 @@ USER_FILE = CONFIG_DIR / "rules.json"
 BUILTIN_INTENTS = ("play_title", "continue_watching", "next_episode", "previous_episode", "open_in_stremio", "youtube",
                    "twitch", "open_app", "home", "pause", "resume", "stop", "skip_forward", "skip_back", "seek_to",
                    "restart", "volume_set", "volume_up", "volume_down", "mute", "unmute", "binge", "sleep_timer",
-                   "subtitles", "audio_language", "replay",
+                   "subtitles", "audio_language", "replay", "show_recent", "show_new", "pick_number",
+                   "latest_episode", "library",
                    "transport", "volume", "none")    # transport/volume: the broader intents of rules files before v2
 PLACEHOLDER = re.compile(r"^\{(\w+)(?:\|(\w+)(!)?)?\}$")
 PACKAGE = re.compile(r"^[a-zA-Z][\w]*(?:\.[\w]+)+$")
@@ -171,6 +172,18 @@ def _play(v, rules):
     return s
 
 
+THIS = re.compile(r"^(?:this|that|it)(?: one| show| series| movie| film| episode)?$")
+
+
+def _subject(v, _):
+    """What follows "add", "mark"…: a title (with a season or episode), or nothing for "this", "it", "this
+    episode" (what's playing)."""
+    s = T.title_slots(v)
+    if (s["title"] or "") in T.CURRENT or THIS.match(s["title"] or ""):
+        s["title"] = None
+    return s
+
+
 LANGUAGE_NAMES = {"english": "eng", "spanish": "spa", "castilian": "spa", "castellano": "spa", "chinese": "chi",
                   "mandarin": "chi", "simplified chinese": "chs", "chinese simplified": "chs", "traditional chinese": "cht",
                   "chinese traditional": "cht", "french": "fre", "italian": "ita", "german": "ger",
@@ -208,6 +221,7 @@ CONVERTERS = {
     "alias": _alias,
     "language": _language,
     "minutes": _minutes,
+    "subject": _subject,
 }
 CONVERTER_HELP = {
     "text": "the words as said",
@@ -225,6 +239,7 @@ CONVERTER_HELP = {
     "alias": "an app, only by one of its exact spoken names",
     "language": "a language by name ('spanish', 'traditional chinese') as its code, or 'original'",
     "minutes": "a duration in minutes ('half an hour', 'in 45')",
+    "subject": "a title (season, episode), or nothing for 'this' / 'it': what's on (use with \"*\")",
 }
 
 

@@ -580,6 +580,129 @@
       "note": "back 10 seconds with subtitles on for a moment"
     },
     {
+      "id": "show_recent",
+      "stage": "grammar",
+      "do": {
+        "type": "show_list",
+        "list": "recent"
+      },
+      "match": "^what (?:was|were|have) (?:i|we) (?:been )?watching(?: (?:lately|recently|before|last))?$|^what did (?:i|we) (?:watch|see) (?:last|lately|recently)$|^(?:show|open|list|give)(?: me| us)? (?:my |our |the )?(?:continue watching|recently watched|recent (?:shows|stuff|things)|what (?:i|we) (?:was|were) watching)(?: list)?$|^(?:my |our )?(?:continue watching list|recently watched)$",
+      "note": "a numbered list of your Continue Watching; “number 2” plays from it"
+    },
+    {
+      "id": "show_new",
+      "stage": "grammar",
+      "do": {
+        "type": "show_list",
+        "list": "new"
+      },
+      "match": "^(?:so )?(?:what'?s|what is) new(?: (?:on|in|for|with) (?:my |our )?(?:shows|series))?(?: this week| today| lately)?$|^(?:is there )?anything new(?: (?:on|in|to watch))?(?: (?:my |our )?(?:shows|series))?$|^(?:(?:are there )?any |show(?: me)? (?:the )?|list (?:the )?)?new episodes(?: (?:of|from|for|on|in) (?:my |our )?(?:shows|series))?$|^what new episodes are (?:there|out)$",
+      "note": "the newest episode of each of your shows that you haven't got to"
+    },
+    {
+      "id": "show_movies",
+      "stage": "grammar",
+      "do": {
+        "type": "show_list",
+        "list": "movies"
+      },
+      "match": "^(?:(?:show|list|give)(?: me| us)? (?:some |the )?|(?:are there )?any |what )?(?:new|latest|recent) (?:movies|films|releases)(?: (?:are )?(?:there|out))?$|^what(?:'s| is) new in (?:movies|films|cinema)$",
+      "note": "your addons' list of new films (one named “Latest”, else “Trending”)"
+    },
+    {
+      "id": "pick_number",
+      "stage": "grammar",
+      "do": {
+        "type": "pick",
+        "number": "{n|number!}"
+      },
+      "match": "^(?:(?:play|pick|choose|select|open|put on|watch|start|go with|let'?s go with|take|i(?:'ll| will) take)\\s+)?(?:number|option|choice)\\s+(?P<n>\\w+)$",
+      "note": "from the list on screen"
+    },
+    {
+      "id": "pick_ordinal",
+      "stage": "grammar",
+      "do": {
+        "type": "pick",
+        "number": "{n|number!}"
+      },
+      "match": "^(?:(?:play|pick|choose|select|open|put on|watch|start|go with|let'?s go with|take|i(?:'ll| will) take)\\s+)?the (?P<n>first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)(?: one| option| choice)?$"
+    },
+    {
+      "id": "pick_bare_number",
+      "stage": "grammar",
+      "do": {
+        "type": "pick",
+        "number": "{n|number!}"
+      },
+      "match": "^(?P<n>one|two|three|four|five|six|seven|eight|nine|ten|[1-9]|1[0-9]|20)$",
+      "note": "a number on its own; does nothing without a list on screen"
+    },
+    {
+      "id": "latest_episode",
+      "stage": "grammar",
+      "do": {
+        "type": "play_title",
+        "*": "{what|play!}",
+        "latest": true,
+        "kind": "series"
+      },
+      "match": "^(?:(?:play|put on|watch|start|show me|i want to watch|let'?s watch)\\s+)?(?:the )?(?:latest|newest|most recent|new|last|last released) episode (?:of|from|in) (?P<what>.+)$",
+      "note": "the newest episode out"
+    },
+    {
+      "id": "latest_title_episode",
+      "stage": "grammar",
+      "do": {
+        "type": "play_title",
+        "*": "{what|play!}",
+        "latest": true,
+        "kind": "series"
+      },
+      "match": "^(?:(?:play|put on|watch|start)\\s+)?(?:the )?(?:latest|newest|new) (?P<what>.+?) episode$"
+    },
+    {
+      "id": "library_add",
+      "stage": "grammar",
+      "do": {
+        "type": "library",
+        "op": "add",
+        "*": "{what|subject}"
+      },
+      "match": "^(?:add|save|put)\\s+(?P<what>.+?)\\s+(?:to|in|into|on)\\s+(?:my |the |our )?(?:library|watch ?list|list|collection)$|^(?:add|save) (?:this|it|that)(?: one| show| series| movie| film)?$"
+    },
+    {
+      "id": "library_remove",
+      "stage": "grammar",
+      "do": {
+        "type": "library",
+        "op": "remove",
+        "*": "{what|subject}"
+      },
+      "match": "^(?:remove|delete|take|drop)\\s+(?P<what>.+?)\\s+(?:from|off|out of)\\s+(?:my |the |our )?(?:library|watch ?list|list|collection)$"
+    },
+    {
+      "id": "mark_unwatched",
+      "stage": "grammar",
+      "do": {
+        "type": "library",
+        "op": "unwatched",
+        "*": "{what|subject}"
+      },
+      "match": "^(?:mark|set|flag)\\s+(?!as\\s)(?P<what>.+?)\\s+(?:as\\s+)?(?:unwatched|not watched|unseen|not seen)$|^mark (?:it |this |that )?as (?:unwatched|not watched|unseen|not seen)$"
+    },
+    {
+      "id": "mark_watched",
+      "stage": "grammar",
+      "do": {
+        "type": "library",
+        "op": "watched",
+        "*": "{what|subject}"
+      },
+      "match": "^(?:mark|set|flag)\\s+(?!as\\s)(?P<what>.+?)\\s+(?:as\\s+)?(?:watched|seen)$|^mark (?:it |this |that )?as (?:watched|seen)$|^i'?ve (?:already )?(?:seen|watched) (?:this|it|that)(?: one| episode| movie| film)?(?: already)?$",
+      "note": "Stremio's watched mark; an episode, a season or the whole show"
+    },
+    {
       "id": "youtube_on",
       "stage": "cue",
       "match": "^(?:search youtube for|youtube search for|find on youtube|search for|search|look up|find|play|put on|put|watch|show me)?\\s*(?P<q>.+?)\\s+on\\s+(?:youtube|you tube)$",
@@ -758,6 +881,21 @@
       },
       "replay": {
         "describe": "go back a few seconds to hear something again (e.g. 'what did they say')"
+      },
+      "show_recent": {
+        "describe": "show the list of what I was watching (e.g. 'what was I watching')"
+      },
+      "show_new": {
+        "describe": "show new episodes of my shows (e.g. 'what's new')"
+      },
+      "pick_number": {
+        "describe": "choose a numbered item of the list on screen (e.g. 'number two')"
+      },
+      "latest_episode": {
+        "describe": "play the newest episode of a named series (e.g. 'play the latest episode of the bear')"
+      },
+      "library": {
+        "describe": "add to or remove from my library, or mark as watched (e.g. 'add this to my library')"
       },
       "none": {
         "describe": "not a TV command, or not understandable (e.g. 'what time is it')"

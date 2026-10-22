@@ -276,6 +276,44 @@ for text, audio in [("original audio", "original"), ("switch to the original lan
 for text in ["what did they say", "what did he just say", "say that again", "i missed that", "repeat that"]:
     add(maybe_noise(text), {"type": "replay", "seconds": 10}, "replay")
 
+# ---- lists on the TV, "number 2", the latest episode, your library
+for text in ["what was i watching", "what were we watching", "what have i been watching lately",
+             "show me what i was watching", "show my continue watching", "open continue watching",
+             "what did we watch last", "recently watched"]:
+    add(maybe_noise(text), {"type": "show_list", "list": "recent"}, "list_recent")
+for text in ["what's new", "anything new", "is there anything new on my shows", "any new episodes", "new episodes",
+             "show me new episodes", "what's new this week", "are there any new episodes of my shows"]:
+    add(maybe_noise(text), {"type": "show_list", "list": "new"}, "list_new")
+for text in ["new movies", "show me new films", "what new movies are there", "latest movies", "any new films"]:
+    add(maybe_noise(text), {"type": "show_list", "list": "movies"}, "list_movies")
+for n in range(1, 9):
+    forms = [f"number {num(n, True)}", f"number {n}", f"play number {num(n, True)}", f"option {num(n, True)}",
+             f"the {ORD[n]} one", f"pick the {ORD[n]} one", num(n, True)]
+    for form in rng.sample(forms, 2):
+        add(maybe_noise(form), {"type": "pick", "number": n}, "pick")
+for title in rng.sample(SERIES, 8):
+    form = rng.choice([f"play the latest episode of {title}", f"latest episode of {title}",
+                       f"the newest episode of {title}", f"put on the new episode of {title}",
+                       f"watch the most recent episode of {title}"])
+    add(maybe_noise(form), {"type": "play_title", "title": title, "latest": True}, "latest_episode")
+for text, expect in [("add this to my library", {"op": "add", "title": None}), ("save this", {"op": "add", "title": None}),
+                     ("add it to my list", {"op": "add", "title": None}),
+                     ("add the bear to my library", {"op": "add", "title": "the bear"}),
+                     ("put dune part two in my watchlist", {"op": "add", "title": "dune part two"}),
+                     ("remove friends from my library", {"op": "remove", "title": "friends"}),
+                     ("take this off my list", {"op": "remove", "title": None}),
+                     ("mark this as watched", {"op": "watched", "title": None}),
+                     ("mark as watched", {"op": "watched", "title": None}),
+                     ("i've already seen this", {"op": "watched", "title": None}),
+                     ("mark the bear season 3 as watched", {"op": "watched", "title": "the bear", "season": 3}),
+                     ("mark severance season two episode four as watched",
+                      {"op": "watched", "title": "severance", "season": 2, "episode": 4}),
+                     ("mark it as unwatched", {"op": "unwatched", "title": None}),
+                     ("mark the office as not watched", {"op": "unwatched", "title": "the office"})]:
+    add(maybe_noise(text), {"type": "library", **expect}, "library")
+for text in ["no one", "one more thing", "two people walked in", "number one fan"]:
+    add(text, {"type": "none"}, "not_a_command")
+
 for r in rows:
     r["split"] = "test" if int(hashlib.sha1(r["text"].encode()).hexdigest(), 16) % 10 < 3 else "dev"
 seen, unique = set(), []

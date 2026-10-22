@@ -502,3 +502,84 @@ def test_end_of_playback_starts_the_next_episode_goes_home_or_turns_off():
     assert ended("series", 2_995_000, after="off") == ["off"]
     assert ended("series", 1_000_000) == ["home"]                        # stopped on the remote: Home, not Kodi's menus
     assert ended("series", 2_995_000, user_stopped=True) == []          # "stop" already went Home
+
+
+def test_watched_marks_round_trip_realign_and_never_wipe():
+    from tv_agent.stremio import watched as W
+    ids = ["tt1:0:1", "tt1:1:1", "tt1:1:2", "tt1:1:3", "tt1:2:1"]
+    marks = W.mark(None, ids, ["tt1:1:1", "tt1:1:2"])
+    assert marks.startswith("tt1:1:2:3:") and W.decode(marks, ids) == [False, True, True, False, False]
+    longer = ["tt1:0:1", "tt1:0:2"] + ids[1:]                  # a special added in front: lined up on the anchor
+    assert W.decode(marks, longer) == [False, False, True, True, False, False]
+    assert W.decode(marks, ["tt1:3:1", "tt1:3:2"]) is None      # anchor missing: can't be lined up
+    assert W.mark(marks, ["tt1:3:1", "tt1:3:2"], ["tt1:3:1"]) is None    # so nothing is rewritten
+    assert W.decode(W.mark(marks, ids, ["tt1:1:1"], on=False), ids) == [False, False, True, False, False]
+    assert W.decode("undefined:1:eJwDAAAAAAE=", ids) == [False] * 5   # what Stremio writes for films
+
+
+def test_progress_marks_the_episode_watched_at_90_percent():
+    from tv_agent.stremio import watched as W
+    ids = ["tt1:1:1", "tt1:1:2"]
+    np = NowPlaying("tt1", "series", "tt1:1:2", "X")
+    item = updated(None, np, 950_000, 1_000_000, 60_000, {}, ids)
+    assert W.decode(item["state"]["watched"], ids) == [False, True]
+    assert "watched" not in updated(None, np, 500_000, 1_000_000, 60_000, {}, ids)["state"]
+
+
+def test_search_merges_names_and_popularity_settles_namesakes():
+    from tv_agent.stremio import cinemeta as C
+    from tv_agent.stremio.search import merge, said_exactly
+    cine = [C.Meta("tt1", "movie", "Back to the Future", "1985", 0), C.Meta("tt2", "series", "Back to the Future", "1991", 0)]
+    aio = [C.Meta("tt1", "movie", "Regreso al futuro", "1985", C.NOT_RANKED, extra_rank=0,
+                  names=("Regreso al futuro",)),
+           C.Meta("tt2", "series", "Regreso al futuro", "1991", C.NOT_RANKED, extra_rank=0, names=("Regreso al futuro",))]
+    merged = merge([cine, aio])
+    assert [m.names for m in merged] == [("Back to the Future", "Regreso al futuro")] * 2
+    assert said_exactly("regreso al futuro", merged[0]) and merged[0].label == \
+        "Back to the Future / Regreso al futuro (1985, movie)"
+    tie = C.ranked("regreso al futuro", merged)
+    assert tie[0][0] - tie[1][0] < 20                              # a close call...
+    settled = C.ranked("regreso al futuro", merged, popularity={"tt1": 2.27, "tt2": 0.39})
+    assert settled[0][1].id == "tt1"                               # ...settled by popularity
+
+
+def test_library_match_needs_the_whole_name():
+    import asyncio
+    from tv_agent.stremio.library import Library
+    lib = Library(None)
+    lib._items = [{"_id": "tt1", "type": "movie", "name": "Dune"},
+                  {"_id": "tt2", "type": "movie", "name": "El señor de los anillos: La comunidad del anillo"},
+                  {"_id": "tt3", "type": "series", "name": "The Office"},
+                  {"_id": "tt4", "type": "series", "name": "Fundación"}]
+    find = lambda t: (asyncio.run(lib.find(t)) or {}).get("_id")   # noqa: E731
+    assert find("dune parte dos") is None and find("dune") == "tt1"
+    assert find("el señor de los anillos") == "tt2"                # the name before its subtitle
+    assert find("office") == "tt3" and find("fundacion") == "tt4"
+
+
+def test_pick_needs_a_list_on_screen():
+    import asyncio
+    import time
+    import types
+    from tv_agent.agent import Agent, ListItem, Shown
+    me = types.SimpleNamespace(_shown=None)
+    assert asyncio.run(Agent._pick(me, A.Pick(number=2))).say == "No list on screen"
+    me._shown = Shown("Continue watching", [ListItem("tt1", "movie", "Up", "Up", "")], time.monotonic())
+    assert asyncio.run(Agent._pick(me, A.Pick(number=2))).say == "The list goes up to 1"
+    me._shown = Shown("Continue watching", [ListItem("tt1", "movie", "Up", "Up", "")], time.monotonic() - 400)
+    assert asyncio.run(Agent._pick(me, A.Pick(number=1))).say == "No list on screen"   # too old
+
+
+@pytest.mark.parametrize("text,expect", [
+    ("number two", {"type": "pick", "number": 2}), ("the third one", {"type": "pick", "number": 3}),
+    ("no one", None), ("what's new", {"type": "show_list", "list": "new"}),
+    ("play the latest episode of the bear", {"type": "play_title", "title": "the bear", "latest": True}),
+    ("mark as watched", {"type": "library", "op": "watched", "title": None}),
+    ("add spanish subtitles", None),
+])
+def test_list_and_library_rules(text, expect):
+    got = rule_action(text)
+    if expect is None:
+        assert got is None or got.type not in ("pick", "library")
+    else:
+        assert got is not None and all(getattr(got, k) == v for k, v in expect.items())
