@@ -101,6 +101,14 @@ class Agent:
         """Run a blocking TV call (adb_shell is synchronous) off the event loop."""
         return await asyncio.to_thread(fn, self.adb, *args)
 
+    async def _wake(self):
+        """End the screensaver. A command from the laptop (panel, MCP, CLI) presses no key, and an app started
+        behind Aerial Views stays hidden and gets frozen by Android (Kodi's playback died that way)."""
+        try:
+            await self.tv(lambda adb: adb.run(["cmd", "input", "keyevent", "KEYCODE_WAKEUP"], timeout=4))
+        except Exception as e:
+            log.info("waking the TV: %s", type(e).__name__)
+
     async def notify(self, text: str):
         """A short message on the TV screen (the app's SayReceiver; ignored if the app isn't installed)."""
         try:
@@ -111,6 +119,8 @@ class Agent:
 
     async def execute(self, action: Action) -> Outcome:
         handler = getattr(self, "_" + action.type.replace("none", "unclear"))
+        if action.type not in ("volume", "none") and not self.dry_run:
+            asyncio.create_task(self._wake())
         try:
             return await handler(action)
         except Exception as e:
@@ -139,22 +149,39 @@ class Agent:
         return streams.rank(found, self.cfg.max_height, self.cfg.max_mbps, _runtime_min(meta),
                             plan.subtitles is None, plan.audio)
 
-    async def apply_tracks(self, plan: languages.TrackPlan, wait_s: float = 12.0,
-                           addon_subs: asyncio.Task | None = None) -> str:
-        """Once Kodi knows the file's tracks, switch audio and subtitles per the plan. Subtitle languages the file
-        lacks come from your subtitle addons (addon_subs: the task fetching them). Returns a short note."""
+    async def apply_tracks(self, plan: languages.TrackPlan, wait_s: float = 20.0,
+                           addon_subs: asyncio.Task | None = None, settle_s: float = 2.5) -> str:
+        """Once Kodi plays the file, switch audio and subtitles per the plan. Subtitle languages the file lacks come
+        from your subtitle addons (addon_subs: the task fetching them). Kodi starts on the right languages itself
+        (prefer() before opening); this refines that (Chinese script, no hearing-impaired or commentary tracks,
+        addon subtitles) once playback has settled: for a few seconds after the picture starts moving Kodi applies
+        its defaults, the settings it saved for a file played before and the jump to the resume point, which undo
+        or drop anything set earlier. Returns a short note."""
         loop = asyncio.get_running_loop()
         deadline = loop.time() + wait_s
+        last = None
         while loop.time() < deadline:
             pid = await self._kodi_player()
-            info = await self.kodi.tracks(pid) if pid is not None else {}
-            if info.get("audiostreams"):
-                break
-            await asyncio.sleep(0.5)
+            if pid is not None:
+                pos, _, speed = await self.kodi.position(pid)
+                if last is not None and speed and pos > last:
+                    break
+                last = pos
+            await asyncio.sleep(0.4)
         else:
             return ""
+        await asyncio.sleep(settle_s)
+        info = await self.kodi.tracks(pid)
+        if not info.get("audiostreams"):
+            return ""
         notes = []
-        audio = languages.pick_audio(info["audiostreams"], plan.audio) if plan.audio else None
+        audio = None
+        for _ in range(3):              # a track's language can show up a moment after the track itself
+            audio = languages.pick_audio(info["audiostreams"], plan.audio) if plan.audio else None
+            if audio or not plan.audio:
+                break
+            await asyncio.sleep(1)
+            info = await self.kodi.tracks(pid) or info
         if audio and audio["index"] != (info.get("currentaudiostream") or {}).get("index"):
             await self.kodi.set_audio(pid, audio["index"])
         if audio is None and plan.audio:
@@ -162,6 +189,7 @@ class Agent:
         if plan.subtitles is None:
             if info.get("subtitleenabled"):
                 await self.kodi.set_subtitle(pid, None)
+            await self._recheck_tracks(pid, audio, None, False)
             return ", ".join(notes)
         inside = [t for t in info.get("subtitles") or [] if not t.get("isforced")]
         missing = [lang for lang in plan.subtitles if not any(languages.matches(t, lang) for t in inside)]
@@ -176,22 +204,54 @@ class Agent:
                       if lang not in missing or any(lang == want for want, _ in offered)), None)
         # Kodi shows the last subtitle it was given, so the one to show (if from an addon) goes last.
         offered.sort(key=lambda pair: pair[0] == first)
-        shown = None
+        added = []
         for lang, sub in offered:
             try:
                 await self.kodi.add_subtitle(pid, sub.url)
-                shown = (lang, sub)
+                added.append((lang, sub))
             except KodiError as e:
                 log.warning("adding %s subtitles from %s: %s", lang, sub.addon, e)
+        target = None
+        if added:
+            await asyncio.sleep(1)      # Kodi loads them in the background and shows each one as it arrives
+            listed = (await self.kodi.tracks(pid)).get("subtitles") or []
+            log.info("added %s subtitles from %s", ", ".join(lang for lang, _ in added),
+                     ", ".join(sorted({sub.addon for _, sub in added})))
+            if first in missing:        # the one to show is the last added: the newest external track
+                external = [t for t in listed if "external" in str(t.get("name") or "").lower()]
+                target = max(external, key=lambda t: t["index"]) if external else None
         if first is not None and first not in missing:
-            sub = languages.pick_subtitle(inside, [first])
-            await self.kodi.set_subtitle(pid, sub["index"])
-            notes.append(f"{sub.get('language')} subs")
-        elif shown:
-            notes.append(f"{shown[0]} subs from {shown[1].addon}")
+            target = languages.pick_subtitle(inside, [first])
+        if target:
+            await self.kodi.set_subtitle(pid, target["index"])
+            notes.append(f"{first} subs" + (f" from {added[-1][1].addon}" if first in missing else ""))
         else:
             notes.append("no subtitles found")
+        await self._recheck_tracks(pid, audio, target, target is not None)
         return ", ".join(notes)
+
+    async def _recheck_tracks(self, pid: int, audio: dict | None, sub: dict | None, subs_on: bool,
+                              seconds: float = 8.0):
+        """Put the choice back if Kodi changes it while playback settles (or loads an added subtitle late)."""
+        loop = asyncio.get_running_loop()
+        until, fixes = loop.time() + seconds, 0
+        while loop.time() < until and fixes < 4:
+            await asyncio.sleep(1)
+            info = await self.kodi.tracks(pid)
+            if not info.get("audiostreams"):
+                return                  # stopped or something else is playing
+            if audio and (info.get("currentaudiostream") or {}).get("index") != audio["index"]:
+                log.info("Kodi changed the audio track; switching it back")
+                await self.kodi.set_audio(pid, audio["index"])
+                fixes += 1
+            current = (info.get("currentsubtitle") or {}).get("index")
+            if subs_on and sub and (not info.get("subtitleenabled") or current != sub["index"]):
+                log.info("Kodi changed the subtitles; switching them back")
+                await self.kodi.set_subtitle(pid, sub["index"])
+                fixes += 1
+            elif not subs_on and info.get("subtitleenabled"):
+                await self.kodi.set_subtitle(pid, None)
+                fixes += 1
 
     async def find_title(self, title: str, kind: str | None, season: int | None = None,
                          utterance: str | None = None) -> cinemeta.Meta | None:
@@ -283,6 +343,12 @@ class Agent:
             await self.tv(lambda adb: adb.run(["am", "force-stop", justplayer.PACKAGE]))
             if not (kodi_ready is not None and await kodi_ready) and not await self.kodi.up():
                 await self.kodi.start()
+            try:
+                await self.kodi.prefer(languages.KODI_NAMES.get(plan.audio or "", "mediadefault"),
+                                       "none" if plan.subtitles is None
+                                       else languages.KODI_NAMES.get(plan.subtitles[0], "original"))
+            except KodiError as e:
+                log.warning("Kodi language settings: %s", e)
             url = chosen.url + ("|" + urlencode(chosen.headers) if chosen.headers else "")
             await self.kodi.open(url, resume_ms)
             self.state.now_playing = NowPlaying(imdb, kind, video, name, "kodi", url, runtime)
@@ -603,22 +669,21 @@ class Agent:
             current = await self.tv(media.get_volume)
             if current:
                 s.volume_before_mute = current
-            await self.tv(media.set_volume, 0)
+            await self.tv(media.set_volume, 0, current)
             return Outcome(True, "Muted")
         if a.op == "unmute":
             await self.tv(media.set_volume, s.volume_before_mute or 12)
             s.volume_before_mute = None
             return Outcome(True, "Sound on")
+        current = await self.tv(media.get_volume)
         if a.op == "set":
             level = a.amount if a.amount is not None else 12
         else:
-            current = await self.tv(media.get_volume)
-            if current is None:
-                current = s.volume_before_mute or 12
+            base = current if current is not None else (s.volume_before_mute or 12)
             step = a.amount if a.amount is not None else 5
-            level = current + step if a.op == "up" else current - step
+            level = base + step if a.op == "up" else base - step
         level = max(0, min(100, level))
-        await self.tv(media.set_volume, level)
+        await self.tv(media.set_volume, level, current)
         return Outcome(True, f"Volume {level}")
 
     async def _unclear(self, a: Unclear) -> Outcome:

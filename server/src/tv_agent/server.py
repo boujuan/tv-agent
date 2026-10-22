@@ -1,4 +1,4 @@
-"""The daemon: two HTTP listeners in one process.
+"""The daemon: two HTTP listeners and the TV app's audio stream, in one process.
 
 LAN, on this computer's address on the TV's network only (lan_address(), port 8765), for the TV app:
     POST /v1/listen/start   the mic pill opened: warm the TV connection while you speak
@@ -6,6 +6,13 @@ LAN, on this computer's address on the TV's network only (lan_address(), port 87
     GET  /v1/health
   Requests must come from the TV's addresses and carry the agent token; bodies over 400 KB are refused; one
   utterance at a time (a new one cancels whatever the previous one is still doing).
+
+LAN, port 8767 (stream_port): the same, streamed while you speak, so it's decided in your pause (listen_stream.py).
+  app -> laptop  a JSON line {"token": "…", "rate": 16000}, then frames: a 2-byte big-endian length and PCM16 LE
+                 audio; a frame of length 0 ends the audio (mic pressed again, the 10 s cap, the app's own limit)
+  laptop -> app  JSON lines: {"heard": "…"} as it understands, {"stop": true} when it has decided (stop recording),
+                 then {"transcript", "say", "ok"} as /v1/utterance answers; then it closes
+  Same address check and token; at most 12 s of audio; one at a time.
 
 Localhost (127.0.0.1:8766), for the panel, the CLI and the MCP server, same token:
     POST /v1/text {"text"}      decide and do it            POST /v1/audio  PCM16 from the laptop's mic
@@ -31,7 +38,8 @@ from .agent import Agent
 from .config import Config, lan_address
 from .decide import evaluate
 from .decide import rules as R
-from .decide.router import Decision, Router
+from .decide.router import Decision, Router, normalize
+from .listen_stream import StreamSession
 from .stt import Stt
 
 log = logging.getLogger("tv_agent")
@@ -167,6 +175,83 @@ class Service:
         return text
 
 
+async def stream_client(svc: "Service", reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    """One mic press, streamed (protocol in the module docstring)."""
+    peer = (writer.get_extra_info("peername") or ("",))[0]
+
+    async def send(msg: dict):
+        writer.write(json.dumps(msg, ensure_ascii=False).encode() + b"\n")
+        await writer.drain()
+
+    try:
+        allowed = set(svc.cfg.tv_hosts) | ({svc.agent.adb.host} if svc.agent.adb.host else set())
+        if peer not in allowed:
+            return
+        hello = json.loads(await asyncio.wait_for(reader.readline(), 3) or b"{}")
+        given = str(hello.get("token") or "")
+        if not svc.token or not hmac.compare_digest(given.encode(), svc.token.encode()):
+            await send({"error": "unauthorized"})
+            return
+        if svc._busy.locked():
+            await send({"error": "busy"})
+            return
+        async with svc._busy:
+            log.info("TV app streaming (from %s)", peer)
+            # Pressed on the screensaver, the app opens behind it, hidden and without the microphone: wake the TV.
+            asyncio.create_task(svc.agent._wake())
+            await stream_session(svc, reader, send)
+    except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionError, ValueError) as e:
+        log.info("audio stream from %s ended: %s", peer, type(e).__name__)
+    finally:
+        writer.close()
+
+
+async def stream_session(svc: "Service", reader: asyncio.StreamReader, send):
+    svc.maybe_reload()
+    rules = svc.agent.rules
+
+    async def transcribe(audio: bytes) -> str:
+        t = time.perf_counter()
+        text = await asyncio.to_thread(svc.stt.transcribe, audio)
+        svc.agent.state.timings.add("stt", (time.perf_counter() - t) * 1000)
+        return text
+
+    sess = StreamSession(transcribe, svc.decide, lambda text: normalize(text, rules), send)
+    total, ended = 0, False
+    while not sess.committed.is_set():
+        try:
+            n = int.from_bytes(await asyncio.wait_for(reader.readexactly(2), 3), "big")
+            if n == 0:
+                ended = True
+                break
+            if n > 8192 or total + n > MAX_BODY:
+                break
+            data = await asyncio.wait_for(reader.readexactly(n), 3)
+        except (asyncio.TimeoutError, asyncio.IncompleteReadError):
+            ended = True            # the app went quiet or away: decide on what arrived
+            break
+        total += n
+        sess.feed(data)
+    d, text = await sess.finish() or (Decision(A.Unclear(heard=""), "none", 0.0, "", []), "")
+    await send({"stop": True})
+    if sess.endpoint_ms is not None:
+        svc.agent.state.timings.add("endpoint", sess.endpoint_ms)
+        log.info("decided %.0f ms after the last word", sess.endpoint_ms)
+    if d.action.type != "none":
+        svc.start(d, text, "tv")
+    else:
+        svc.record("tv", text, d, False, unclear_say(text), None)
+    await send({"transcript": text, "say": describe(d.action) if d.action.type != "none" else unclear_say(text),
+                "ok": d.action.type != "none"})
+    # Read (and drop) what the app sent meanwhile until its end marker: closing with unread audio would reset the
+    # connection, and the app could lose the reply above and send the recording again.
+    try:
+        while not ended and (n := int.from_bytes(await asyncio.wait_for(reader.readexactly(2), 2), "big")):
+            await asyncio.wait_for(reader.readexactly(n), 2)
+    except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionError):
+        pass
+
+
 def unclear_say(text: str) -> str:
     return f"Didn't get that: “{text}”" if text else "Didn't hear anything"
 
@@ -183,7 +268,7 @@ def lan_app(svc: Service) -> FastAPI:
     async def listen_start(request: Request):
         svc.check(request, lan=True)
         log.info("TV app listening (from %s)", request.client.host)
-        asyncio.create_task(asyncio.to_thread(svc.agent.adb.keepalive))
+        asyncio.create_task(svc.agent._wake())     # the screensaver would hide the pill (see stream_client)
         return {"ok": True}
 
     @app.post("/v1/utterance")
@@ -332,6 +417,7 @@ async def serve(cfg: Config):
     except Exception as e:
         log.warning("couldn't pick up the last session: %s", type(e).__name__)
     lan_host = lan_address(cfg)
+    stream = await asyncio.start_server(lambda r, w: stream_client(svc, r, w), lan_host, cfg.stream_port)
     servers = [
         uvicorn.Server(uvicorn.Config(lan_app(svc), host=lan_host, port=cfg.lan_port, access_log=False,
                                       log_level="warning")),
@@ -344,10 +430,11 @@ async def serve(cfg: Config):
             await asyncio.sleep(50)
             await asyncio.to_thread(svc.agent.adb.keepalive)
 
-    log.info("listening on %s:%d (TV) and 127.0.0.1:%d (local)", lan_host, cfg.lan_port, cfg.local_port)
+    log.info("listening on %s:%d and :%d (TV) and 127.0.0.1:%d (local)", lan_host, cfg.lan_port, cfg.stream_port,
+             cfg.local_port)
     ka = asyncio.create_task(keepalive())
     try:
-        await asyncio.gather(*(s.serve() for s in servers))
+        await asyncio.gather(*(s.serve() for s in servers), stream.serve_forever())
     finally:
         ka.cancel()
         await svc.agent.close()

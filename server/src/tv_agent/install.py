@@ -90,12 +90,13 @@ WantedBy=default.target
 
 
 def pair(cfg: Config, adb: Adb) -> str:
-    """Send the agent's address and token to the TV app (a broadcast only ADB may send)."""
+    """Send the agent's address, token and audio-stream port to the TV app (a broadcast only ADB may send)."""
     token = cfg.secret("agent_token")
     if not token:
         raise SystemExit("no agent token yet: run `tv-agent setup token`")
     url = f"http://{lan_address(cfg)}:{cfg.lan_port}"
-    out = adb.run(["am", "broadcast", "-n", f"{APP}/.ConfigReceiver", "--es", "url", url, "--es", "token", token])
+    out = adb.run(["am", "broadcast", "-n", f"{APP}/.ConfigReceiver", "--es", "url", url, "--es", "token", token,
+                   "--ei", "stream_port", str(cfg.stream_port)])
     if "result=-1" not in out.replace(" ", ""):
         raise SystemExit(f"the TV app didn't take the settings ({out.strip()[-80:]}); is it installed?")
     return url

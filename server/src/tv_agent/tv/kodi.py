@@ -34,6 +34,7 @@ class Kodi:
         self.http, self.adb, self.port = http, adb, port
         self.auth = httpx.BasicAuth(user, password) if password else None
         self._id = 0
+        self._settings = {}          # what prefer() last set, so unchanged settings aren't sent again
 
     @property
     def url(self) -> str:
@@ -118,6 +119,16 @@ class Kodi:
             return
         await self.call("Player.SetSubtitle", {"playerid": pid, "subtitle": index, "enable": True})
         await self.call("Player.SetSubtitle", {"playerid": pid, "subtitle": "on"})
+
+    async def prefer(self, audio: str, subtitles: str):
+        """Kodi's own language choice for the next file (names as in its settings: "English", "Spanish"…, or
+        "mediadefault" / "none"), with the file's "default" flags ignored, so it starts on the right tracks."""
+        wanted = {"locale.audiolanguage": audio, "locale.subtitlelanguage": subtitles,
+                  "videoplayer.preferdefaultflag": False}
+        for key, value in wanted.items():
+            if self._settings.get(key) != value:
+                await self.call("Settings.SetSettingValue", {"setting": key, "value": value})
+                self._settings[key] = value
 
     async def add_subtitle(self, pid: int, url: str):
         """Load a subtitle file by link (Kodi detects the format from its content); it becomes the shown one."""

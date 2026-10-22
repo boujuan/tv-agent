@@ -19,8 +19,15 @@ def get_volume(adb: Adb) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def set_volume(adb: Adb, level: int):
-    """Exact level with the TV's volume bar shown. Mute is level 0 plus a remembered level (state.py): the
-    VOLUME_MUTE key only toggles, and KEYCODE_MUTE is the microphone's mute."""
+def set_volume(adb: Adb, level: int, current: int | None = None):
+    """Exact level, by pressing the volume keys the difference from now (one step each; the TV shows its own
+    volume bar). Setting the level through Android's audio service is ignored on this TCL, at least while Kodi
+    plays (found 2026-10-22). Mute is level 0 plus a remembered level (state.py): the VOLUME_MUTE key only
+    toggles, reading the mute state takes a second, and KEYCODE_MUTE is the microphone's mute."""
     level = max(0, min(100, int(level)))
-    adb.run(["cmd", "media_session", "volume", "--show", "--stream", MUSIC, "--set", str(level)])
+    if current is None:
+        current = get_volume(adb)
+    if current is None or current == level:
+        return
+    key = "KEYCODE_VOLUME_UP" if level > current else "KEYCODE_VOLUME_DOWN"
+    adb.run(["cmd", "input", "keyevent", *([key] * abs(level - current))], timeout=20)

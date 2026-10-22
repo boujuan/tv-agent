@@ -9,6 +9,11 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 Upgrading from 0.3.0, which was signed with a debug key: uninstall it once (`tv-agent tv shell pm uninstall
 com.boujuan.tvagent`), then `tv-agent tv install tv-agent-android-<version>.apk`, which pairs again.
 
+### Added
+- Streams the remote's microphone to tv-agent while you speak (TCP, `stream_port`, sent at pairing) and shows
+  what it has understood so far; tv-agent decides during your pause and tells the app to stop. Falls back to
+  sending the recording at the end when the stream isn't available (an older agent, a dropped connection).
+
 ### Changed
 - Releases are signed with the project's release key (certificate SHA-256
   `bd934e07d6784766bbfb3948bf3467ef9b2cb0c9c1146fdf9528dc76c8eb1e08`), so each release installs over the previous
@@ -40,7 +45,22 @@ panel's Decisions tab, then redo your changes.
 
 - Kodi is started while the stream is being looked up, when it isn't running yet.
 
+- d1 acts only when it's at least 0.65 sure and its answer is twice as likely as the next ("one two three" was
+  taken for "next episode" at 0.32).
+- Kodi: before each file, its preferred audio and subtitle languages are set from your rule and the files'
+  "default" flags ignored (a Blu-ray started on its Ukrainian dub); tracks are refined once playback has settled
+  and kept for 8 s against Kodi's own late changes (it turned subtitles off again after the resume jump).
+- Volume is changed with the volume keys: setting the level through Android is ignored on this TCL while Kodi
+  plays.
+- The TV is woken before anything is shown or played, and when the TV app connects: commands from the laptop and
+  mic presses on the screensaver opened apps behind it, hidden, frozen and without the microphone.
+- "Clay" at the start is read as "play" (the remote's mic opens a moment late).
+
 ### Added
+- The TV app's audio stream (port 8767): decided ~0.25-0.3 s after your last word for complete commands
+  ("pause", "next episode", "… season 3 episode 2"), ~0.45 s for "volume twenty", ~0.7 s for a title alone, which
+  is often followed by a season. Earlier it was 0.7 s of quiet plus the upload and transcription of the whole
+  clip.
 - Subtitles from your Stremio subtitle addons in Kodi: asked like Stremio asks (the chosen file's hash, size and
   name), and added with `Player.AddSubtitle` for the languages of your list the file doesn't have, the one to show
   last. The file's own subtitles still come first for a language it has.

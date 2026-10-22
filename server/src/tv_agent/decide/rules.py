@@ -87,6 +87,7 @@ class Rules:
     apps: dict[str, App]
     hooks: dict[str, dict]
     counts: dict = field(default_factory=dict)
+    min_ratio: float = 1.0                       # d1's top answer must be this many times as likely as its second
 
     # ---- apps and hooks ----
 
@@ -303,6 +304,9 @@ def build(raw: dict, source: str) -> Rules:
     rules.min_confidence = float(m.get("min_confidence", 0.3))
     if not 0 <= rules.min_confidence <= 1:
         raise RulesError("model: min_confidence must be between 0 and 1")
+    rules.min_ratio = float(m.get("min_ratio", 1.0))
+    if rules.min_ratio < 1:
+        raise RulesError("model: min_ratio (top answer over the second) must be 1 or more")
     for key, it in m.get("intents", {}).items():
         it = it if isinstance(it, dict) else {"describe": str(it)}
         if not it.get("enabled", True):

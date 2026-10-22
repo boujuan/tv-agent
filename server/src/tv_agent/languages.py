@@ -23,6 +23,12 @@ ALIASES = {"eng": {"eng", "en", "english"}, "spa": {"spa", "es", "spanish", "esp
 # Simplified vs Traditional Chinese: the track's language says "Chinese"; its name usually says which.
 SIMPLIFIED = re.compile(r"simplified|简体|簡體|简|\bchs\b|hans|\bsc\b|zh-?cn|chinese \(prc\)|mandarin", re.I)
 TRADITIONAL = re.compile(r"traditional|繁體|繁体|繁|\bcht\b|hant|\btc\b|zh-?tw|zh-?hk|taiwan|hong ?kong|cantonese|big5", re.I)
+# Kodi's names in its language settings (locale.audiolanguage / locale.subtitlelanguage).
+KODI_NAMES = {"eng": "English", "spa": "Spanish", "fre": "French", "ita": "Italian", "ger": "German",
+              "por": "Portuguese", "jpn": "Japanese", "kor": "Korean", "chi": "Chinese", "chs": "Chinese",
+              "cht": "Chinese"}
+# Commentary and audio-description tracks: never the one to play by default.
+EXTRA_AUDIO = re.compile(r"comment|коментар|комментар|director|descri|\bAD\b", re.I)
 # Android caption locales for Just Player (it only tells languages apart, not the two Chinese scripts).
 ANDROID_LOCALE = {"eng": "en", "spa": "es", "fre": "fr", "ita": "it", "ger": "de", "por": "pt", "jpn": "ja",
                   "kor": "ko", "chi": "zh", "chs": "zh_CN", "cht": "zh_TW"}
@@ -62,10 +68,12 @@ def android_locale(lang: str) -> str:
 
 
 def pick_audio(tracks: list[dict], lang: str) -> dict | None:
-    """The track in that language; for Spanish, Castilian before Latin American."""
+    """The track in that language, not a commentary or audio description; for Spanish, Castilian before Latin
+    American."""
     found = [t for t in tracks if matches(t, lang)]
-    if lang == "spa":
-        found.sort(key=lambda t: any(w in str(t.get("name") or "").lower() for w in ("latino", "latin", "lat ")))
+    found.sort(key=lambda t: (bool(t.get("isimpaired")) or bool(EXTRA_AUDIO.search(str(t.get("name") or ""))),
+                              lang == "spa" and any(w in str(t.get("name") or "").lower()
+                                                    for w in ("latino", "latin", "lat "))))
     return found[0] if found else None
 
 

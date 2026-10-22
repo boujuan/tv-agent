@@ -1,8 +1,10 @@
 # tv-agent TV app
 
 The app on the TV (`com.boujuan.tvagent`, ~28 KB, plain Java, no libraries) that the remote's mic button opens.
-It shows a small "Listening…" pill, records until you stop talking, sends the audio to the
-[tv-agent server](../server/README.md), shows what it heard and what it will do, and closes. Nothing runs between
+It shows a small "Listening…" pill and streams the audio to the [tv-agent server](../server/README.md) while you
+speak; the server shows what it has understood so far, decides during your pause and tells the app to stop. The
+pill shows what it heard and what it will do, and closes. With an older server (or if the connection drops) it
+records until 0.7 s of quiet and sends it all at once. Nothing runs between
 presses: no service, no listener.
 
 ## Build and install
@@ -36,8 +38,8 @@ Settings > Privacy > Microphone must be on (only the app records, and only while
 
 | Class | What it does |
 |---|---|
-| `ListenActivity` | The pill: records with end-of-speech detection (16 kHz, stops after 0.7 s of quiet, 10 s cap), uploads, shows the reply |
-| `Pairing`, `ConfigReceiver` | Where the agent is and its token; set over ADB only (`DUMP` permission) |
+| `ListenActivity` | The pill: streams the microphone (16 kHz, 20 ms chunks) and stops when the agent has decided; 10 s cap; falls back to recording until 0.7 s of quiet and uploading |
+| `Pairing`, `ConfigReceiver` | Where the agent is, its token and its audio-stream port; set over ADB only (`DUMP` permission) |
 | `SayReceiver` | Shows the agent's messages ("Playing The Bear · S3E2 · 4K") as a toast; ADB only |
 | `ProbeActivity` | Phase 0 microphone probe (which input a normal app gets); ADB only |
 

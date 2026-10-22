@@ -59,6 +59,11 @@
         "from": "[,\\s]+(?:now|thanks|thank you|right now|for me)$",
         "to": "",
         "note": "politeness at the end (“pause now”, “next episode thanks”)"
+      },
+      {
+        "from": "^(?:clay|klay|blay|flay)\\b",
+        "to": "play",
+        "note": "the remote's mic opens a moment late and clips the “p” of “play”"
       }
     ]
   },
@@ -495,7 +500,8 @@
   ],
   "model": {
     "question": "A spoken command to a TV, transcribed by speech recognition (it may contain recognition errors). Which action does the user want?",
-    "min_confidence": 0.3,
+    "min_confidence": 0.65,
+    "min_ratio": 2.0,
     "offline_fallback": "play_title",
     "title_question": "Which title does the user most likely mean?",
     "title_candidates": 4,

@@ -47,6 +47,18 @@ Also measured and set aside: Stremio's own player accepts an agent-chosen stream
 (`stremio:///player/<stream>/<addon>/<cinemeta>/<type>/<id>/<video>`) and keeps Continue Watching itself, but took
 15-20 s to start cold and only takes media keys.
 
+## Voice: decided while you pause
+
+The TV app streams the remote's microphone in 20 ms chunks from the moment the pill opens (`stream_port`, 8767,
+on the same address and token as the TV's HTTP endpoint). tv-agent tracks speech and quiet as it arrives and,
+in the quiet after you speak, transcribes and decides: at ~160 ms of quiet for a complete command that can't be
+the start of a longer one ("pause", "next episode", "go home", "… season 3 episode 2"), at ~460 ms for other
+understood commands ("volume twenty" could still become "twenty five"), at ~720 ms otherwise (a title alone, since
+a season often follows). If you go on talking, the early result is dropped. Measured with the remote on
+2026-10-22: 240-310 ms from your last word to the decision for complete commands (it was ~0.9 s). The pill shows
+what it has understood so far. Pressing the mic again sends at once; without the stream the app falls back to
+recording until 0.7 s of quiet and sending it all. Logic: `listen_stream.py`; protocol: `server.py`.
+
 ## How it decides
 
 All of this is data in `~/.config/tv-agent/rules.json` (or `src/tv_agent/decide/default_rules.json` until you
@@ -60,8 +72,8 @@ save your own), editable in the panel's **Decisions** tab and used at once, with
    A converter marked `!` makes the rule not match when its part can't be converted, so the next rule gets a try.
    The last two catch "play / put on / watch / start + a title" and a title said with a season or episode, so the
    commonest commands never wait for the model, and titles made of command words ("Up", "Stop Making Sense") play.
-4. **d1-3B** (Liquid AI's decision model, ~0.65 s) chooses among the intents by their descriptions; below the
-   confidence threshold (0.30) the answer is "Didn't get that". d1 sees only the descriptions, never the intent
+4. **d1-3B** (Liquid AI's decision model, ~0.65 s) chooses among the intents by their descriptions; unless it's
+   0.65 sure and its answer is twice as likely as the next, the answer is "Didn't get that". d1 sees only the descriptions, never the intent
    names, so each one says what it does with examples; there is one intent per action (pause, resume, seek to,
    previous episode, set volume…), so nothing has to be squeezed into a near miss. Built-in intents pull titles and
    numbers out with code; your own intents do a fixed action or fill one from the whole sentence. d1 also picks

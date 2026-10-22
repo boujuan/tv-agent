@@ -289,7 +289,8 @@ def test_subtitle_languages_and_request_path():
     from tv_agent.stremio import subtitles as S
     assert S.language("eng") == "eng" and S.language("Spanish", "es") == "spa"
     assert S.language("Chinese bilingual", "ze") == "chi" and S.language("chi") == "chi"
-    sub = S.parse("SubSense", {"id": "1", "url": "https://subs/1.srt", "lang": "eng", "label": "OpenSubtitles · [SRT] · x · HI"})
+    sub = S.parse("SubSense", {"id": "1", "url": "https://subs/1.srt", "lang": "eng",
+                               "label": "OpenSubtitles · [SRT] · x · HI"})
     assert sub.language == "eng" and sub.impaired
     assert S.parse("x", {"lang": "eng"}) is None                               # no link, nothing to load
     s = streams.Stream("AIO", "https://debrid/1", "n", "d", "The Bear S03E02.mkv", 0, video_hash="abc", size=123)
@@ -311,18 +312,24 @@ def test_subtitles_chosen_per_language_in_your_order():
 
 class _FakeKodi:
     def __init__(self, subtitles):
-        self.subs, self.added, self.shown = list(subtitles), [], None
+        self.subs, self.added, self.shown, self.ms, self.external = list(subtitles), [], None, 0, []
+
+    async def position(self, pid):
+        self.ms += 400                  # playing: the picture moves
+        return self.ms, 1_600_000, 1.0
 
     async def tracks(self, pid):
         return {"audiostreams": [{"index": 0, "language": "eng"}], "currentaudiostream": {"index": 0},
-                "subtitles": self.subs, "subtitleenabled": False}
+                "subtitles": self.subs + self.external, "subtitleenabled": False}
 
     async def set_audio(self, pid, index):
         pass
 
-    async def add_subtitle(self, pid, url):
+    async def add_subtitle(self, pid, url):          # Kodi lists an added file as "<id> (External)"
         self.added.append(url)
-        self.shown = url
+        self.external.append({"index": len(self.subs) + len(self.external), "language": "",
+                              "name": f"{len(self.added)} (External)"})
+        self.shown = self.external[-1]["index"]
 
     async def set_subtitle(self, pid, index):
         self.shown = index
@@ -337,9 +344,11 @@ def _apply(kodi, offered, langs):
     async def run():
         async def player():
             return 1
-        me = types.SimpleNamespace(kodi=kodi, _kodi_player=player)
+        async def recheck(*args):
+            pass
+        me = types.SimpleNamespace(kodi=kodi, _kodi_player=player, _recheck_tracks=recheck)
         task = asyncio.create_task(asyncio.sleep(0, result=offered))
-        return await Agent.apply_tracks(me, languages.TrackPlan("eng", langs), addon_subs=task)
+        return await Agent.apply_tracks(me, languages.TrackPlan("eng", langs), addon_subs=task, settle_s=0)
     return asyncio.run(run())
 
 
@@ -352,4 +361,95 @@ def test_kodi_gets_addon_subtitles_only_for_missing_languages():
     nothing_inside = _FakeKodi([])
     note = _apply(nothing_inside, offered, ["eng", "spa"])
     assert nothing_inside.added == ["https://s/spa", "https://s/eng"]           # the one to show goes last
-    assert nothing_inside.shown == "https://s/eng" and note == "eng subs from SubSense"
+    assert nothing_inside.shown == 1 and note == "eng subs from SubSense"       # and it's the one selected
+
+
+@pytest.mark.parametrize("text,stage,expect", [
+    ("pause", 0, True), ("next episode", 0, True), ("go home", 0, True), ("mute", 0, True),
+    ("play", 0, False), ("play", 1, False), ("play", 2, True),                  # "play …" may go on
+    ("play the bear", 1, False), ("play the bear", 2, True),                    # a title alone waits for "season 3"
+    ("play the bear season 3 episode 2", 0, True), ("go to season 4 episode 2", 0, True),
+    ("volume twenty", 0, False), ("volume twenty", 1, True), ("volume fifteen", 0, True),
+    ("lofi on youtube", 1, False), ("skip 30 seconds", 0, True), ("continue the bear", 1, True),
+])
+def test_when_a_streamed_command_is_acted_on(text, stage, expect):
+    from tv_agent.listen_stream import ready
+    t = router.normalize(text, RULES)
+    hit = router.match_rules(t, RULES, [])
+    assert hit, text
+    assert ready(hit[0], hit[1], t, stage) is expect
+
+
+def test_d1_answers_wait_for_the_second_checkpoint():
+    from tv_agent.listen_stream import ready
+    assert not ready(A.Transport(op="pause"), "d1", "could you hold it there", 0)
+    assert ready(A.Transport(op="pause"), "d1", "could you hold it there", 1)
+    assert not ready(A.Unclear(), "d1", "what time is it", 1)
+
+
+def test_endpointer_counts_quiet_after_speech():
+    import numpy as np
+    from tv_agent.listen_stream import FRAME, Endpointer
+    room = (np.random.default_rng(1).normal(0, 30, FRAME)).astype("<i2")       # ~-60 dB background
+    voice = (np.sin(np.arange(FRAME) / 5) * 8000).astype("<i2")                 # ~-15 dB
+    ep = Endpointer()
+    for _ in range(12):
+        ep.feed(room, 0)
+    assert not ep.speaking and ep.stage == -1
+    for _ in range(20):
+        ep.feed(voice, 0)
+    assert ep.speaking and ep.stage == -1
+    stages = []
+    for _ in range(40):
+        ep.feed(room, 0)
+        stages.append(ep.stage)
+    assert stages.index(0) == 7 and stages.index(1) == 22 and stages.index(2) == 35   # 160, 460, 720 ms
+
+
+def test_stream_session_drops_an_early_result_when_you_keep_talking():
+    import asyncio
+    import numpy as np
+    from tv_agent.decide.router import Decision
+    from tv_agent.listen_stream import FRAME, StreamSession
+
+    room = (np.random.default_rng(2).normal(0, 30, FRAME)).astype("<i2").tobytes()
+    voice = (np.sin(np.arange(FRAME) / 5) * 8000).astype("<i2").tobytes()
+    said = iter(["play", "play the bear season 3 episode 2"])
+
+    async def run():
+        async def transcribe(audio):
+            return next(said)
+
+        async def decide(text):
+            hit = router.match_rules(router.normalize(text, RULES), RULES, [])
+            return Decision(hit[0], hit[1], 1.0, hit[2]) if hit else Decision(A.Unclear(), "none", 0.0)
+
+        sess = StreamSession(transcribe, decide, lambda t: router.normalize(t, RULES), lambda m: None)
+        for chunk in [room] * 12 + [voice] * 20 + [room] * 10 + [voice] * 30 + [room] * 12:
+            sess.feed(chunk)
+            await asyncio.sleep(0)
+        return await sess.finish()
+
+    d, text = asyncio.run(run())
+    assert text == "play the bear season 3 episode 2" and d.action.episode == 2   # "play" alone never ran
+
+
+def test_d1_needs_a_clear_lead_to_act():
+    import asyncio
+    from tv_agent.decide.d1 import Choice
+
+    class FakeD1:
+        def __init__(self, probs):
+            self.probs = probs
+
+        async def choice(self, state, question, options):
+            key = max(self.probs, key=self.probs.get)
+            n = len(options)
+            return Choice(key, (self.probs[key] - 1 / n) / (1 - 1 / n), self.probs)
+
+    def decide(probs, text="one two three"):
+        return asyncio.run(router.Router(FakeD1(probs), RULES).decide(text))
+
+    assert decide({"next_episode": 0.36, "resume": 0.33, "none": 0.31}).action.type == "none"    # no clear winner
+    assert decide({"unmute": 0.63, "none": 0.20, "volume_up": 0.17}).action.type == "none"       # below 0.65
+    assert decide({"volume_down": 0.92, "none": 0.05, "mute": 0.03}, "it is way too loud").action.type == "volume"

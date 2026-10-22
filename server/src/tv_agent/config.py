@@ -28,6 +28,7 @@ class Config:
     lan_host: str = ""                      # this computer on the TV's network; empty: worked out (never 0.0.0.0)
     lan_port: int = 8765
     local_port: int = 8766
+    stream_port: int = 8767                 # the TV app's live audio (LAN, like lan_port)
     d1_url: str = "http://127.0.0.1:8091"
     d1_model: Path = DATA_DIR / "models/d1-3B/d1-3B-Q4_K_M.gguf"
     llama_server: str = ""                  # llama.cpp's llama-server; empty: on PATH or under ~/.local/opt

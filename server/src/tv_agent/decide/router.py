@@ -178,7 +178,8 @@ class Router:
         step = {"stage": "model", "intent": pick.key, "confidence": round(pick.confidence, 3),
                 "threshold": rules.min_confidence, "top": [[k, round(p, 3)] for k, p in top]}
         trace.append(step)
-        if pick.key == "none" or pick.confidence < rules.min_confidence:
+        ratio = top[0][1] / max(top[1][1], 1e-9) if len(top) > 1 else float("inf")
+        if pick.key == "none" or pick.confidence < rules.min_confidence or ratio < rules.min_ratio:
             step["accepted"] = False
             return Decision(A.Unclear(heard=text), "d1", pick.confidence, pick.key, trace)
         action = from_intent(pick.key, t, rules)
