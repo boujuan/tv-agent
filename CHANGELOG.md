@@ -22,9 +22,10 @@ panel's Decisions tab, then redo your changes.
 
 ### Changed
 - Every action has its own d1 intent (pause, resume, stop, skip forward/back, seek to, restart, previous episode,
-  set volume, louder, quieter, mute, unmute…), each described with examples. d1 only sees the descriptions, and
-  "previous episode", "go back to the start" or "volume twenty" used to have no matching option. On the 107
-  original sentences d1 on its own went from 84 to 97 right.
+  set volume, louder, quieter, mute, unmute…), each described with one example. d1 only sees the descriptions,
+  and "previous episode", "go back to the start" or "volume twenty" used to have no matching option. On the 107
+  original sentences d1 on its own went from 84 to 100 right; a d1 answer now takes ~0.65 s instead of ~0.2 s
+  (longer prompt), but the new rules leave it only ~4% of commands.
 - New pattern rules: "play / put on / watch / start + a title" and a title said with a season or episode, so the
   commonest commands are decided in under 0.1 ms instead of ~0.2 s, and titles made of command words ("Up",
   "Stop Making Sense", "Pause") are played instead of obeyed.

@@ -501,70 +501,70 @@
     "title_candidates": 4,
     "intents": {
       "play_title": {
-        "describe": "play a named movie or series, maybe a given season or episode (e.g. 'play the bear season 3 episode 2', 'put on dune', 'watch severance from the start')"
+        "describe": "play a named movie or series, maybe a given season or episode (e.g. 'play the bear season 3 episode 2')"
       },
       "continue_watching": {
-        "describe": "continue a named title, or whatever was watched last, from where it was left (e.g. 'continue severance', 'resume the last of us', 'keep watching')"
+        "describe": "continue a named title, or whatever was watched last, from where it was left (e.g. 'continue severance')"
       },
       "next_episode": {
-        "describe": "go to the next episode of what is playing (e.g. 'next episode', 'skip this episode')"
+        "describe": "go to the next episode of what is playing (e.g. 'next episode')"
       },
       "previous_episode": {
-        "describe": "go back to the previous episode of what is playing (e.g. 'previous episode', 'go back one episode')"
+        "describe": "go back to the previous episode of what is playing (e.g. 'previous episode')"
       },
       "open_in_stremio": {
-        "describe": "show a title's page in Stremio without playing it (e.g. 'open the office in stremio', 'show me the bear in stremio')"
+        "describe": "show a title's page in Stremio without playing it (e.g. 'open the office in stremio')"
       },
       "youtube": {
-        "describe": "play or search something on YouTube (e.g. 'lofi on youtube', 'search cats on youtube')"
+        "describe": "play or search something on YouTube (e.g. 'lofi on youtube')"
       },
       "twitch": {
         "describe": "watch a streamer's channel on Twitch (e.g. 'put ibai on twitch')"
       },
       "open_app": {
-        "describe": "open an app such as YouTube, Stremio, Twitch, Movistar+, Prime Video, Kodi or Settings (e.g. 'open stremio', 'launch prime video')"
+        "describe": "open an app such as YouTube, Stremio, Twitch, Movistar+, Prime Video, Kodi or Settings (e.g. 'open stremio')"
       },
       "home": {
-        "describe": "go to the TV's home screen (e.g. 'go home', 'home screen')"
+        "describe": "go to the TV's home screen (e.g. 'go home')"
       },
       "pause": {
-        "describe": "pause what is playing (e.g. 'pause', 'hold on', 'wait')"
+        "describe": "pause what is playing (e.g. 'pause')"
       },
       "resume": {
-        "describe": "resume or unpause what is paused (e.g. 'play', 'resume', 'continue', 'unpause')"
+        "describe": "resume or unpause what is paused (e.g. 'play')"
       },
       "stop": {
-        "describe": "stop playback (e.g. 'stop', 'stop playing')"
+        "describe": "stop playback (e.g. 'stop')"
       },
       "skip_forward": {
-        "describe": "skip forward by an amount of time (e.g. 'skip 30 seconds', 'forward 20 minutes', 'fast forward')"
+        "describe": "skip forward by an amount of time (e.g. 'skip 30 seconds')"
       },
       "skip_back": {
-        "describe": "go back by an amount of time (e.g. 'go back 10 seconds', 'rewind a minute')"
+        "describe": "go back by an amount of time (e.g. 'go back 10 seconds')"
       },
       "seek_to": {
-        "describe": "jump to a specific time or point of the current video (e.g. 'go to twelve minutes', 'jump to one hour five', 'go to the middle')"
+        "describe": "jump to a specific time or point of the current video (e.g. 'go to twelve minutes')"
       },
       "restart": {
-        "describe": "start the current video again from the beginning (e.g. 'start over', 'go back to the start', 'from the beginning')"
+        "describe": "start the current video again from the beginning (e.g. 'start over')"
       },
       "volume_set": {
-        "describe": "set the volume to a number (e.g. 'volume twenty', 'set the volume to 15')"
+        "describe": "set the volume to a number (e.g. 'volume twenty')"
       },
       "volume_up": {
-        "describe": "make it louder (e.g. 'volume up', 'louder', 'I can't hear')"
+        "describe": "make it louder (e.g. 'louder')"
       },
       "volume_down": {
-        "describe": "make it quieter (e.g. 'volume down', 'quieter', 'too loud')"
+        "describe": "make it quieter (e.g. 'volume down')"
       },
       "mute": {
-        "describe": "mute the sound (e.g. 'mute', 'silence')"
+        "describe": "mute the sound (e.g. 'mute')"
       },
       "unmute": {
-        "describe": "unmute the sound (e.g. 'unmute', 'sound on')"
+        "describe": "unmute the sound (e.g. 'unmute')"
       },
       "none": {
-        "describe": "not a TV command, or not understandable (e.g. 'what time is it', 'thank you', 'uh')"
+        "describe": "not a TV command, or not understandable (e.g. 'what time is it')"
       }
     }
   },

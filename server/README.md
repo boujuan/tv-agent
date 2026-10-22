@@ -57,7 +57,7 @@ save your own), editable in the panel's **Decisions** tab and used at once, with
    A converter marked `!` makes the rule not match when its part can't be converted, so the next rule gets a try.
    The last two catch "play / put on / watch / start + a title" and a title said with a season or episode, so the
    commonest commands never wait for the model, and titles made of command words ("Up", "Stop Making Sense") play.
-4. **d1-3B** (Liquid AI's decision model, ~0.2 s) chooses among the intents by their descriptions; below the
+4. **d1-3B** (Liquid AI's decision model, ~0.65 s) chooses among the intents by their descriptions; below the
    confidence threshold (0.30) the answer is "Didn't get that". d1 sees only the descriptions, never the intent
    names, so each one says what it does with examples; there is one intent per action (pause, resume, seek to,
    previous episode, set volume…), so nothing has to be squeezed into a near miss. Built-in intents pull titles and
@@ -85,7 +85,7 @@ URL-encoded into the hook templates.
 | Stage | Result |
 |---|---|
 | Speech-to-text | 103 ms p50, 193 ms p95 in real use (5 s test clip: 211 ms) |
-| Decision | fixed phrase / pattern under 0.1 ms; d1 ~200-260 ms. Rules decide ~95% of commands. Test sets: 107/107 (`eval/utterances.jsonl`) and 654/654 full actions (`eval/commands.jsonl`: 476 for tuning, 178 held out) |
+| Decision | fixed phrase / pattern under 0.1 ms; d1 ~0.65 s (22 described intents, ~470 prompt tokens). Rules decide ~96% of commands. Test sets: 107/107 (`eval/utterances.jsonl`) and 654/654 full actions (`eval/commands.jsonl`: 476 for tuning, 178 held out) |
 | Transport, volume, apps | ~0.1-0.8 s after you stop talking |
 | Film or episode | ~6 s from your words to moving picture in either player (addon lookup + link check + opening the 4K link dominate) |
 | Cost on this computer | tv-agent ~1.1 GB RAM (mostly the speech model), 0% CPU idle; d1-3B 1.7 GB of GPU memory |

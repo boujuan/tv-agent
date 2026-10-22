@@ -12,7 +12,7 @@ Remote mic button ─► TV app ("Listening…", records until you stop talking)
       ▼
 This computer: tv-agent daemon
    speech-to-text   Parakeet TDT 0.6B v2 (CPU, ~0.1-0.2 s)
-   decide           clean-up → fixed phrases → pattern rules → d1-3B (GPU, ~0.2 s) → one typed action
+   decide           clean-up → fixed phrases → pattern rules → d1-3B (GPU, ~0.65 s, ~4% of commands) → one typed action
    do it            ADB: apps, deep links, media keys, volume
                     Stremio account + Cinemeta + your addons → best cached debrid link → Just Player or Kodi
    afterwards       the player's position → your Stremio library (Continue Watching)
