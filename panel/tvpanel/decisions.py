@@ -5,15 +5,18 @@ the agent, which checks them and uses them at once (no restart)."""
 import copy
 import json
 import subprocess
+from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QFrame,
-                               QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
-                               QPushButton, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
-                               QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog,
+                               QFormLayout, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
+                               QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QSplitter, QTableWidget,
+                               QTableWidgetItem, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
-from .common import AMBER, BLUE, GREEN, GREY, RED, ApiError, api, card, dim, openrouter_check, systemctl
+from .common import (AMBER, BLUE, GREEN, GREY, RED, TV_AGENT, ApiError, KeyLine, agent_config, api, card, dim,
+                     openrouter_check, systemctl)
+from .speech_tab import SpeechToText
 
 # ---------------------------------------------------------------- the diagram
 
@@ -26,12 +29,13 @@ DECISION_MODELS = ["d1", "d1-ultra", "liquid/d1", "liquid/d1-ultra", "typesafe/j
 
 FIXED = {"input": "Your words", "stt": "Speech to text", "clean": "Clean-up", "unclear": "Didn't get that",
          "action": "Action", "tv": "TV"}
-STEP_TITLE = {"phrases": "Fixed phrases", "patterns": "Pattern rules", "llm": "LLM", "d1": "d1 model"}
+STEP_TITLE = {"phrases": "Fixed phrases", "patterns": "Pattern rules", "llm": "LLM", "d1": "Decision model"}
 STEP_EDGE = {"phrases": "exact match", "patterns": "a rule fits", "llm": "answered", "d1": "confident"}
 WHERE = [("local-first", "Local, then hosted"), ("hosted-first", "Hosted, then local"), ("local", "Local only"),
          ("hosted", "Hosted only")]
 NUMS = "①②③④"
-TAB_FOR = {"clean": 0, "phrases": 1, "patterns": 2, "llm": 3, "d1": 4, "unclear": 4, "action": 5, "tv": 5}
+TAB_FOR = {"clean": 0, "phrases": 1, "patterns": 2, "input": 3, "stt": 3, "llm": 4, "d1": 5, "unclear": 5,
+           "action": 6, "tv": 6}
 
 
 class StepCard(QFrame):
@@ -429,6 +433,7 @@ class TableEditor(QWidget):
         self.extra = btns
         lay.addLayout(btns)
         self.locked_rows: set[int] = set()
+        self._fitted = False
 
     def _cell(self, value, kind) -> QTableWidgetItem:
         if kind == "list":
@@ -466,6 +471,8 @@ class TableEditor(QWidget):
 
     def add_row(self, row: dict | None = None):
         self._append(row or {})
+        if self._fitted:
+            self.fit_rows()
         self.table.setCurrentCell(self.table.rowCount() - 1, 0)
         self.table.editItem(self.table.item(self.table.rowCount() - 1, 0))
         self.changed.emit()
@@ -478,6 +485,8 @@ class TableEditor(QWidget):
             QMessageBox.information(self, "TV Agent", "Built-in entries can be switched off but not removed.")
             return
         self.table.removeRow(i)
+        if self._fitted:
+            self.fit_rows()
         self.locked_rows = {r - (r > i) for r in self.locked_rows if r != i}
         self.changed.emit()
 
@@ -522,6 +531,15 @@ class TableEditor(QWidget):
                     r[key] = text
             out.append(r)
         return out
+
+    def fit_rows(self):
+        """As tall as all its rows: the page around it scrolls instead."""
+        t = self.table
+        t.resizeRowsToContents()
+        h = t.horizontalHeader().height() + sum(t.rowHeight(i) for i in range(t.rowCount())) + 2 * t.frameWidth() + 4
+        t.setFixedHeight(max(h, 120))
+        t.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._fitted = True
 
     def select_where(self, key: str, value: str):
         col = next((j for j, c in enumerate(self.columns) if c[1] == key), None)
@@ -656,6 +674,10 @@ class Decisions(QWidget):
         al.addWidget(self.pattern_help)
         self.tabs.addTab(aw, "Pattern rules")
 
+        # speech to text (applies at once)
+        self.speech = SpeechToText(self.panel, self)
+        self.tabs.addTab(self.speech, "Speech to text")
+
         # the LLM (applies at once, like the steps above)
         lw = QWidget()
         ll = QVBoxLayout(lw)
@@ -678,31 +700,55 @@ class Decisions(QWidget):
         self.llm_private.setToolTip("Zero data retention providers only: fewer to choose from, often slower")
         self.llm_private.clicked.connect(lambda _c: self.llm_changed())
         lf.addRow("Model", self.llm_model)
-        self.llm_check = dim("")
+        self.llm_check = dim("", wrap=False)
         lf.addRow("", self.llm_check)
         lf.addRow("Reasoning", self.llm_reasoning)
         lf.addRow("", self.llm_private)
+        self.llm_key = KeyLine(self.panel)
+        lf.addRow("", self.llm_key)
         ll.addLayout(lf)
-        self.llm_note = dim("")
-        ll.addWidget(self.llm_note)
-        ll.addWidget(dim("It gets what you said, what's playing, the app names and up to 10 of your library's titles "
-                         "that sound like what you said. Its answer is checked like every other: a title it names "
-                         "still has to be found before anything plays. It also gets titles the search can't find, to "
-                         "say what they were misheard from. Measured models: docs/research-2026-10-22.md."))
         ll.addStretch()
         self.tabs.addTab(lw, "LLM")
 
-        # model
-        mw = QWidget()
-        ml = QVBoxLayout(mw)
+        # the decision model: a scrolling page, the intents table at full height
+        mw = QScrollArea()
+        mw.setWidgetResizable(True)
+        mw.setFrameShape(QFrame.Shape.NoFrame)
+        inner = QWidget()
+        mw.setWidget(inner)
+        ml = QVBoxLayout(inner)
         mf = QFormLayout()
+        self.local_d1 = QComboBox()
+        self.local_d1.setToolTip("The model file llama-d1 serves on this laptop (a GGUF)")
+        self.local_d1.activated.connect(lambda _i: self.local_d1_changed(self.local_d1.currentData()))
+        pick = QPushButton("File…")
+        pick.setToolTip("Another GGUF decision model file")
+        pick.clicked.connect(self.pick_local_d1)
+        row = QHBoxLayout()
+        row.addWidget(self.local_d1, 1)
+        row.addWidget(pick)
+        mf.addRow("Local model", row)
+        self.local_d1_state = dim("", wrap=False)
+        mf.addRow("", self.local_d1_state)
+        self.hosted_model = QComboBox()
+        self.hosted_model.setEditable(True)            # "d1", "d1-ultra" (Liquid's API) or an OpenRouter decision model
+        for model in DECISION_MODELS:
+            self.hosted_model.addItem(f"{model} (recommended)" if model == "d1" else model, model)
+        self.hosted_model.setToolTip("d1 or d1-ultra through Liquid's API (Liquid key), or any of OpenRouter's "
+                                     "decision models by id (OpenRouter key)")
+        self.hosted_model.activated.connect(lambda _i: self.hosted_changed())
+        self.hosted_model.lineEdit().editingFinished.connect(self.hosted_changed)
+        mf.addRow("Hosted model", self.hosted_model)
+        self.hosted_check = dim("", wrap=False)
+        mf.addRow("", self.hosted_check)
+        self.hosted_key = KeyLine(self.panel)
+        mf.addRow("", self.hosted_key)
         self.question = QLineEdit()
         self.min_conf = QDoubleSpinBox()
         self.min_conf.setRange(0, 1)
         self.min_conf.setSingleStep(0.05)
-        self.min_conf.setToolTip("d1's confidence (0 = all options equally likely). Below it, the next step decides "
-                                 "(or “Didn't get that”).")
-        self.fallback_note = "the LLM and d1 off or unreachable: what the rules don't catch is treated as this"
+        self.min_conf.setToolTip("The model's confidence (0 = all options equally likely). Below it, the next step "
+                                 "decides (or “Didn't get that”).")
         self.fallback = QComboBox()
         self.title_q = QLineEdit()
         self.cands = QSpinBox()
@@ -712,31 +758,29 @@ class Decisions(QWidget):
         self.min_conf.valueChanged.connect(self.mark_dirty)
         self.cands.valueChanged.connect(self.mark_dirty)
         self.fallback.currentIndexChanged.connect(self.mark_dirty)
-        self.hosted_model = QComboBox()
-        self.hosted_model.setEditable(True)            # "d1", "d1-ultra" (Liquid's API) or an OpenRouter decision model
-        self.hosted_model.addItems(DECISION_MODELS)
-        self.hosted_model.setToolTip("d1 or d1-ultra through Liquid's API (Liquid key), or any of OpenRouter's "
-                                     "decision models by id (OpenRouter key)")
-        self.hosted_model.activated.connect(lambda _i: self.hosted_changed())
-        self.hosted_model.lineEdit().editingFinished.connect(self.hosted_changed)
-        mf.addRow("Hosted decision model", self.hosted_model)
-        self.hosted_check = dim("")
-        mf.addRow("", self.hosted_check)
-        mf.addRow("Question d1 answers", self.question)
+        mf.addRow("Question it answers", self.question)
         mf.addRow("Act only above confidence", self.min_conf)
         mf.addRow("When no model answers", self.fallback)
+        mf.addRow("", dim("When the LLM and the decision model are off or can't be reached, a sentence the rules "
+                          "don't catch is treated as this. “play_title” takes the whole sentence as a title and plays "
+                          "it only if the search finds that exact name (“the bear” plays The Bear; “what's the "
+                          "weather” finds nothing and does nothing). “nothing” always says “Didn't get that”."))
         mf.addRow("Title-choice question", self.title_q)
-        mf.addRow("Title candidates shown to d1", self.cands)
+        mf.addRow("Candidates for a title choice", self.cands)
+        mf.addRow("", dim("When a title search finds several close names and none clearly wins (“the office”: the US "
+                          "or the UK series), the decision model picks among the top ones, with your sentence. More "
+                          "candidates give it more chance to include the right one but a harder choice; your library "
+                          "is checked first and Cinemeta's popularity settles most ties before it's asked."))
         ml.addLayout(mf)
-        ml.addWidget(dim("Intents are the options d1 chooses between; it reads only their descriptions. Built-in "
-                         "intents use code to pull out titles and numbers; your own intents do a fixed action, or use "
-                         "\"{text|converter}\" on the whole sentence."))
+        ml.addWidget(dim("Intents are the options the decision model chooses between; it reads only their "
+                         "descriptions. Built-in intents use code to pull out titles and numbers; your own intents do "
+                         "a fixed action, or use \"{text|converter}\" on the whole sentence."))
         self.intents = TableEditor([("On", "enabled", "bool", False), ("Intent", "key", "text", False),
-                                    ("What d1 reads", "describe", "text", True),
+                                    ("What the model reads", "describe", "text", True),
                                     ("Action (JSON, your own intents)", "do", "json", True)],
                                    movable=False, add_label="Add intent")
-        ml.addWidget(self.intents, 1)
-        self.tabs.addTab(mw, "d1 model")
+        ml.addWidget(self.intents)
+        self.tabs.addTab(mw, "Decision model")
 
         # apps & hooks
         hw = QWidget()
@@ -846,6 +890,7 @@ class Decisions(QWidget):
             if k in builtin:
                 locked.add(i)
         self.intents.set_rows(rows, locked)
+        self.intents.fit_rows()
         for i in locked:          # show "built-in" in the action column
             self.intents.table.item(i, 3).setText("built-in")
         self.fallback.blockSignals(True)
@@ -854,7 +899,6 @@ class Decisions(QWidget):
         for k in m.get("intents", {}):
             if k != "none":
                 self.fallback.addItem(k.replace("play_title", "play_title (play it as a title)"), k)
-        self.fallback.setToolTip(self.fallback_note)
         self.fallback.setCurrentIndex(max(0, self.fallback.findData(m.get("offline_fallback", "play_title"))))
         self.fallback.blockSignals(False)
         self.apps.set_rows(raw.get("apps", []))
@@ -992,10 +1036,30 @@ class Decisions(QWidget):
         self.llm_model.setCurrentText(res["llm_model"])
         self.llm_reasoning.setCurrentIndex(max(0, self.llm_reasoning.findData(res["llm_reasoning"])))
         self.llm_private.setChecked(res["llm_private"])
-        self.hosted_model.setCurrentText(res["hosted_d1_model"])
-        self.llm_note.setText("OpenRouter key set." if res["keys"]["openrouter"] else
-                              f"<span style='color:{AMBER}'>No OpenRouter key yet: Settings › Set OpenRouter key."
-                              "</span>")
+        i = self.hosted_model.findData(res["hosted_d1_model"])
+        if i >= 0:
+            self.hosted_model.setCurrentIndex(i)
+        else:
+            self.hosted_model.setEditText(res["hosted_d1_model"])
+        keys = res["keys"]
+        self.llm_key.show_key(keys["openrouter"], "OpenRouter")
+        via_openrouter = "/" in res["hosted_d1_model"]
+        self.hosted_key.show_key(keys["openrouter"] if via_openrouter else keys["liquid"],
+                                 "OpenRouter" if via_openrouter else "Liquid",
+                                 " (for this hosted model)")
+        self.local_d1.blockSignals(True)
+        self.local_d1.clear()
+        path = res.get("d1_model", "")
+        for f in sorted(set((agent_config.DATA_DIR / "models").glob("*/*.gguf")) | ({Path(path)} if path else set())):
+            self.local_d1.addItem(f.stem, str(f))
+            self.local_d1.setItemData(self.local_d1.count() - 1, str(f), Qt.ItemDataRole.ToolTipRole)
+        self.local_d1.setCurrentIndex(max(0, self.local_d1.findData(path)))
+        self.local_d1.blockSignals(False)
+        state = self._d1_server()
+        self.local_d1_state.setText(f"<span style='color:{GREEN if state == 'active' else AMBER}'>●</span> "
+                                    + ("llama-d1 running" if state == "active" else f"llama-d1 {state}")
+                                    + ("" if res["d1_where"] != "hosted" else " · not used: hosted only"))
+        self.speech.show_state(res)
         self.check_models(res["llm_model"], res["hosted_d1_model"])
 
     def check_models(self, llm: str, hosted: str):
@@ -1010,15 +1074,40 @@ class Decisions(QWidget):
         if self._checked.get("hosted") != hosted:
             self._checked["hosted"] = hosted
             if "/" not in hosted:
-                self.hosted_check.setText("Liquid's own API (the Liquid key, Settings)")
+                self.hosted_check.setText("Through Liquid's own API")
             else:
                 self.panel.bg.run(lambda: openrouter_check(hosted, "decision"),
                                   lambda r, e: show(self.hosted_check, r or (False, str(e))))
 
     def hosted_changed(self):
-        model = self.hosted_model.currentText().strip()
+        text = self.hosted_model.currentText().strip()
+        i = self.hosted_model.findText(text)
+        model = self.hosted_model.itemData(i) if i >= 0 else text
         if model and model != self.pipeline.get("hosted_d1_model"):
             self.set_pipeline({"hosted_d1_model": model})
+
+    def pick_local_d1(self):
+        path, _ = QFileDialog.getOpenFileName(self, "A GGUF decision model", str(agent_config.DATA_DIR / "models"),
+                                              "GGUF models (*.gguf)")
+        if path:
+            self.local_d1_changed(path)
+
+    def local_d1_changed(self, path: str):
+        """A new local model: saved, llama-d1's service rewritten for it, and restarted if it's running."""
+        if not path or path == self.pipeline.get("d1_model"):
+            return
+
+        def then():
+            def rewrite():
+                r = subprocess.run([str(TV_AGENT), "setup", "services"], capture_output=True, text=True, timeout=60)
+                if r.returncode == 0 and self._d1_server() == "active":
+                    systemctl("restart", "llama-d1.service")
+                return r.returncode, (r.stdout + r.stderr).strip().splitlines()[-1:]
+
+            self.panel.bg.run(rewrite, lambda r, e: (self.panel.refresh_units(), self.status.setText(
+                "Local model set" + ("; llama-d1 restarted with it" if r and r[0] == 0 else f": {e or r}"))))
+
+        self.set_pipeline({"d1_model": path}, then)
 
     def set_pipeline(self, change: dict, then=None):
         def done(res, err):

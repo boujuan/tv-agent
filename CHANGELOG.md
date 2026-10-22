@@ -28,9 +28,24 @@ com.boujuan.tvagent`), then `tv-agent tv install tv-agent-android-<version>.apk`
 ## server — unreleased
 
 Rules version 2. A `rules.json` you saved before keeps working but doesn't get these: Reset to defaults in the
-panel's Decisions tab, then redo your changes.
+panel's Decisions tab, then redo your changes. Saving rules identical to the defaults now removes `rules.json`, so
+they keep following the defaults as these improve.
 
 ### Changed
+- Rules reviewed: apps are matched by their spoken name more strictly ("start it" no longer opens Twitch, "go to
+  the movies" Movistar+); "put on YouTube" / "pon Twitch" open the app instead of searching for "put"; fillers
+  ("ok tv", "oye", "please") go before the clean-up fixes, and "so", "now", "right", "and then" are removed only
+  before a command, so "Now You See Me" keeps its first word; "go to sleep in 20 minutes" is a timer, not a seek;
+  "skip ahead" / "skip the intro" aren't "next episode"; "volume up to 40", "turn it up to 30", "increase the
+  volume", "too loud", "go back 10", "fast forward 90", "pick two", "first one", "set sleep timer 30", "cancel
+  timer". Spanish: "pon el capítulo cinco", "la temporada dos de The Bear", "capítulo siguiente", "pon el
+  anterior", "pon el audio en inglés", "súbelo", "bájalo un poco", "volumen a tope", "pon el segundo", "el número
+  tres", "una hora y media" (90 minutes, was 60), "vuelve a empezar", "sigue viendo", "salta treinta segundos",
+  "pon a ibai en twitch", and "pon X y apaga la tele cuando acabe" as two commands.
+- New apps: the TV's Settings ("abre ajustes"), YouTube Music, RTVE Play and TDTChannels. New decision-model
+  intents for "that's wrong", auto skip on/off and new films.
+- When no model answers (LLM and decision model off or unreachable) and the offline intent is play_title, the
+  sentence is played only if a search finds that exact title; otherwise "Didn't get that: …".
 - Every action has its own d1 intent (pause, resume, stop, skip forward/back, seek to, restart, previous episode,
   set volume, louder, quieter, mute, unmute…), each described with one example. d1 only sees the descriptions,
   and "previous episode", "go back to the start" or "volume twenty" used to have no matching option. On the 107
@@ -79,6 +94,10 @@ panel's Decisions tab, then redo your changes.
   there (the player is polled every 10 s).
 
 ### Fixed
+- The llama-d1 unit quotes its llama-server and model paths (a path with a space or a % broke it); rewrite it once
+  with `tv-agent setup services`. `tv-agent setup kodi` keeps a piped password's own spaces.
+- `GET /v1/tv/status`'s "app in front" came from the focused window, empty while the screen is off; it's the
+  resumed activity now, with the screen state.
 - Progress could go unsaved when something new started right after a stop: the previous session's follower was
   cancelled in the middle of its last write. It's now told to stop and finishes the write.
 - Found by review before release: watched marks use Stremio's own episode order (stremio-core: specials last), and
@@ -110,6 +129,20 @@ panel's Decisions tab, then redo your changes.
   `tv-agent setup services`.
 
 ### Added
+- Hosted speech-to-text through OpenRouter (`stt_where` "hosted", or "hosted-first" with this laptop's model as
+  backup; `stt_hosted_model`, Voxtral Mini Transcribe 3 by default; Deepgram Nova-3, AssemblyAI, ElevenLabs Scribe,
+  GPT transcribe, MAI-Transcribe and others listed). It gets the recording when you pause (~0.4-1 s more than the
+  local model). The local model loads only when it's needed and can be unloaded live (`stt_loaded` in
+  `POST /v1/pipeline`).
+- `keep_recordings`: each spoken command's audio kept (the last 300, mode 600) and linked from its history entry;
+  `POST /v1/transcribe` transcribes one again, locally or with any hosted model.
+- History entries carry their timings and costs: speech-to-text (where, ms, cost), deciding (ms, the models'
+  cost), time from your last word, audio length.
+- The TV over the local API: `GET /v1/tv/status` (model, Android, the TV app's version, network and Wi-Fi signal,
+  CPU, memory, busiest processes, app in front, the laptop's link and ping), `POST /v1/tv/speedtest`,
+  `/v1/tv/diagnose` (each ADB step with what to do), `/v1/tv/reconnect`, `/v1/tv/key` (a fixed list of keys),
+  `GET /v1/tv/screenshot`, `GET /v1/now-playing/link` (what the agent plays, local only, never logged) and
+  `POST /v1/tv/play-link` (any http(s) video link, in Kodi or Just Player).
 - The TV app's audio stream (port 8767): decided ~0.25-0.3 s after your last word for complete commands
   ("pause", "next episode", "… season 3 episode 2"), ~0.45 s for "volume twenty", ~0.7 s for a title alone, which
   is often followed by a season. Earlier it was 0.7 s of quiet plus the upload and transcription of the whole
@@ -224,12 +257,28 @@ panel's Decisions tab, then redo your changes.
   takes the strict JSON answers the LLM step needs (or is one of its decision models).
 - Commands: everything you can say as patterns with ‹placeholders›, by section, in English or Spanish, with a
   filter; "try" fills one in with an example you can edit, then explains it (nothing sent) or does it on the TV.
-- Settings covers every setting now: buttons to set the Liquid and OpenRouter keys (checked, then saved; the
-  panel keeps nothing), "No limit" for the bitrate, and an Advanced section (addresses, ports, model files, Kodi
-  user).
-- Settings: a Voice card: the speech model (with "Download and use" for one not on this computer yet), binge
-  mode, auto skip, and whether the cloud keys are set. The tab reloads when shown, so a binge mode changed by
-  voice isn't overwritten.
+- Settings covers every setting now: an API keys card (each key's state, and buttons to set the Liquid and
+  OpenRouter keys: checked, then saved; the panel keeps nothing), "No limit" for the bitrate, binge mode and auto
+  skip under Playback, and an Advanced section (addresses, ports, the Kodi user and password, pairing the TV app
+  again). The tab reloads when shown, so a binge mode changed by voice isn't overwritten.
+- Settings: Export all / Import all: settings, your rules, taught sentences and the panel's preferences in one
+  JSON file (no keys or passwords); importing checks it, then restarts the voice agent.
+- Decisions › Speech to text (click its box in the diagram): this laptop, hosted, or hosted with this laptop as
+  backup; the local model (download, or another model's folder) and the hosted one by name; choosing hosted offers
+  to unload the local model, choosing this laptop loads it; "Keep recordings".
+- Decisions › Decision model (was "d1 model"): a local model (any GGUF file) and a hosted one ("d1" recommended);
+  the key each needs is shown with ✔ or ⚠ and a link to it in Settings (also in the LLM and Speech to text tabs);
+  what "when no model answers" and "candidates for a title choice" do; the whole tab scrolls, with every intent
+  shown.
+- Overview › TV: model, Android and uptime, screen off; Wi-Fi or Ethernet with signal and link speed, the laptop's
+  link and ping, a speed test; TV CPU and memory with history, the busiest processes and the app in front; the TV
+  app's version against this copy's, with Install / Update / Uninstall / Pair again; Diagnose (each ADB step with
+  what to do) and Reconnect; shortcut keys, Kodi / Stremio, a screenshot; what the agent plays with its stream
+  link (open or copy) and a field to send any video link to the TV.
+- Activity: a Response times chart of the last 48 commands (speech-to-text, deciding, waiting for your pause;
+  doing it, green or amber), with each one's numbers on hover, and typical / slowest-5% times by step, model and
+  action, the cloud cost today, how many were understood. Commands with a recording (🔊) can be played or
+  transcribed again with another model from the right-click menu.
 - Activity: "Only wrong or not understood"; right-click a command to mark it wrong, teach it the right action
   (type what you meant, see how the agent takes it, save) or forget what it was taught.
 - Decisions: explains sentences you taught, answers from Liquid's hosted d1 and the LLM step.

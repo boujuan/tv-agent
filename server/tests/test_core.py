@@ -215,7 +215,7 @@ def test_a_named_show_is_not_the_current_one():
      A.PlayTitle(title="the expanse", season=5, episode=10, kind="series")),
     ("community season two episode two", A.PlayTitle(title="community", season=2, episode=2, kind="series")),
     ("okay let's watch the godfather", A.PlayTitle(title="the godfather")),
-    ("play youtube", None),                                                  # an app: left for d1
+    ("play youtube", A.OpenApp(app="tizentube")),                           # an app by its exact name
     ("play a game", None),
     ("skip back two minutes", A.Transport(op="back", seconds=120)),
     ("skip to an hour and a half", A.Transport(op="seek_to", seconds=5400)),
@@ -951,7 +951,7 @@ def test_every_command_in_the_list_is_understood_in_english_and_spanish():
     ("skip a bit", A.Transport(op="forward", seconds=30)), ("skip thirty", A.Transport(op="forward", seconds=30)),
     ("skip it", A.Transport(op="forward")),
     ("turn the sound back on", A.Volume(op="unmute")),            # the word-order swap leaves "back" alone
-    ("put youtube on", None),                                     # not a YouTube search for "put"
+    ("put youtube on", A.OpenApp(app="tizentube")),               # not a YouTube search for "put"
     ("marca esto como visto", A.LibraryEdit(op="watched")),       # "esto": what's on, not a title
     ("añade esto a mi lista", A.LibraryEdit(op="add")),
 ])
@@ -983,6 +983,8 @@ def _router(**kw):
     ("skip to an hour and a half", None),
     ("pausa y luego", None),                                      # the offline guess isn't a second command
     ("salta la intro y pon friends", ["skip", "play_title"]),     # "pon" is a play verb once cleaned up
+    ("pon the bear y apaga la tele cuando acabe", ["play_title", "timer"]),
+    ("para cuando acabe este, que estoy cansado", None),
 ])
 def test_two_commands_in_one_sentence(text, steps):
     import asyncio
@@ -1169,3 +1171,126 @@ def test_a_hosted_decision_model_can_be_any_openrouter_one():
     d1 = ask("typesafe/jev-1.14")
     assert sent[-1] == (OPENROUTER, "typesafe/jev-1.14", "Bearer ok") and d1.last_usage["cost"] == 1e-6
     assert D1(Http(), "u", "lk", "cloudflare/clef", "hosted", None).sources() == ()      # no OpenRouter key
+
+
+@pytest.mark.parametrize("text,expect", [
+    ("start it", None), ("go to the movies", None),               # not apps that merely sound alike
+    ("ok tv pon pausa", A.Transport(op="pause")),                 # fillers go before the fixes that need ^
+    ("subtitles off please", A.Tracks(subtitles="off")),
+    ("skip the intro", A.Skip(what="intro")), ("skip ahead", A.Transport(op="forward")),
+    ("go back an episode", A.NextEpisode(offset=-1)),
+    ("go to sleep in 20 minutes", A.Timer(minutes=20, then="off")),
+    ("continuous", None), ("continue the movie", A.Transport(op="resume")),
+    ("put on youtube", A.OpenApp(app="tizentube")), ("pon twitch", A.OpenApp(app="twitch")),
+    ("pon la temporada dos de the bear", A.PlayTitle(title="the bear", season=2, kind="series")),
+    ("pon el capítulo cinco", A.PlayTitle(episode=5, kind="series")),
+    ("pon el capítulo siguiente", A.NextEpisode(offset=1)), ("pon el anterior", A.NextEpisode(offset=-1)),
+    ("pon el audio en inglés", A.Tracks(audio="eng")),
+    ("apaga la tele en una hora y media", A.Timer(minutes=90, then="off")),
+    ("volume up to 40", A.Volume(op="set", amount=40)), ("turn it up to 30", A.Volume(op="set", amount=30)),
+    ("increase the volume", A.Volume(op="up")), ("too loud", A.Volume(op="down")),
+    ("sube un poco el volumen", A.Volume(op="up", amount=3)), ("volumen a tope", A.Volume(op="set", amount=100)),
+    ("go back 10", A.Transport(op="back", seconds=10)), ("fast forward 90", A.Transport(op="forward", seconds=90)),
+    ("pon el segundo", A.Pick(number=2)), ("el número tres", A.Pick(number=3)), ("pick two", A.Pick(number=2)),
+    ("now you see me", None), ("right play the bear", A.PlayTitle(title="the bear")),   # titles keep their first word
+    ("vuelve a empezar", A.Transport(op="seek_to", seconds=0)),
+    ("pon a ibai en twitch", A.Twitch(channel="ibai")),
+    ("set sleep timer 30", A.Timer(minutes=30, then="off")), ("cancel timer", A.Timer(then="stop", cancel=True)),
+    ("abre ajustes", A.OpenApp(app="settings")), ("youtube music", A.OpenApp(app="youtube_music")),
+    ("pon rtve", A.OpenApp(app="rtve")), ("play tv", A.PlayTitle(title="tv")),          # "tv" isn't RTVE
+])
+def test_rules_review_2026_10(text, expect):
+    assert rule_action(text) == expect
+
+
+def test_saving_unchanged_rules_keeps_following_the_defaults(tmp_path, monkeypatch):
+    monkeypatch.setattr(R, "USER_FILE", tmp_path / "rules.json")
+    assert R.save(R.defaults_raw()).source == "defaults" and not R.USER_FILE.exists()
+    changed = R.defaults_raw()
+    changed["phrases"][0]["say"].append("hold it right there")
+    R.save(changed)
+    assert R.USER_FILE.exists()
+
+
+def test_no_model_answering_plays_a_title_only_if_found_exactly():
+    import asyncio
+    r = _router()
+    r.rules.fallback_intent = "play_title"
+    d = asyncio.run(r.decide("the bear"))
+    assert d.action.type == "play_title" and d.action.guess and d.action.title == "the bear"
+    assert asyncio.run(r.decide("play the bear")).action.guess is False      # a rule understood it
+
+
+def _bare_service(monkeypatch, tmp_path):
+    """A Service without __init__ (no TV, no models): just what transcribe and local_stt use."""
+    import asyncio
+    import types
+    from tv_agent import server, stt
+    svc = server.Service.__new__(server.Service)
+    svc.cfg = types.SimpleNamespace(stt_where="hosted", stt_model="a", stt_hosted_model="x/y", keep_recordings=True,
+                                    log_transcripts=True, secret=lambda k: "key")
+    svc.agent = types.SimpleNamespace(http=None, state=types.SimpleNamespace(
+        timings=types.SimpleNamespace(add=lambda *a: None)))
+    svc.stt, svc._stt_name, svc._stt_gen, svc._stt_loading = None, "", 0, asyncio.Lock()
+    monkeypatch.setattr(stt, "RECORDINGS", tmp_path / "recordings")
+    return svc, server, stt
+
+
+def test_a_model_changed_or_unloaded_while_loading_isnt_kept(monkeypatch, tmp_path):
+    import asyncio
+    svc, server, _ = _bare_service(monkeypatch, tmp_path)
+
+    class FakeStt:
+        def __init__(self, path):
+            self.path = path
+            if path.endswith("a"):
+                svc.cfg.stt_model = "b"          # the panel picked another model meanwhile
+    monkeypatch.setattr(server, "Stt", FakeStt)
+    monkeypatch.setattr(server, "stt_model_dir", lambda name: f"/models/{name}")
+    got = asyncio.run(svc.local_stt())
+    assert got.path == "/models/b" and svc._stt_name == "b"
+
+    class SlowStt(FakeStt):
+        def __init__(self, path):
+            self.path = path
+            svc.unload_stt()                     # "unload" arrived while it loaded
+    monkeypatch.setattr(server, "Stt", SlowStt)
+    svc.unload_stt()
+    assert asyncio.run(svc.local_stt()) is not None and svc.stt is None
+
+
+def test_transcribing_again_never_falls_back_quietly(monkeypatch, tmp_path):
+    import asyncio
+    import httpx
+    svc, server, stt = _bare_service(monkeypatch, tmp_path)
+
+    async def down(*a, **k):
+        raise httpx.ConnectError("down")
+    monkeypatch.setattr(stt, "hosted_transcribe", down)
+    svc.stt, svc._stt_name = types_stt("local words"), "a"
+    text, info = asyncio.run(svc.transcribe(b"\0" * 32000, where="hosted", fallback=False))
+    assert text == "" and info["stt"] == "x/y" and "ConnectError" in info["stt_error"]
+    text, info = asyncio.run(svc.transcribe(b"\0" * 32000, where="hosted"))        # a voice command: the backup
+    assert text == "local words" and info["stt"] == "local" and info["stt_error"]
+
+
+def types_stt(text):
+    import types
+    return types.SimpleNamespace(transcribe=lambda pcm: text)
+
+
+def test_a_recording_that_cant_be_saved_loses_only_the_recording(monkeypatch, tmp_path):
+    import asyncio
+    svc, server, stt = _bare_service(monkeypatch, tmp_path)
+    name = asyncio.run(svc.keep_recording(b"\1\0" * 16000))
+    assert name and oct(stt.recording(name).stat().st_mode & 0o777) == "0o600"
+
+    svc.cfg.log_transcripts = False                 # no history: nothing would point at it, so none kept
+    assert asyncio.run(svc.keep_recording(b"\1\0" * 16000)) is None
+    svc.cfg.log_transcripts = True
+
+    def full(pcm):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(stt, "save_recording", full)
+    assert asyncio.run(svc.keep_recording(b"\1\0" * 16000)) is None
+    assert stt.delete_recordings() == 1 and not stt.recordings()         # the temporary folder's one

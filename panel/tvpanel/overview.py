@@ -1,11 +1,13 @@
-"""Overview tab: is voice control on, what's playing, the two services with live resource graphs, processes."""
+"""Overview tab: is voice control on, what's playing, the TV (tv_card.py), the two services with live resource
+graphs, processes."""
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QCheckBox, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMessageBox,
-                               QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+                               QPushButton, QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from .common import (AMBER, BLUE, GREEN, GREY, ICON, ICON_SIZE, PURPLE, RED, SERVICES, card, dim, human,
                      local_d1_needed, metric, set_badge, systemctl, uptime)
+from .tv_card import TvCard
 
 
 class ServiceCard(QFrame):
@@ -120,11 +122,15 @@ class ServiceCard(QFrame):
         self.panel.bg.run(systemctl, done, "enable" if checked else "disable", f"{self.unit}.service")
 
 
-class Overview(QWidget):
+class Overview(QScrollArea):
     def __init__(self, panel):
         super().__init__()
         self.panel = panel
-        lay = QVBoxLayout(self)
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        inner = QWidget()
+        self.setWidget(inner)
+        lay = QVBoxLayout(inner)
         lay.setContentsMargins(14, 14, 14, 14)
         lay.setSpacing(12)
 
@@ -158,6 +164,8 @@ class Overview(QWidget):
         lay.addWidget(banner)
 
         self.cards = {unit: ServiceCard(panel, unit, title, about) for unit, title, about in SERVICES}
+        self.tv_card = TvCard(panel)
+        lay.addWidget(self.tv_card)
         for c in self.cards.values():
             lay.addWidget(c)
 

@@ -25,6 +25,10 @@ twitch_favorites = []      # e.g. ["ibai", "auronplay"]: matched first, since sp
 log_transcripts = true     # what you said, in `journalctl --user -u tv-agent`
 
 stt_model = "parakeet-v2"  # speech: "parakeet-v2" (English) or "parakeet-v3" (25 languages; `tv-agent setup stt`)
+stt_where = "local"        # "local" (this laptop, while you speak), "hosted" (OpenRouter, the recording when you
+                           # pause), or "hosted-first" (this laptop's model if it fails); hosted needs the OpenRouter key
+stt_hosted_model = "mistralai/voxtral-mini-transcribe-3-0"   # any OpenRouter transcription model id
+keep_recordings = false    # keep each spoken command's audio (the last 300) to replay or transcribe again (Activity)
 binge = true               # when an episode ends, the next one starts ("binge mode on / off")
 auto_skip = false          # skip intros and recaps by themselves when their timestamps are sure ("auto skip on")
 

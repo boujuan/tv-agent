@@ -95,7 +95,7 @@ class Rules:
 
     def find_app(self, spoken: str) -> App | None:
         names = {alias: app for app in self.apps.values() for alias in app.aliases}
-        hit = process.extractOne(spoken.lower(), list(names), scorer=fuzz.WRatio, score_cutoff=80)
+        hit = process.extractOne(spoken.lower(), list(names), scorer=fuzz.ratio, score_cutoff=78)
         return names[hit[0]] if hit else None
 
     def link(self, hook: str, **values) -> tuple[App, str]:
@@ -443,6 +443,8 @@ def load_safe() -> tuple[Rules, str | None]:
 
 def save(raw: dict) -> Rules:
     rules = build(raw, str(USER_FILE))      # raises before anything is written
+    if raw == defaults_raw():
+        return reset()                      # unchanged: keep following the shipped defaults as they improve
     USER_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = USER_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(raw, indent=2, ensure_ascii=False) + "\n")

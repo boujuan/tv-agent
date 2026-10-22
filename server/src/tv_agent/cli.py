@@ -152,7 +152,8 @@ async def _setup_kodi() -> int:
     import getpass
     from .tv.kodi import Kodi, KodiError
     cfg = config.load()
-    password = getpass.getpass(f"Kodi web password for user '{cfg.kodi_user}': ")
+    password = (sys.stdin.read().rstrip("\r\n") if not sys.stdin.isatty()        # piped (the panel, a password manager)
+                else getpass.getpass(f"Kodi web password for user '{cfg.kodi_user}': "))
     agent = Agent(cfg)
     kodi = Kodi(agent.http, agent.adb, cfg.kodi_port, cfg.kodi_user, password)
     try:

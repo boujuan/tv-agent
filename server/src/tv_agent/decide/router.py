@@ -34,6 +34,8 @@ class Decision:
     confidence: float = 1.0
     rule: str = ""                    # phrase group or pattern id; the intent for d1
     trace: list[dict] = field(default_factory=list)
+    ms: float = 0.0                   # how long deciding took (set by the server)
+    cost: float = 0.0                 # what the model calls cost ($), from the trace
 
 
 log = logging.getLogger(__name__)
@@ -53,6 +55,7 @@ def normalize(text: str, rules: Rules) -> str:
     t = text.lower().strip()
     t = re.sub(r"[“”\"!?¿¡]", "", t)
     t = re.sub(r"\s+", " ", t).rstrip(".").strip()
+    t = rules.fillers.sub("", t) or t
     for rx, to in rules.fixes:
         t = rx.sub(to, t)
     said = t
@@ -243,6 +246,7 @@ class Router:
         if not t:
             return Decision(A.Unclear(heard=text), "none", 0.0, "", trace)
         d = await self._two(t, rules, trace) or await self._steps(text, t, rules, trace)
+        d.cost = sum(x.get("cost") or 0 for x in d.trace)
         help_in = A.Help(lang="es" if T.spanish(text) else "en")         # the list in the language it was asked in
         if d.action.type == "help" and d.action.lang is None:
             d.action = help_in
@@ -294,9 +298,10 @@ class Router:
                 return Decision(hit[0], hit[1], 1.0, hit[2], trace)
             if step == "llm":
                 context = await self.context(text) if self.context else {}
+                self.llm.last_usage = {}
                 reached, action = await self.llm.answer(text, context)
                 trace.append({"stage": "llm", "model": self.llm.model, "action": action.type if action else "none",
-                              "reached": reached})
+                              "reached": reached, "cost": (getattr(self.llm, "last_usage", None) or {}).get("cost")})
                 if reached:                     # its "not a command" is final: the d1 after it guesses worse
                     return Decision(action or A.Unclear(heard=text), "llm", 0.9 if action else 0.0, "llm", trace)
             if step == "d1" and (d := await self._ask_d1(text, t, rules, trace)):
@@ -307,6 +312,8 @@ class Router:
             return unsure
         # No model answered (off or unreachable): the rules' offline intent ("play it as a title"), if any
         action = from_intent(rules.fallback_intent, t, rules) if rules.fallback_intent != "none" else None
+        if isinstance(action, A.PlayTitle) and action.title:
+            action = action.model_copy(update={"guess": True})     # played only if the title is found exactly
         trace.append({"stage": "fallback", "intent": rules.fallback_intent, "accepted": action is not None})
         return Decision(action or A.Unclear(heard=text), "none", 0.0, rules.fallback_intent, trace)
 
@@ -323,7 +330,10 @@ class Router:
         top = sorted(pick.probabilities.items(), key=lambda kv: -kv[1])[:3]
         step = {"stage": "model", "intent": pick.key, "confidence": round(pick.confidence, 3),
                 "threshold": rules.min_confidence, "top": [[k, round(p, 3)] for k, p in top],
-                "source": getattr(self.d1, "last_source", "local"), "where": where}
+                "source": getattr(self.d1, "last_source", "local"), "where": where,
+                "model": getattr(self.d1, "hosted_model", "d1") if getattr(self.d1, "last_source", "") == "hosted"
+                else "local d1",
+                "cost": (getattr(self.d1, "last_usage", None) or {}).get("cost")}
         trace.append(step)
         ratio = top[0][1] / max(top[1][1], 1e-9) if len(top) > 1 else float("inf")
         action = None

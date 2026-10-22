@@ -83,15 +83,22 @@ class Adb:
 
     def run(self, argv: list[str], timeout: float = 10.0) -> str:
         """Run one command on the TV and return its output. Reconnects once if the connection went stale."""
-        cmd = quote(argv)
+        out = self._shell(quote(argv), timeout, True)
+        return out if isinstance(out, str) else out.decode(errors="replace")
+
+    def run_bytes(self, argv: list[str], timeout: float = 15.0) -> bytes:
+        """Like run, for binary output (a screenshot)."""
+        return self._shell(quote(argv), timeout, False)
+
+    def _shell(self, cmd: str, timeout: float, decode: bool):
         with self._lock:
             for attempt in (1, 2):
                 try:
                     if self._dev is None or not self._dev.available:
                         self._connect()
-                    out = self._dev.shell(cmd, timeout_s=timeout, read_timeout_s=timeout)
+                    out = self._dev.shell(cmd, timeout_s=timeout, read_timeout_s=timeout, decode=decode)
                     self._used = time.monotonic()
-                    return out if isinstance(out, str) else out.decode(errors="replace")
+                    return out
                 except TvUnreachable:
                     raise
                 except Exception as e:  # adb_shell raises several transport/OS error types
@@ -100,6 +107,11 @@ class Adb:
                     if attempt == 2:
                         raise TvUnreachable(f"ADB failed: {type(e).__name__}") from e
         raise AssertionError("unreachable")
+
+    def reconnect(self):
+        """Drop the connection (between two commands); the next one connects again."""
+        with self._lock:
+            self.close()
 
     def push(self, local, remote: str, timeout: float = 120.0):
         """Copy a (small) file to the TV."""

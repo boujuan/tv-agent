@@ -1,0 +1,199 @@
+"""Decisions › Speech to text: on this laptop (a Parakeet model, while you speak) or hosted (an OpenRouter
+transcription model, sent the recording when you pause), or hosted with this laptop as backup; the local model
+(downloaded here), the hosted one, and keeping recordings for the Activity tab. Live at once (/v1/pipeline)."""
+import subprocess
+
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QHBoxLayout, QMessageBox, QPushButton,
+                               QVBoxLayout, QWidget)
+
+from .common import AMBER, GREEN, TV_AGENT, KeyLine, agent_stt, dim, offer_to_delete_recordings, openrouter_check
+
+WHERE = [("local", "On this laptop"), ("hosted", "Hosted (OpenRouter)"), ("hosted-first", "Hosted, this laptop if it fails")]
+
+
+class SpeechToText(QWidget):
+    def __init__(self, panel, decisions):
+        super().__init__()
+        self.panel, self.decisions = panel, decisions
+        self.state: dict = {}
+        self._checked = ""
+        self._dl_status = None
+        lay = QVBoxLayout(self)
+        form = QFormLayout()
+        self.where = QComboBox()
+        for key, label in WHERE:
+            self.where.addItem(label, key)
+        self.where.activated.connect(lambda _i: self.where_changed())
+        form.addRow("Where", self.where)
+
+        self.local = QComboBox()
+        self.local.activated.connect(lambda _i: self.local_changed())
+        self.download = QPushButton("Download")
+        self.download.clicked.connect(self.download_model)
+        folder = QPushButton("Folder…")
+        folder.setToolTip("Another sherpa-onnx NeMo transducer model: its folder")
+        folder.clicked.connect(self.pick_folder)
+        row = QHBoxLayout()
+        row.addWidget(self.local, 1)
+        row.addWidget(self.download)
+        row.addWidget(folder)
+        form.addRow("Local model", row)
+        self.local_state = dim("", wrap=False)
+        form.addRow("", self.local_state)
+
+        self.hosted = QComboBox()
+        self.hosted.setEditable(True)                   # any OpenRouter transcription model id
+        for model, name in agent_stt.HOSTED.items():
+            self.hosted.addItem(name, model)
+            self.hosted.setItemData(self.hosted.count() - 1, model, 3)      # tooltip: the id
+        self.hosted.activated.connect(lambda _i: self.hosted_changed())
+        self.hosted.lineEdit().editingFinished.connect(self.hosted_changed)
+        form.addRow("Hosted model", self.hosted)
+        self.hosted_check = dim("", wrap=False)
+        form.addRow("", self.hosted_check)
+        self.key = KeyLine(panel)
+        form.addRow("", self.key)
+        self.keep = QCheckBox("Keep recordings of commands (the last 300, with the history on), to play and "
+                              "transcribe again in Activity")
+        self.keep.clicked.connect(self.keep_changed)
+        form.addRow("", self.keep)
+        lay.addLayout(form)
+        lay.addWidget(dim("On this laptop the model listens while you speak, so the command is decided a moment after "
+                          "you stop. A hosted model gets the recording when you pause: a few tenths of a second more, "
+                          "and a small cost per command (OpenRouter's price per hour of audio)."))
+        lay.addStretch()
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._show_download)
+
+    # ---- showing ----
+
+    def show_state(self, res: dict):
+        self.state = res
+        self.where.setCurrentIndex(max(0, self.where.findData(res.get("stt_where", "local"))))
+        current = res.get("stt_model", "")
+        self.local.blockSignals(True)
+        self.local.clear()
+        for key, m in agent_stt.MODELS.items():
+            self.local.addItem(m.label, key)
+        if current not in agent_stt.MODELS:
+            self.local.addItem(current, current)
+        self.local.setCurrentIndex(max(0, self.local.findData(current)))
+        self.local.blockSignals(False)
+        self._show_download_button()
+        loaded = res.get("stt_loaded")
+        self.local_state.setText(f"<span style='color:{GREEN if loaded else AMBER}'>●</span> "
+                                 + ("Loaded in the voice agent" if loaded else "Not loaded (loads when it's needed)"))
+        hosted = res.get("stt_hosted_model", "")
+        i = self.hosted.findData(hosted)
+        if i >= 0:
+            self.hosted.setCurrentIndex(i)
+        else:
+            self.hosted.setEditText(hosted)
+        self.key.show_key(res.get("keys", {}).get("openrouter", False), "OpenRouter",
+                          " (needed for a hosted model)")
+        self.keep.setChecked(bool(res.get("keep_recordings")))
+        if self._checked != hosted:
+            self._checked = hosted
+            self.panel.bg.run(lambda: openrouter_check(hosted, "transcription"),
+                              lambda r, e: self.hosted_check.setText(
+                                  f"<span style='color:{GREEN if r and r[0] else AMBER}'>{'✓' if r and r[0] else '✗'}"
+                                  f" {(r or (False, str(e)))[1]}</span>"))
+
+    def _show_download_button(self):
+        key = self.local.currentData()
+        m = agent_stt.MODELS.get(key)
+        self.download.setVisible(bool(m) and not agent_stt.installed(key))
+        if m:
+            self.download.setText(f"Download ({m.size / 1e6:.0f} MB)")
+
+    # ---- changing ----
+
+    def selected_hosted(self) -> str:
+        text = self.hosted.currentText().strip()
+        i = self.hosted.findText(text)
+        return self.hosted.itemData(i) if i >= 0 else text
+
+    def where_changed(self):
+        where = self.where.currentData()
+        change = {"stt_where": where}
+        keys = self.state.get("keys", {})
+        if where != "local" and not keys.get("openrouter"):
+            QMessageBox.information(self, "TV Agent", "A hosted model needs the OpenRouter key: Settings › API keys. "
+                                    "Until then this laptop's model is used.")
+        if where == "hosted" and self.state.get("stt_loaded"):
+            box = QMessageBox(QMessageBox.Icon.Question, "TV Agent",
+                              "The local speech model is loaded in the voice agent (about 1 GB of memory). Unload it? "
+                              "Choosing this laptop again loads it in a few seconds.", parent=self)
+            unload = box.addButton("Unload it", QMessageBox.ButtonRole.AcceptRole)
+            box.addButton("Keep it loaded", QMessageBox.ButtonRole.RejectRole)
+            box.exec()
+            if box.clickedButton() is unload:
+                change["stt_loaded"] = False
+        elif where != "hosted" and not self.state.get("stt_loaded"):
+            if not agent_stt.installed(self.local.currentData()):
+                QMessageBox.information(self, "TV Agent", "The local model isn't downloaded yet: use Download next to "
+                                        "it.")
+            else:
+                self.local_state.setText("Loading the local speech model…")
+                change["stt_loaded"] = True
+        self.decisions.set_pipeline(change)
+
+    def local_changed(self):
+        key = self.local.currentData()
+        self._show_download_button()
+        if agent_stt.installed(key):
+            self.local_state.setText("Loading the local speech model…")
+            self.decisions.set_pipeline({"stt_model": key})
+
+    def hosted_changed(self):
+        model = self.selected_hosted()
+        if model and model != self.state.get("stt_hosted_model"):
+            self.decisions.set_pipeline({"stt_hosted_model": model})
+
+    def keep_changed(self, on: bool):
+        self.decisions.set_pipeline({"keep_recordings": on})
+        if not on:
+            offer_to_delete_recordings(self)
+
+    def pick_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "A sherpa-onnx NeMo transducer model's folder")
+        if folder:
+            if not agent_stt.installed(folder):
+                QMessageBox.warning(self, "TV Agent", f"That folder needs {', '.join(agent_stt.FILES)}.")
+                return
+            self.decisions.set_pipeline({"stt_model": folder})
+
+    def download_model(self):
+        key = self.local.currentData()
+        m = agent_stt.MODELS[key]
+        if QMessageBox.question(self, "TV Agent", f"Download {m.label} ({m.size / 1e6:.0f} MB) from GitHub "
+                                f"(k2-fsa/sherpa-onnx), check it against its published SHA-256 and use it?") \
+                != QMessageBox.StandardButton.Yes:
+            return
+        self._dl_status = "Starting the download…"
+        self.download.setEnabled(False)
+        self._timer.start(400)
+
+        def run():
+            p = subprocess.Popen([str(TV_AGENT), "setup", "stt", key], stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, text=True)
+            for line in p.stdout:
+                if line.strip() and " INFO " not in line:
+                    self._dl_status = line.strip()
+            return p.wait()
+
+        def done(code, err):
+            self._timer.stop()
+            self._dl_status = None
+            self.download.setEnabled(True)
+            if err or code:
+                self.local_state.setText(f"Download failed: {err or 'see the panel log'}")
+                return
+            self.decisions.set_pipeline({"stt_model": key})
+
+        self.panel.bg.run(run, done)
+
+    def _show_download(self):
+        if self._dl_status:
+            self.local_state.setText(self._dl_status)

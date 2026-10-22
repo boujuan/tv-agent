@@ -175,6 +175,12 @@ class Panel(QMainWindow):
     def prefs_changed(self):
         self.update_tooltip()
 
+    def show_settings_keys(self):
+        """Settings, scrolled to the API keys, which flash for a moment."""
+        self.bring_up()
+        self.tabs.setCurrentWidget(self.settings)
+        self.settings.highlight_keys()
+
     def show_decisions(self, text: str):
         self.bring_up()
         self.tabs.setCurrentWidget(self.decisions)

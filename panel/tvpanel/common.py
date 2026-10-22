@@ -21,11 +21,11 @@ except ImportError:
     sys.path.insert(0, str(REPO / "server" / "src"))
 from tv_agent import activity as agent_activity  # noqa: E402,F401  (stdlib only)
 from tv_agent import config as agent_config  # noqa: E402  (stdlib only; the daemon's own checks)
-from tv_agent import stt as agent_stt  # noqa: E402  (stdlib only until a model is loaded)
+from tv_agent import stt as agent_stt  # noqa: E402,F401  (stdlib only until a model is loaded)
 
-from PySide6.QtCore import QSettings, QSize, QTimer  # noqa: E402
+from PySide6.QtCore import QSettings, QSize, Qt, QTimer  # noqa: E402
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen  # noqa: E402
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget  # noqa: E402
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMessageBox, QSizePolicy, QVBoxLayout, QWidget  # noqa: E402
 
 APP_ID = "tv-agent-panel"
 ICON = PANEL / "tv-agent.svg"
@@ -178,16 +178,21 @@ def api(path: str, body=None, timeout: float = 6.0, raw: bytes | None = None, ok
 
 def openrouter_check(model: str, kind: str = "llm") -> tuple[bool, str]:
     """Whether OpenRouter has this model in a form the agent can use (public catalog, no key): a chat model with a
-    provider that enforces JSON answers (kind "llm"), or one of its decision models (kind "decision")."""
+    provider that enforces JSON answers (kind "llm"), one of its decision models ("decision") or one of its
+    transcription models ("transcription")."""
     base = "https://openrouter.ai/api/v1"
     try:
-        if kind == "decision":
-            with urllib.request.urlopen(f"{base}/models?output_modalities=decisions", timeout=8) as r:
+        if kind in ("decision", "transcription"):
+            what = "decisions" if kind == "decision" else "transcription"
+            with urllib.request.urlopen(f"{base}/models?output_modalities={what}", timeout=8) as r:
                 found = {m["id"]: m for m in json.loads(r.read()).get("data", [])}
             if model not in found:
-                return False, "not one of OpenRouter's decision models"
-            price = float((found[model].get("pricing") or {}).get("prompt") or 0) * 1e6
-            return True, f"an OpenRouter decision model, ${price:.3f} per million tokens in"
+                return False, f"not one of OpenRouter's {'decision' if kind == 'decision' else 'transcription'} models"
+            price = float((found[model].get("pricing") or {}).get("prompt") or 0)
+            if kind == "decision":
+                return True, f"an OpenRouter decision model, ${price * 1e6:.3f} per million tokens in"
+            per_hour = price * 3600 if price < 0.01 else price         # per second of audio, or (MAI) per hour
+            return True, f"an OpenRouter transcription model, about ${per_hour:.2f} per hour of audio"
         with urllib.request.urlopen(f"{base}/models/{model}/endpoints", timeout=8) as r:
             endpoints = (json.loads(r.read()).get("data") or {}).get("endpoints") or []
     except urllib.error.HTTPError as e:
@@ -200,6 +205,40 @@ def openrouter_check(model: str, kind: str = "llm") -> tuple[bool, str]:
                        "work here" if endpoints else "on OpenRouter, but no provider serves it now")
     price = min(float((e.get("pricing") or {}).get("prompt") or 0) for e in good) * 1e6
     return True, f"on OpenRouter: {len(good)} provider{'s' * (len(good) > 1)} with JSON answers, from ${price:.2f} per million tokens in"
+
+
+class KeyLine(QLabel):
+    """Whether an API key is set, with a link to where Settings changes it."""
+
+    def __init__(self, panel):
+        super().__init__("")
+        self.panel = panel
+        self.setTextFormat(Qt.TextFormat.RichText)
+        self.linkActivated.connect(lambda _link: panel.show_settings_keys())
+
+    def show_key(self, ok: bool, name: str, why: str = ""):
+        if ok:
+            self.setText(f"<span style='color:{GREEN}; font-size:13pt'>✔</span>&nbsp; <b>{name} key set</b>"
+                         f"{why} · <a href='keys'>change it in Settings</a>")
+        else:
+            self.setText(f"<span style='color:{AMBER}; font-size:13pt'>⚠</span>&nbsp; <b>No {name} key</b>{why} · "
+                         f"<a href='keys'>set it in Settings</a>")
+
+
+def offer_to_delete_recordings(parent):
+    """Recordings kept off: the ones already kept can go too."""
+    n = len(agent_stt.recordings())
+    if n and QMessageBox.question(parent, "TV Agent", f"Delete the {n} recordings already kept?") \
+            == QMessageBox.StandardButton.Yes:
+        agent_stt.delete_recordings()
+
+
+def android_version() -> str | None:
+    """The TV app's version in this copy of the code (android/app/build.gradle)."""
+    try:
+        return re.search(r"versionName\s+'([^']+)'", (REPO / "android/app/build.gradle").read_text()).group(1)
+    except (OSError, AttributeError):
+        return None
 
 
 def run_doctor() -> str:
@@ -310,10 +349,10 @@ def card() -> QFrame:
     return f
 
 
-def dim(text: str = "") -> QLabel:
+def dim(text: str = "", wrap: bool = True) -> QLabel:
     lab = QLabel(text)
     lab.setObjectName("dim")
-    lab.setWordWrap(True)
+    lab.setWordWrap(wrap)                   # a one-line status in a form: no wrap, or the row reserves 3 lines
     return lab
 
 

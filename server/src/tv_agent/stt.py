@@ -1,4 +1,5 @@
-"""Speech to text through sherpa-onnx on the CPU, with the model chosen in config.toml (`stt_model`, or the panel):
+"""Speech to text: on this laptop through sherpa-onnx on the CPU (`stt_model`), or hosted, through OpenRouter's
+transcription API (`stt_hosted_model`); `stt_where` picks which (the panel's Decisions tab, "Speech to text"):
 
 - parakeet-v2: NVIDIA Parakeet TDT 0.6B v2, English (the default). About 0.2 s for 5 s of audio on the Ryzen 7 8845HS.
 - parakeet-v3: Parakeet TDT 0.6B v3, 25 European languages including Spanish, the same speed. It works out the
@@ -6,11 +7,18 @@
 
 `stt_model` can also be the path of another sherpa-onnx NeMo transducer folder. Models are downloaded on request
 (`tv-agent setup stt parakeet-v3`, or the panel), checked against the SHA-256 GitHub publishes for the archive.
-Audio is never written to disk.
+A hosted model gets the recording when you pause (OpenRouter's API isn't streaming): measured 0.4-0.7 s for the
+quick ones (docs/research-2026-10-22.md §2.10). Audio is written to disk only with `keep_recordings` on (the last
+RECORDINGS_KEPT commands, in ~/.local/share/tv-agent/recordings, for the Activity tab).
 """
+import base64
 import hashlib
+import io
+import os
 import tarfile
 import threading
+import time
+import wave
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,11 +39,87 @@ class Model:
 MODELS = {
     "parakeet-v2": Model("Parakeet TDT 0.6B v2", "English", "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",
                          "157c157bc51155e03e37d2466522a3a737dd9c72bb25f36eb18912964161e1ad", 482_468_385),
-    "parakeet-v3": Model("Parakeet TDT 0.6B v3", "25 European languages, Spanish included (found by itself)",
+    "parakeet-v3": Model("Parakeet TDT 0.6B v3", "25 European languages, Spanish included",
                          "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
                          "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf", 487_170_055),
 }
 FILES = ("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt")
+# OpenRouter's transcription models that did well on short commands (2026-10-22), by name
+HOSTED = {"mistralai/voxtral-mini-transcribe-3-0": "Voxtral Mini Transcribe 3",
+          "assemblyai/universal-3-6-pro": "AssemblyAI Universal-3.6 Pro",
+          "deepgram/nova-3": "Deepgram Nova-3",
+          "mistralai/voxtral-small-transcribe-3-0": "Voxtral Small Transcribe 3",
+          "x-ai/grok-stt-1.0": "Grok STT 1.0",
+          "elevenlabs/scribe-v2": "ElevenLabs Scribe v2",
+          "openai/gpt-4o-mini-transcribe": "GPT-4o mini Transcribe",
+          "openai/gpt-transcribe": "GPT Transcribe",
+          "microsoft/mai-transcribe-2": "MAI-Transcribe 2",
+          "nvidia/parakeet-tdt-0.6b-v3": "Parakeet TDT 0.6B v3 (hosted)",
+          "openai/whisper-large-v3-turbo": "Whisper large v3 turbo"}
+TRANSCRIBE_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
+RECORDINGS = DATA_DIR / "recordings"
+RECORDINGS_KEPT = 300
+RATE = 16000
+
+
+def wav(pcm16: bytes, rate: int = RATE) -> bytes:
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm16)
+    return out.getvalue()
+
+
+async def hosted_transcribe(http, key: str, model: str, pcm16: bytes, timeout: float = 6.0) -> tuple[str, float | None]:
+    """(text, cost in $) from one of OpenRouter's transcription models; raises httpx errors."""
+    r = await http.post(TRANSCRIBE_URL, timeout=timeout, headers={"Authorization": f"Bearer {key}", "X-Title": "tv-agent"},
+                        json={"model": model, "input_audio": {"data": base64.b64encode(wav(pcm16)).decode(),
+                                                              "format": "wav"}})
+    r.raise_for_status()
+    data = r.json()
+    return str(data.get("text") or "").strip(), (data.get("usage") or {}).get("cost")
+
+
+def save_recording(pcm16: bytes) -> str | None:
+    """Keep a command's audio (with keep_recordings on): its file name, the oldest beyond RECORDINGS_KEPT removed."""
+    if len(pcm16) < RATE // 5:                          # under 0.1 s: nothing was said
+        return None
+    RECORDINGS.mkdir(parents=True, exist_ok=True, mode=0o700)
+    name = time.strftime("%Y%m%d-%H%M%S") + f"-{int(time.time() * 1000) % 1000:03d}.wav"
+    fd = os.open(RECORDINGS / name, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)     # private from the start
+    with os.fdopen(fd, "wb") as f:
+        f.write(wav(pcm16))
+    for old in sorted(RECORDINGS.glob("*.wav"))[:-RECORDINGS_KEPT]:
+        old.unlink(missing_ok=True)
+    return name
+
+
+def recordings() -> list[Path]:
+    return sorted(RECORDINGS.glob("*.wav")) if RECORDINGS.is_dir() else []
+
+
+def delete_recordings() -> int:
+    """Every kept recording removed (keep_recordings turned off, or the history erased): how many."""
+    gone = recordings()
+    for path in gone:
+        path.unlink(missing_ok=True)
+    return len(gone)
+
+
+def recording(name: str) -> Path | None:
+    """A kept recording by its file name (nothing outside the folder)."""
+    path = RECORDINGS / Path(name).name
+    return path if path.suffix == ".wav" and path.exists() else None
+
+
+def read_recording(name: str) -> bytes | None:
+    path = recording(name)
+    if not path:
+        return None
+    with wave.open(str(path)) as w:
+        return w.readframes(w.getnframes())
 
 
 def model_dir(choice: str) -> Path:

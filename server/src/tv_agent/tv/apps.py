@@ -39,7 +39,7 @@ FRESH = "0x14000000"
 
 def find(spoken: str) -> App | None:
     names = {alias: app for app in APPS.values() for alias in app.aliases}
-    hit = process.extractOne(spoken.lower(), list(names), scorer=fuzz.WRatio, score_cutoff=80)
+    hit = process.extractOne(spoken.lower(), list(names), scorer=fuzz.ratio, score_cutoff=78)
     return names[hit[0]] if hit else None
 
 

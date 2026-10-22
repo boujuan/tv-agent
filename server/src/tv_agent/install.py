@@ -41,6 +41,14 @@ def tv_agent_command() -> Path:
     raise SystemExit("can't find the tv-agent command")
 
 
+def _arg(path) -> str:
+    """One ExecStart argument for systemd: quoted, with its specifier character escaped."""
+    text = str(path)
+    if "\n" in text:
+        raise SystemExit(f"{text!r}: a path with a line break can't go in a systemd unit")
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%") + '"'
+
+
 def write_services(cfg: Config, enable: bool) -> list[Path]:
     server = llama_server(cfg)
     if not cfg.d1_model.exists():
@@ -53,7 +61,7 @@ def write_services(cfg: Config, enable: bool) -> list[Path]:
 Description=d1-3B decision model for tv-agent (llama.cpp, localhost only)
 
 [Service]
-{libdir}ExecStart={server} -m {cfg.d1_model} --host 127.0.0.1 --port {port} -ngl 99 -c 4096 --parallel 1 -fa on --alias d1-3B --no-webui
+{libdir}ExecStart={_arg(server)} -m {_arg(cfg.d1_model)} --host 127.0.0.1 --port {port} -ngl 99 -c 4096 --parallel 1 -fa on --alias d1-3B --no-webui
 Restart=on-failure
 RestartSec=10
 

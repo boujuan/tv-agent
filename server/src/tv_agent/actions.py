@@ -20,6 +20,7 @@ class PlayTitle(_Action):
     kind: Literal["movie", "series"] | None = None
     restart: bool = False
     latest: bool = False                 # "the latest episode of …": the newest one out
+    guess: bool = False                  # no model understood it: played only if the title is found exactly
 
 
 class ContinueWatching(_Action):

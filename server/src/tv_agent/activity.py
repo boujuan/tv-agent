@@ -21,12 +21,19 @@ def append(entry: dict, path: Path = FILE):
         f.write(json.dumps({"t": round(time.time(), 3), **entry}, ensure_ascii=False) + "\n")
 
 
-def entry(source: str, heard: str, decision, ok: bool | None, say: str, ms: float | None) -> dict:
-    """One record. source: 'tv' (remote mic), 'laptop' (panel mic), 'text' (typed), 'mcp'."""
-    return {"source": source, "heard": heard, "type": decision.action.type, "via": decision.via,
-            "rule": decision.rule, "confidence": round(decision.confidence, 3),
-            "action": decision.action.model_dump(exclude_none=True), "ok": ok, "say": say,
-            "ms": round(ms) if ms is not None else None}
+def entry(source: str, heard: str, decision, ok: bool | None, say: str, ms: float | None,
+          extra: dict | None = None) -> dict:
+    """One record. source: 'tv' (remote mic), 'laptop' (panel mic), 'text' (typed), 'mcp'. ms: doing it. extra:
+    how it was heard and timed (stt, stt_ms, stt_cost, after_speech_ms, audio_s, recording); decide_ms and the
+    models' cost come from the decision."""
+    e = {"source": source, "heard": heard, "type": decision.action.type, "via": decision.via,
+         "rule": decision.rule, "confidence": round(decision.confidence, 3),
+         "action": decision.action.model_dump(exclude_none=True), "ok": ok, "say": say,
+         "ms": round(ms) if ms is not None else None,
+         "decide_ms": round(decision.ms, 2) if getattr(decision, "ms", 0) else None,      # rules: well under 1 ms
+         "cost": getattr(decision, "cost", 0) or None}
+    e.update({k: v for k, v in (extra or {}).items() if v is not None})
+    return {k: v for k, v in e.items() if v is not None or k in ("ok", "ms")}
 
 
 def read(path: Path = FILE, limit: int | None = None) -> list[dict]:

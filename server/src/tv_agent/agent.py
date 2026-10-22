@@ -83,6 +83,8 @@ class DryAdb:
     def close(self):
         pass
 
+    reconnect = close
+
 
 def _clock(ms: int) -> str:
     s = ms // 1000
@@ -410,15 +412,19 @@ class Agent:
                 return m.id, 0.0
         return dict(await asyncio.gather(*(one(m) for m in metas)))
 
-    async def resolve(self, title: str, kind: str | None, season: int | None) -> tuple[str, str, str] | None:
+    async def resolve(self, title: str, kind: str | None, season: int | None,
+                      exact: bool = False) -> tuple[str, str, str] | None:
         """(imdb id, type, name): your library first (what you watch), then Cinemeta. A name the search doesn't find
         exactly also goes to the LLM, meanwhile, for the real titles it sounds like ("ceberance": Severance); the
         closest-sounding one that the library or the search has is used."""
         if kind is None and season is not None:
             kind = "series"
         item = await self.library.find(title, kind)
-        if item:
+        if item and (not exact or library_mod.bare(item.get("name", "")) == library_mod.bare(title)):
             return item["_id"], item["type"], item.get("name", title)
+        if exact:                              # a sentence nothing understood: only a title said exactly
+            m = await self.find_title(title, kind, season)
+            return (m.id, m.type, m.name) if m and title_search.said_exactly(title, m) else None
         fix = asyncio.create_task(self._sounds_like(title)) if self.llm_on() else None
         try:
             m = await self.find_title(title, kind, season)
@@ -973,9 +979,9 @@ class Agent:
             imdb, name, playing_video = current
             kind = "series"
         else:
-            found = await self.resolve(a.title, a.kind, a.season)
+            found = await self.resolve(a.title, a.kind, a.season, exact=a.guess)
             if not found:
-                return Outcome(False, f"Couldn't find “{a.title}”")
+                return Outcome(False, f"Didn't get that: “{a.title}”" if a.guess else f"Couldn't find “{a.title}”")
             imdb, kind, name = found
         state = ((await self.library.get(imdb)) or {}).get("state") or {}
         # The stream lookup (3-6 s) starts now when the video is already known; the metadata comes meanwhile.
@@ -1174,6 +1180,28 @@ class Agent:
         if np and (st := await self._just_status()) is not None:
             return Outcome(True, f"{np.name} · {_clock(st[1])}" + (f" of {_clock(np.runtime_ms)}" if np.runtime_ms else ""))
         return Outcome(True, "Nothing's playing")
+
+    async def play_link(self, url: str) -> Outcome:
+        """Any video link on the TV (the panel's "send a link"), in the configured player."""
+        if not re.match(r"^https?://\S+$", url):
+            return Outcome(False, "Only http(s) links")
+        self._stop_following()                       # what was followed isn't what plays now
+        self.state.now_playing = None                # nor its progress, binge or restore after a restart
+        NOW_PLAYING_FILE.unlink(missing_ok=True)
+        if self.cfg.player == "kodi":
+            await self.kodi.start()
+            await self.kodi.open(url)
+        else:
+            await self.tv(justplayer.start, url, "Link from the panel")
+        return Outcome(True, "Playing the link")
+
+    def now_playing_link(self) -> dict | None:
+        """What the agent is playing, with its stream link (the panel only: the link carries the debrid key)."""
+        np = self.state.now_playing
+        if not np:
+            return None
+        return {"name": np.name, "video_id": np.video_id, "kind": np.kind, "player": np.player, "url": np.url,
+                "filename": np.filename}
 
     async def _sequence(self, a: Sequence) -> Outcome:
         """Two commands said together, one after the other. After one that starts something, the next waits until
