@@ -65,7 +65,7 @@ panel's Decisions tab, then redo your changes.
   plain before SDH / hearing-impaired, Castilian before Latin American.
 - A title said has to match a library item's whole name (or the name before its subtitle): "dune parte dos" no
   longer plays your "Dune".
-- d1 chooses between 32 intents (~0.88 s instead of ~0.74 s, for the ~4% of commands that reach it).
+- d1 chooses between 33 intents (~0.88 s instead of ~0.74 s, for the ~4% of commands that reach it).
 - Faster starts. Kodi is brought up at once and gets ready during the stream search; the stream lookup (3-6 s
   at AIOStreams) starts as soon as the video is known, alongside Cinemeta, and its answer is reused for 30
   minutes; the link check runs while Kodi gets ready and is done at the best link's answer; Kodi gets the file's
@@ -88,9 +88,9 @@ panel's Decisions tab, then redo your changes.
 - Subtitles from your Stremio subtitle addons in Kodi: asked like Stremio asks (the chosen file's hash, size and
   name), and added with `Player.AddSubtitle` for the languages of your list the file doesn't have, the one to show
   last. The file's own subtitles still come first for a language it has.
-- `eval/commands.jsonl`: 761 generated, labelled commands (551 for tuning, 210 held out) from
+- `eval/commands.jsonl`: 777 generated, labelled commands (564 for tuning, 213 held out) from
   `eval/build_commands.py`; `tv-agent eval --file … --split dev|test` scores them by category. Current rules:
-  761/761, with d1 needed for ~4% of them.
+  777/777, with d1 needed for ~4% of them.
 - Binge mode, on by default ("binge mode on/off", `binge` in config.toml): when an episode ends, the next one
   starts by itself. It's found, its stream chosen and its link checked 20 s into the episode, so it starts in
   ~3-4 s (measured: The Office S3E2 → S3E3). After a film or a season's last episode, back to Home instead of
@@ -104,6 +104,13 @@ panel's Decisions tab, then redo your changes.
   shows that you haven't got to), "new films" (your addons' "Latest" list); "number 2", "the second one" or the
   remote plays from it (`/v1/choose` for the TV app).
 - "Play the latest episode of The Bear": the newest episode out.
+- "Skip the intro", "skip the recap", "skip the credits" (the next episode in binge mode, else Home), from
+  TheIntroDB's timestamps for a file of this length and IntroDB's; it only jumps when you're in that part, so
+  timestamps from another cut can't send you somewhere wrong; a chapter named "Opening" or "Recap" counts too.
+  "Auto skip on" (off by default, `auto_skip`) skips intros and recaps by themselves when their timestamps are
+  sure: made on a file within 2 s of this one's length by 3 or more people at confidence ≥ 0.5, or IntroDB
+  agreeing within 2 s (identical numbers don't count: likely copied). Both services get the episode's IMDb id and
+  the file's length.
 - Your Stremio library by voice: "add this to my library", "remove Friends from my library", "mark this as
   watched", "mark The Bear season 3 as watched", "mark it as unwatched". Episodes get Stremio's own watched marks,
   lined up with the episode list your Stremio uses (its first metadata addon); marks that can't be lined up are

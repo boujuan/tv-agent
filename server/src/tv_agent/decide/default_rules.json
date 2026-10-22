@@ -338,6 +338,53 @@
       "note": "only when no title is said: the show that's on"
     },
     {
+      "id": "skip_intro",
+      "stage": "grammar",
+      "do": {
+        "type": "skip",
+        "what": "intro"
+      },
+      "match": "^(?:skip|jump past|jump over|skip past|skip over|get past|go past|fast forward through)\\s+(?:the\\s+|this\\s+)?(?:intro|introduction|opening(?: credits| titles| song| theme)?|theme(?: song| tune)?|title sequence|titles)$",
+      "note": "the intro you're in, from TheIntroDB / IntroDB timestamps (or a chapter named so)"
+    },
+    {
+      "id": "skip_recap",
+      "stage": "grammar",
+      "do": {
+        "type": "skip",
+        "what": "recap"
+      },
+      "match": "^(?:skip|jump past|jump over|skip past|skip over|get past|go past|fast forward through)\\s+(?:the\\s+|this\\s+)?(?:recap|previously(?: on)?|summary|catch[ -]?up)$"
+    },
+    {
+      "id": "skip_credits",
+      "stage": "grammar",
+      "do": {
+        "type": "skip",
+        "what": "credits"
+      },
+      "match": "^(?:skip|jump past|jump over|skip past|skip over|get past|go past|fast forward through)\\s+(?:the\\s+|these\\s+)?(?:(?:end(?:ing)?|closing) credits|credits|outro|ending)$",
+      "note": "the next episode in binge mode, else stop and Home"
+    },
+    {
+      "id": "auto_skip_on",
+      "stage": "grammar",
+      "do": {
+        "type": "auto_skip",
+        "on": true
+      },
+      "match": "^(?:(?:turn|switch) on|enable|start|activate)\\s+(?:the\\s+)?auto(?:matic)?[ -]?skip(?:ping)?(?:\\s+(?:the\\s+)?(?:intros?|recaps?|intros and recaps))?$|^(?:always skip|auto(?:matically)? skip) (?:the\\s+)?(?:intros?|recaps?|intros and recaps)$|^auto[ -]?skip(?:ping)?(?: on)?$"
+    },
+    {
+      "id": "auto_skip_off",
+      "stage": "grammar",
+      "do": {
+        "type": "auto_skip",
+        "on": false
+      },
+      "match": "^(?:(?:turn|switch) off|disable|stop|deactivate)\\s+(?:the\\s+)?auto(?:matic)?[ -]?skip(?:ping)?(?:\\s+(?:the\\s+)?(?:intros?|recaps?|intros and recaps))?$|^(?:stop|don'?t) (?:automatically )?skip(?:ping)? (?:the\\s+)?(?:intros?|recaps?|intros and recaps)(?: automatically)?$|^auto[ -]?skip(?:ping)? off$"
+    },
+    {
       "id": "skip_to_next_episode",
       "stage": "grammar",
       "match": "^(?:skip|fast forward|forward|go forward|jump forward|skip ahead)\\b.*\\bepisode\\b.*$",
@@ -896,6 +943,9 @@
       },
       "library": {
         "describe": "add to or remove from my library, or mark as watched (e.g. 'add this to my library')"
+      },
+      "skip_segment": {
+        "describe": "skip the intro, recap or credits that are playing (e.g. 'skip the intro')"
       },
       "none": {
         "describe": "not a TV command, or not understandable (e.g. 'what time is it')"

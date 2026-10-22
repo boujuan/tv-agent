@@ -755,6 +755,22 @@
 {"text": "Mark severance season two episode four as watched.", "expect": {"type": "library", "op": "watched", "title": "severance", "season": 2, "episode": 4}, "cat": "library", "split": "test"}
 {"text": "mark it as unwatched", "expect": {"type": "library", "op": "unwatched", "title": null}, "cat": "library", "split": "test"}
 {"text": "Mark the office as not watched.", "expect": {"type": "library", "op": "unwatched", "title": "the office"}, "cat": "library", "split": "dev"}
+{"text": "skip the intro", "expect": {"type": "skip", "what": "intro"}, "cat": "skip_part", "split": "dev"}
+{"text": "skip intro", "expect": {"type": "skip", "what": "intro"}, "cat": "skip_part", "split": "dev"}
+{"text": "skip the opening credits", "expect": {"type": "skip", "what": "intro"}, "cat": "skip_part", "split": "test"}
+{"text": "skip the theme song", "expect": {"type": "skip", "what": "intro"}, "cat": "skip_part", "split": "dev"}
+{"text": "Jump past the intro.", "expect": {"type": "skip", "what": "intro"}, "cat": "skip_part", "split": "dev"}
+{"text": "skip the recap", "expect": {"type": "skip", "what": "recap"}, "cat": "skip_part", "split": "dev"}
+{"text": "skip previously on", "expect": {"type": "skip", "what": "recap"}, "cat": "skip_part", "split": "dev"}
+{"text": "Skip the credits.", "expect": {"type": "skip", "what": "credits"}, "cat": "skip_part", "split": "dev"}
+{"text": "skip the end credits", "expect": {"type": "skip", "what": "credits"}, "cat": "skip_part", "split": "test"}
+{"text": "Skip the outro.", "expect": {"type": "skip", "what": "credits"}, "cat": "skip_part", "split": "dev"}
+{"text": "Turn on auto skip.", "expect": {"type": "auto_skip", "on": true}, "cat": "auto_skip", "split": "dev"}
+{"text": "Auto skip intros.", "expect": {"type": "auto_skip", "on": true}, "cat": "auto_skip", "split": "dev"}
+{"text": "Always skip intros.", "expect": {"type": "auto_skip", "on": true}, "cat": "auto_skip", "split": "dev"}
+{"text": "okay turn off auto skip", "expect": {"type": "auto_skip", "on": false}, "cat": "auto_skip", "split": "dev"}
+{"text": "can you stop skipping intros", "expect": {"type": "auto_skip", "on": false}, "cat": "auto_skip", "split": "test"}
+{"text": "auto skip off", "expect": {"type": "auto_skip", "on": false}, "cat": "auto_skip", "split": "dev"}
 {"text": "no one", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
 {"text": "one more thing", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
 {"text": "two people walked in", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}

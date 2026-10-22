@@ -147,6 +147,12 @@ def from_intent(intent: str, t: str, rules: Rules) -> A.Action | None:
         s = T.title_slots(re.sub(r"\s+", " ", rest).strip())
         title = None if (s["title"] or "") in T.CURRENT or re.match(r"^(?:this|that|it)\b", s["title"] or "") else s["title"]
         return A.LibraryEdit(op=op, title=title, season=s["season"], episode=s["episode"], kind=s["kind"])
+    if intent == "skip_segment":
+        if re.search(r"\b(?:recap|previously|summary)\b", t):
+            return A.Skip(what="recap")
+        if re.search(r"\b(?:credits|outro|ending)\b", t) and not re.search(r"\bopening\b", t):
+            return A.Skip(what="credits")
+        return A.Skip(what="intro")
     if intent in ("play_title", "open_in_stremio"):
         s = T.title_slots(t)
         if (s["title"] or "") in T.CURRENT:

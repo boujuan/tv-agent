@@ -625,3 +625,80 @@ def test_a_write_without_a_length_keeps_the_known_one():
     np = NowPlaying("tt1", "series", "tt1:1:2", "X")
     item = {"_id": "tt1", "state": {"video_id": "tt1:1:2", "duration": 3_000_000, "timeOffset": 100_000}}
     assert updated(item, np, 120_000, 0, 20_000, {})["state"]["duration"] == 3_000_000
+
+
+def test_skip_timestamps_fit_the_file_and_need_more_to_go_by_themselves():
+    from tv_agent import skips as K
+    assert K._length_fit(2_831_000, 2_831_500)[1:] == (True, True)          # same file length
+    assert K._length_fit(2_831_000, 2_845_000)[1:] == (False, True)         # near: only when asked
+    assert K._length_fit(4_059_000, 3_795_000) is None                      # another cut: ignored
+    scale, _, near = K._length_fit(round(3_695_000 / K.PAL), 3_695_000)     # PAL speed-up: scaled
+    assert near and abs(scale - 1 / K.PAL) < 1e-3
+    intro = K.Segment("intro", 216_000, 233_000, "TheIntroDB")
+    assert K.around([intro], "intro", 220_000) is intro
+    assert K.around([intro], "intro", 205_000) is intro                     # just before it
+    assert K.around([intro], "intro", 60_000) is None                       # nowhere near: no jump
+    assert K.around([intro], "recap", 220_000) is None
+
+
+def test_two_sources_agreeing_make_a_segment_sure_unless_copied():
+    import asyncio
+    from tv_agent import skips as K
+
+    def run(tidb_intro, idb_intro):
+        async def tidb(*_):
+            return [K.Segment("intro", *tidb_intro, "TheIntroDB", False, True)]
+
+        async def idb(*_):
+            return [K.Segment("intro", *idb_intro, "IntroDB")]
+        K._theintrodb, K._introdb = tidb, idb
+        return asyncio.run(K.fetch(None, "tt1", 1, 1, 2_000_000))[0].sure
+
+    real_t, real_i = K._theintrodb, K._introdb
+    try:
+        assert run((216_218, 233_207), (216_000, 232_000))          # independent and within 2 s
+        assert not run((216_000, 233_000), (216_000, 233_000))      # identical: likely copied
+        assert not run((216_000, 233_000), (220_000, 233_000))      # 4 s apart
+    finally:
+        K._theintrodb, K._introdb = real_t, real_i
+
+
+def test_auto_skip_jumps_a_sure_intro_as_it_comes_and_leaves_the_rest():
+    import asyncio
+    import types
+    from tv_agent import skips as K
+    from tv_agent.agent import Agent
+
+    def watch(segments, start_ms):
+        clock = {"t": 0.0, "base": start_ms}
+        seeks = []
+
+        async def sleep(d):
+            clock["t"] += d
+
+        async def position(pid):
+            return round(clock["base"] + clock["t"] * 1000), 2_831_000, 1.0
+
+        async def seek_to(pid, ms):
+            seeks.append(ms)
+            clock["base"] = ms - clock["t"] * 1000
+
+        async def player():
+            return 1 if clock["t"] < 600 else None
+
+        async def segs(np, total):
+            return segments
+
+        async def notify(text):
+            pass
+        np = NowPlaying("tt1", "series", "tt1:2:3", "X")
+        me = types.SimpleNamespace(state=types.SimpleNamespace(now_playing=np), _kodi_player=player, segments=segs,
+                                   kodi=types.SimpleNamespace(position=position, seek_to=seek_to), notify=notify)
+        asyncio.run(Agent._skip_watch(me, np, sleep=sleep))
+        return seeks
+
+    sure = K.Segment("intro", 216_000, 233_000, "TheIntroDB", sure=True)
+    unsure = K.Segment("intro", 216_000, 233_000, "IntroDB")
+    assert watch([sure], 200_000) == [233_000]          # skipped once, as it came
+    assert watch([unsure], 200_000) == []                # not sure: only when asked
+    assert watch([sure], 400_000) == []                  # resumed after it

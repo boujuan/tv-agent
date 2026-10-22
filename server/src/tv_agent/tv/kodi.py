@@ -105,6 +105,14 @@ class Kodi:
     async def seek_to(self, pid: int, ms: int):
         await self.call("Player.Seek", {"playerid": pid, "value": {"time": _time(ms)}})
 
+    async def info(self, *labels: str) -> dict:
+        """Kodi's info labels, e.g. "Player.ChapterName"."""
+        return await self.call("XBMC.GetInfoLabels", {"labels": list(labels)}) or {}
+
+    async def action(self, name: str):
+        """One of Kodi's built-in actions, e.g. "chapterorbigstepforward"."""
+        await self.call("Input.ExecuteAction", {"action": name})
+
     async def tracks(self, pid: int) -> dict:
         return await self.call("Player.GetProperties", {"playerid": pid, "properties": [
             "audiostreams", "currentaudiostream", "subtitles", "currentsubtitle", "subtitleenabled"]})

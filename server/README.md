@@ -20,6 +20,7 @@ playback and progress sync. Also the `tv-agent` command line and the MCP server.
 | Sleep timer | "stop after this episode", "turn the TV off after this one", "stop in 30 minutes", "turn off in an hour", "cancel the sleep timer" | Stops (then Home) or puts the TV to sleep; "after this one" wins over binge mode |
 | Subtitles, audio | "subtitles on", "subtitles off", "Spanish subtitles", "original audio", "audio in English" | Kodi: the file's own track, else your subtitle addons for that release |
 | Missed a line | "what did they say?", "say that again" | Back 10 s, subtitles on for a moment |
+| Intro, recap, credits | "skip the intro", "skip the recap", "skip the credits"; "auto skip on" / "off" | Jumps to the end of the part you're in, from TheIntroDB / IntroDB timestamps (or a chapter named "Opening"); credits: the next episode in binge mode. Auto skip (off by default, `auto_skip`) skips intros and recaps by themselves when their timestamps are sure |
 | Lists | "what was I watching?", "what's new?", "new films", then "number 2" / "the second one" | A numbered list on the TV (posters); the remote's OK or number keys pick too |
 | Newest episode | "play the latest episode of The Bear" | The newest episode out |
 | Your library | "add this to my library", "remove Friends from my library", "mark this as watched", "mark The Bear season 3 as watched", "mark it as unwatched" | Written to your Stremio library, with Stremio's own per-episode watched marks |
@@ -28,6 +29,11 @@ Audio and subtitles: a title made in a country that speaks `native_language` pla
 anything else plays in `audio_language` (when the file has it) with the first available of `subtitle_languages`
 (English, Spanish, Chinese Simplified/Traditional and others). Dubbed-only releases (French-only, Latino-only) of
 titles from elsewhere are marked down. Kodi applies this per file; Just Player only partly (see below).
+
+Skipping asks TheIntroDB and IntroDB with the episode's IMDb id and the file's length, and only jumps when the part
+you asked about contains where you are: timestamps made on another cut of the episode can't send you somewhere
+wrong. Skipping by itself needs timestamps made on a file within 2 s of yours' length, from 3 or more people (or
+both databases agreeing). Rules and coverage: [research §2.6](../docs/research-2026-10-22.md).
 
 Anything it doesn't understand shows "Didn't get that: …" and does nothing. While the pill listens, the volume
 is halved (Kodi's own volume when Kodi plays, else the TV's) and comes back afterwards; nothing is paused.

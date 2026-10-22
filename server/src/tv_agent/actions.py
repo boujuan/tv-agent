@@ -117,19 +117,30 @@ class LibraryEdit(_Action):
     kind: Literal["movie", "series"] | None = None
 
 
+class Skip(_Action):
+    type: Literal["skip"] = "skip"             # the intro, recap or credits you're in (skips.py)
+    what: Literal["intro", "recap", "credits"]
+
+
+class AutoSkip(_Action):
+    type: Literal["auto_skip"] = "auto_skip"   # intros and recaps skipped by themselves when the data is sure
+    on: bool
+
+
 class Unclear(_Action):
     type: Literal["none"] = "none"
     heard: str = ""
 
 
 Action = Annotated[Union[PlayTitle, ContinueWatching, NextEpisode, OpenInStremio, YouTube, Twitch, OpenApp, Home,
-                         Transport, Volume, Binge, Timer, Tracks, Replay, ShowList, Pick, LibraryEdit, Unclear],
+                         Transport, Volume, Binge, Timer, Tracks, Replay, ShowList, Pick, LibraryEdit, Skip,
+                         AutoSkip, Unclear],
                    Field(discriminator="type")]
 ACTION = TypeAdapter(Action)
 ACTION_TYPES = {m.model_fields["type"].default: m for m in (PlayTitle, ContinueWatching, NextEpisode, OpenInStremio,
                                                              YouTube, Twitch, OpenApp, Home, Transport, Volume, Binge,
                                                              Timer, Tracks, Replay, ShowList, Pick, LibraryEdit,
-                                                             Unclear)}
+                                                             Skip, AutoSkip, Unclear)}
 
 
 def parse(data: str | dict) -> Action:

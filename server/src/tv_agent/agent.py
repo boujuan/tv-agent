@@ -11,9 +11,10 @@ from urllib.parse import urlencode
 
 import httpx
 
-from . import __version__, languages, twitch, youtube
-from .actions import (Action, Binge, ContinueWatching, Home, LibraryEdit, NextEpisode, OpenApp, OpenInStremio, Pick,
-                      PlayTitle, Replay, ShowList, Timer, Tracks, Transport, Twitch, Unclear, Volume, YouTube)
+from . import __version__, languages, skips, twitch, youtube
+from .actions import (Action, AutoSkip, Binge, ContinueWatching, Home, LibraryEdit, NextEpisode, OpenApp, OpenInStremio,
+                      Pick, PlayTitle, Replay, ShowList, Skip, Timer, Tracks, Transport, Twitch, Unclear, Volume,
+                      YouTube)
 from .config import CONFIG_DIR, Config, set_value
 from .decide import rules as rules_mod
 from .decide.d1 import D1
@@ -133,6 +134,8 @@ class Agent:
         self._shown: Shown | None = None         # the list on the TV, for "number 2"
         self._streams: dict[tuple[str, str], tuple[float, list[streams.Stream]]] = {}
         self._stream_jobs: dict[tuple[str, str], asyncio.Task] = {}
+        self._segments: dict[tuple[str, int], list[skips.Segment]] = {}
+        self._skip_task: asyncio.Task | None = None
         self._user_stopped = False               # a stop that was asked for isn't the end of an episode
         self._duck: asyncio.Task | None = None
         self._ducked: tuple[str, int] | None = None   # ("kodi" or "tv", the volume before listening)
@@ -169,7 +172,7 @@ class Agent:
 
     async def execute(self, action: Action) -> Outcome:
         handler = getattr(self, "_" + action.type.replace("none", "unclear"))
-        if action.type not in ("volume", "none", "binge", "timer") and not self.dry_run:
+        if action.type not in ("volume", "none", "binge", "timer", "auto_skip") and not self.dry_run:
             asyncio.create_task(self._wake())
         try:
             return await handler(action)
@@ -509,6 +512,8 @@ class Agent:
                                                 filename=chosen.filename, size=chosen.size,
                                                 video_hash=chosen.video_hash)
             self._tracks_task = asyncio.create_task(self._set_tracks(meta, label, addon_subs))
+            if kind == "series" and self.cfg.auto_skip:
+                self._start_skip_watch(self.state.now_playing)
         self._follow(meta)
         self._save_now_playing()
         if kind == "series":
@@ -1095,6 +1100,99 @@ class Agent:
         video = it.video or it.imdb
         resume = state.get("timeOffset", 0) if state.get("video_id") == video else 0
         return await self.play(it.imdb, it.kind, it.name, video, it.label, meta, resume)
+
+    # ---- skipping intros, recaps and credits (skips.py) ----
+
+    async def segments(self, np: NowPlaying, total_ms: int) -> list[skips.Segment]:
+        """The episode's intro, recap and credits timestamps for this file's length (the last episode's are kept)."""
+        m = re.match(r"^(tt\d+):(\d+):(\d+)$", np.video_id)
+        if np.kind != "series" or not m or not total_ms:
+            return []
+        key = (np.video_id, total_ms // 1000)
+        if key not in self._segments:
+            self._segments = {key: await skips.fetch(self.http, m.group(1), int(m.group(2)), int(m.group(3)), total_ms)}
+        return self._segments[key]
+
+    async def _skip(self, a: Skip) -> Outcome:
+        pid = await self._kodi_player()
+        np = self.state.now_playing
+        if pid is None or np is None or np.player != "kodi":
+            return Outcome(False, "Skipping works in Kodi, for what the agent started")
+        pos, total, _ = await self.kodi.position(pid)
+        what = "intro" if a.what == "credits" and total and pos < total / 4 else a.what   # "the opening credits"
+        found = await self.segments(np, total)
+        if what == "credits":
+            if not (skips.around(found, "credits", pos, lead_ms=30_000) or (total and pos >= 0.85 * total)):
+                return Outcome(False, "The credits haven't started")
+            if np.kind == "series" and self.cfg.binge:
+                return await self._next_episode(NextEpisode(offset=1))
+            self._user_stopped = True
+            await self._note_position(pid)
+            await self.kodi.stop(pid)
+            await self.tv(apps.home)
+            return Outcome(True, "Credits skipped")
+        if seg := skips.around(found, what, pos):
+            await self.kodi.seek_to(pid, seg.end_ms)
+            log.info("skip: %s %s %s-%s (%s)", np.video_id, what, _clock(seg.start_ms), _clock(seg.end_ms), seg.source)
+            return Outcome(True, f"Skipped the {what}")
+        if await self._skip_chapter(what):
+            return Outcome(True, f"Skipped the {what} (chapter)")
+        if a.what == "credits":
+            return Outcome(False, "The credits haven't started")
+        return Outcome(False, f"No {what} timestamps for this part of the episode; “skip 90 seconds” jumps ahead")
+
+    async def _skip_chapter(self, what: str) -> bool:
+        """A chapter named like the part to skip (anime and some releases name them): on to the next chapter."""
+        try:
+            name = str((await self.kodi.info("Player.ChapterName")).get("Player.ChapterName") or "").lower()
+        except Exception:
+            return False
+        names = {"intro": r"\b(?:intro|opening|op|title sequence|theme)\b", "recap": r"\b(?:recap|previously)\b"}
+        if not re.search(names[what], name):
+            return False
+        await self.kodi.action("chapterorbigstepforward")
+        return True
+
+    async def _auto_skip(self, a: AutoSkip) -> Outcome:
+        set_value(self.cfg, "auto_skip", a.on)
+        if a.on and (np := self.state.now_playing) and np.kind == "series" and np.player == "kodi":
+            self._start_skip_watch(np)
+        return Outcome(True, "Auto skip on: intros and recaps go by themselves when their timestamps are sure"
+                       if a.on else "Auto skip off")
+
+    def _start_skip_watch(self, np: NowPlaying):
+        if self._skip_task and not self._skip_task.done():
+            self._skip_task.cancel()
+        self._skip_task = asyncio.create_task(self._skip_watch(np))
+
+    async def _skip_watch(self, np: NowPlaying, sleep=asyncio.sleep):
+        """auto_skip: the episode's intro and recap skipped as they come, when their timestamps are sure."""
+        try:
+            await sleep(4)                               # the file is open and moving
+            if (pid := await self._kodi_player()) is None:
+                return
+            _, total, _ = await self.kodi.position(pid)
+            todo = sorted((s for s in await self.segments(np, total) if s.sure and s.kind in ("intro", "recap")),
+                          key=lambda s: s.start_ms)
+            for seg in todo:
+                while True:
+                    if self.state.now_playing is not np or (pid := await self._kodi_player()) is None:
+                        return
+                    pos, _, speed = await self.kodi.position(pid)
+                    if pos >= seg.end_ms - 3_000:
+                        break                            # past it already (resumed later on, or skipped by hand)
+                    if pos >= seg.start_ms:
+                        await self.kodi.seek_to(pid, seg.end_ms)
+                        await self.notify(f"Skipped the {seg.kind}")
+                        log.info("auto skip: %s %s %s-%s", np.video_id, seg.kind, _clock(seg.start_ms),
+                                 _clock(seg.end_ms))
+                        break
+                    ahead = (seg.start_ms - pos) / 1000 / (speed if speed > 0 else 1)
+                    await sleep(min(max(ahead - 0.3, 0.25), 10) if speed else 5)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.info("auto skip: %s", type(e).__name__)
 
     # ---- your Stremio library: add, remove, mark watched ----
 

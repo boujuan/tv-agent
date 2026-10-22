@@ -47,6 +47,7 @@ class Config:
     native_language: str = "spa"
     twitch_favorites: list[str] = field(default_factory=list)
     binge: bool = True                      # at the end of an episode the next one starts (also by voice)
+    auto_skip: bool = False                 # intros and recaps skipped by themselves when the timestamps are sure
     log_transcripts: bool = True
     secrets: dict[str, str] = field(default_factory=dict, repr=False)
 

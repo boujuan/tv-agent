@@ -100,6 +100,10 @@ def describe(a: A.Action) -> str:
             return {"recent": "What you were watching…", "new": "New episodes…", "movies": "New films…"}[a.list]
         case A.Pick():
             return f"Number {a.number}…"
+        case A.Skip():
+            return f"Skipping the {a.what}"
+        case A.AutoSkip():
+            return "Auto skip on" if a.on else "Auto skip off"
         case A.LibraryEdit():
             what = a.title.title() if a.title else "this"
             return {"add": f"Adding {what} to your library", "remove": f"Removing {what} from your library",
@@ -175,7 +179,7 @@ class Service:
         """Execute in the background so the pill can close; the result arrives on the TV as a toast."""
         out = await self.execute(d, heard, source)
         if d.action.type in ("play_title", "continue_watching", "next_episode", "youtube", "twitch", "pick",
-                             "library") or not out.ok:
+                             "library", "skip") or not out.ok:
             await self.agent.notify(out.say)
 
     def start(self, d: Decision, heard: str, source: str):

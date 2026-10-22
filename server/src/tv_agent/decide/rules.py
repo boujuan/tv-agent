@@ -33,7 +33,7 @@ BUILTIN_INTENTS = ("play_title", "continue_watching", "next_episode", "previous_
                    "twitch", "open_app", "home", "pause", "resume", "stop", "skip_forward", "skip_back", "seek_to",
                    "restart", "volume_set", "volume_up", "volume_down", "mute", "unmute", "binge", "sleep_timer",
                    "subtitles", "audio_language", "replay", "show_recent", "show_new", "pick_number",
-                   "latest_episode", "library",
+                   "latest_episode", "library", "skip_segment",
                    "transport", "volume", "none")    # transport/volume: the broader intents of rules files before v2
 PLACEHOLDER = re.compile(r"^\{(\w+)(?:\|(\w+)(!)?)?\}$")
 PACKAGE = re.compile(r"^[a-zA-Z][\w]*(?:\.[\w]+)+$")

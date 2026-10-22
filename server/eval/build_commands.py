@@ -311,6 +311,14 @@ for text, expect in [("add this to my library", {"op": "add", "title": None}), (
                      ("mark it as unwatched", {"op": "unwatched", "title": None}),
                      ("mark the office as not watched", {"op": "unwatched", "title": "the office"})]:
     add(maybe_noise(text), {"type": "library", **expect}, "library")
+for text, what in [("skip the intro", "intro"), ("skip intro", "intro"), ("skip the opening credits", "intro"),
+                   ("skip the theme song", "intro"), ("jump past the intro", "intro"), ("skip the recap", "recap"),
+                   ("skip previously on", "recap"), ("skip the credits", "credits"), ("skip the end credits", "credits"),
+                   ("skip the outro", "credits")]:
+    add(maybe_noise(text), {"type": "skip", "what": what}, "skip_part")
+for text, on in [("turn on auto skip", True), ("auto skip intros", True), ("always skip intros", True),
+                 ("turn off auto skip", False), ("stop skipping intros", False), ("auto skip off", False)]:
+    add(maybe_noise(text), {"type": "auto_skip", "on": on}, "auto_skip")
 for text in ["no one", "one more thing", "two people walked in", "number one fan"]:
     add(text, {"type": "none"}, "not_a_command")
 
