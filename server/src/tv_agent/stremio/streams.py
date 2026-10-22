@@ -52,6 +52,7 @@ class Stream:
     description: str
     filename: str
     order: int
+    video_hash: str = ""            # OpenSubtitles hash, when the addon knows it (subtitles match on it)
     height: int = 0
     size: int = 0
     duration_ms: int = 0             # from AIOStreams; else the title's runtime is used for the bitrate
@@ -86,7 +87,7 @@ def parse(addon: str, raw: dict, order: int) -> Stream | None:
     hints = raw.get("behaviorHints") or {}
     s = Stream(addon=addon, url=url, name=str(raw.get("name") or ""),
                description=str(raw.get("description") or raw.get("title") or ""),
-               filename=str(hints.get("filename") or ""), order=order,
+               filename=str(hints.get("filename") or ""), order=order, video_hash=str(hints.get("videoHash") or ""),
                headers=((hints.get("proxyHeaders") or {}).get("request") or {}))
     data = raw.get("streamData")
     if isinstance(data, dict) and data.get("type") not in ("error", "statistic"):

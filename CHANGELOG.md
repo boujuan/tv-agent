@@ -38,7 +38,12 @@ panel's Decisions tab, then redo your changes.
   instead of being guessed from its names. The link check no longer mistakes AIOStreams' "can't play" redirect
   videos for a working file.
 
+- Kodi is started while the stream is being looked up, when it isn't running yet.
+
 ### Added
+- Subtitles from your Stremio subtitle addons in Kodi: asked like Stremio asks (the chosen file's hash, size and
+  name), and added with `Player.AddSubtitle` for the languages of your list the file doesn't have, the one to show
+  last. The file's own subtitles still come first for a language it has.
 - `eval/commands.jsonl`: 654 generated, labelled commands (476 for tuning, 178 held out) from
   `eval/build_commands.py`; `tv-agent eval --file … --split dev|test` scores them by category. Current rules:
   654/654, with d1 needed for ~4% of them.

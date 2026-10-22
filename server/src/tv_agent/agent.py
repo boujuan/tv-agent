@@ -18,12 +18,12 @@ from .config import CONFIG_DIR, Config
 from .decide import rules as rules_mod
 from .decide.d1 import D1
 from .state import NowPlaying, State
-from .stremio import cinemeta, progress, streams
+from .stremio import cinemeta, progress, streams, subtitles
 from .stremio.account import Account, Addon
 from .stremio.library import Library
 from .tv import apps, justplayer, media
 from .tv.adb import Adb
-from .tv.kodi import Kodi
+from .tv.kodi import Kodi, KodiError
 
 log = logging.getLogger(__name__)
 SAY_RECEIVER = "com.boujuan.tvagent/.SayReceiver"
@@ -139,8 +139,10 @@ class Agent:
         return streams.rank(found, self.cfg.max_height, self.cfg.max_mbps, _runtime_min(meta),
                             plan.subtitles is None, plan.audio)
 
-    async def apply_tracks(self, plan: languages.TrackPlan, wait_s: float = 12.0) -> str:
-        """Once Kodi knows the file's tracks, switch audio and subtitles per the plan. Returns a short note."""
+    async def apply_tracks(self, plan: languages.TrackPlan, wait_s: float = 12.0,
+                           addon_subs: asyncio.Task | None = None) -> str:
+        """Once Kodi knows the file's tracks, switch audio and subtitles per the plan. Subtitle languages the file
+        lacks come from your subtitle addons (addon_subs: the task fetching them). Returns a short note."""
         loop = asyncio.get_running_loop()
         deadline = loop.time() + wait_s
         while loop.time() < deadline:
@@ -160,13 +162,35 @@ class Agent:
         if plan.subtitles is None:
             if info.get("subtitleenabled"):
                 await self.kodi.set_subtitle(pid, None)
+            return ", ".join(notes)
+        inside = [t for t in info.get("subtitles") or [] if not t.get("isforced")]
+        missing = [lang for lang in plan.subtitles if not any(languages.matches(t, lang) for t in inside)]
+        offered = []
+        if missing and addon_subs is not None:
+            try:
+                offered = subtitles.choose(await asyncio.wait_for(asyncio.shield(addon_subs), 15), missing)
+            except Exception as e:      # slow or failing addons: the file's own subtitles only
+                log.info("addon subtitles: %s", type(e).__name__)
+        # The language to show: the first of yours that the file or an addon has.
+        first = next((lang for lang in plan.subtitles
+                      if lang not in missing or any(lang == want for want, _ in offered)), None)
+        # Kodi shows the last subtitle it was given, so the one to show (if from an addon) goes last.
+        offered.sort(key=lambda pair: pair[0] == first)
+        shown = None
+        for lang, sub in offered:
+            try:
+                await self.kodi.add_subtitle(pid, sub.url)
+                shown = (lang, sub)
+            except KodiError as e:
+                log.warning("adding %s subtitles from %s: %s", lang, sub.addon, e)
+        if first is not None and first not in missing:
+            sub = languages.pick_subtitle(inside, [first])
+            await self.kodi.set_subtitle(pid, sub["index"])
+            notes.append(f"{sub.get('language')} subs")
+        elif shown:
+            notes.append(f"{shown[0]} subs from {shown[1].addon}")
         else:
-            sub = languages.pick_subtitle(info.get("subtitles") or [], plan.subtitles)
-            if sub:
-                await self.kodi.set_subtitle(pid, sub["index"])
-                notes.append(f"{sub.get('language')} subs")
-            else:
-                notes.append("no subtitles in this file")
+            notes.append("no subtitles found")
         return ", ".join(notes)
 
     async def find_title(self, title: str, kind: str | None, season: int | None = None,
@@ -221,6 +245,9 @@ class Agent:
         if not self.account:
             return Outcome(False, "Stremio isn't signed in (tv-agent setup stremio)")
         await self.notify(f"Finding {label}…")
+        kodi_ready = None
+        if self.cfg.player == "kodi" and not self.dry_run and not await self.kodi.up():
+            kodi_ready = asyncio.create_task(self._start_kodi())   # Kodi's cold start overlaps the stream search
         found = [s for s in await self.streams_for(kind, video, meta) if not s.why_dropped]
         if self.cfg.player == "just":
             found = [s for s in found if not s.headers]     # Just Player can't send an addon's extra headers
@@ -249,22 +276,36 @@ class Agent:
             if self.cfg.probe_streams:
                 self._duration = asyncio.create_task(self._probe_duration(self.state.now_playing))
         else:
+            plan = self.track_plan(meta)
+            addon_subs = None
+            if plan.subtitles is not None:   # asked now, attached once Kodi has opened the file
+                addon_subs = asyncio.create_task(subtitles.fetch(self.http, await self.addons(), kind, video, chosen))
             await self.tv(lambda adb: adb.run(["am", "force-stop", justplayer.PACKAGE]))
-            if not await self.kodi.up():
+            if not (kodi_ready is not None and await kodi_ready) and not await self.kodi.up():
                 await self.kodi.start()
             url = chosen.url + ("|" + urlencode(chosen.headers) if chosen.headers else "")
             await self.kodi.open(url, resume_ms)
             self.state.now_playing = NowPlaying(imdb, kind, video, name, "kodi", url, runtime)
-            self._tracks = asyncio.create_task(self._set_tracks(meta, label))
+            self._tracks = asyncio.create_task(self._set_tracks(meta, label, addon_subs))
         self._follow(meta)
         self._save_now_playing()
         quality = f" · {'4K' if chosen.height >= 2160 else f'{chosen.height}p'}" if chosen.height else ""
         return Outcome(True, f"Playing {label}{quality}" + (f" · from {_clock(resume_ms)}" if resume_ms else ""))
 
-    async def _set_tracks(self, meta: dict, label: str):
+    async def _start_kodi(self) -> bool:
+        """Kodi.start() that reports failure instead of raising (it runs ahead of time, before it's certain to be
+        needed); the caller tries again where it matters."""
+        try:
+            await self.kodi.start()
+            return True
+        except (KodiError, httpx.HTTPError, OSError) as e:
+            log.info("starting Kodi early: %s", e)
+            return False
+
+    async def _set_tracks(self, meta: dict, label: str, addon_subs: asyncio.Task | None = None):
         """Audio and subtitles once Kodi has opened the file (a few seconds for a 4K debrid link)."""
         try:
-            note = await self.apply_tracks(self.track_plan(meta))
+            note = await self.apply_tracks(self.track_plan(meta), addon_subs=addon_subs)
             log.info("tracks for %s: %s", label, note or "as the file has them")
             if "no " in note:
                 await self.notify(note.capitalize())

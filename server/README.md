@@ -24,9 +24,12 @@ titles from elsewhere are marked down. Kodi applies this per file; Just Player o
 
 Anything it doesn't understand shows "Didn't get that: …" and does nothing.
 
-## Player: Just Player or Kodi
+## Player: Kodi (default) or Just Player
 
-`player = "just"` or `player = "kodi"` in `~/.config/tv-agent/config.toml` (or the panel's Settings).
+`player = "kodi"` or `player = "just"` in `~/.config/tv-agent/config.toml` (or the panel's Settings). Kodi is the
+default: it's the only player the laptop can fully drive, including subtitles from your Stremio subtitle addons
+(why: [research of 2026-10-22](../docs/research-2026-10-22.md)). When Kodi isn't running, it's started while the
+stream is still being looked up.
 
 | | Just Player 0.217 (`com.brouken.player`) | Kodi 21.2 |
 |---|---|---|
@@ -36,7 +39,7 @@ Anything it doesn't understand shows "Didn't get that: …" and does nothing.
 | Skips | Media keys: +15 s forward, -5 s back per press | Exact, API |
 | Jump to a time, "the middle" | Reopens the same link at that time (~6 s of buffering) | Exact, API |
 | Audio language | The TV's language when the file has it; a native-language title with an English dub plays in English | The rule, per file |
-| Subtitles | Android's system captions setting, set by the agent before each start and turned off again after | The rule, per file |
+| Subtitles | Android's system captions setting, set by the agent before each start and turned off again after; only the file's own | The rule, per file: the file's own, and for languages it lacks, the best match from your subtitle addons (SubSense, OpenSubtitles…) for that exact release |
 | Progress to Stremio | From Android's media session; real length read with `ffprobe` (~2 s) | From the API |
 | Extra addon headers | Not supported: those streams are skipped | Supported |
 
@@ -189,7 +192,7 @@ rm -rf ~/.config/tv-agent ~/.local/share/tv-agent ~/.local/opt/llama.cpp ~/.loca
 | `src/tv_agent/decide/` | `router.py` (the decision path), `rules.py` + `default_rules.json` (the rules engine and defaults), `text.py`, `numbers.py`, `d1.py`, `evaluate.py` |
 | `src/tv_agent/actions.py`, `agent.py` | The closed action set and what each one does on the TV |
 | `src/tv_agent/tv/` | `adb.py` (the only shell path), `apps.py`, `media.py`, `kodi.py`, `justplayer.py` |
-| `src/tv_agent/stremio/` | `account.py` (API, link login), `cinemeta.py`, `streams.py`, `library.py`, `progress.py` |
+| `src/tv_agent/stremio/` | `account.py` (API, link login), `cinemeta.py`, `streams.py`, `subtitles.py`, `library.py`, `progress.py` |
 | `src/tv_agent/languages.py` | Audio/subtitle rule and track matching |
 | `src/tv_agent/config.py`, `redact.py`, `state.py`, `activity.py` | Settings and secrets, log redaction, memory between commands, the history file |
 | `src/tv_agent/mcp_server.py` | MCP tools for Claude Code (`tv-agent-mcp`) |

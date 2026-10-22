@@ -27,11 +27,14 @@ class Addon:
         return self.transport_url.removesuffix("/manifest.json")
 
     def serves_streams(self, kind: str, video_id: str) -> bool:
-        """Whether this addon answers /stream for this type and id (manifest resources, types, idPrefixes)."""
+        return self.serves("stream", kind, video_id)
+
+    def serves(self, resource: str, kind: str, video_id: str) -> bool:
+        """Whether this addon answers /{resource} for this type and id (manifest resources, types, idPrefixes)."""
         m = self.manifest
         for res in m.get("resources", []):
             name = res if isinstance(res, str) else res.get("name")
-            if name != "stream":
+            if name != resource:
                 continue
             types = m.get("types", []) if isinstance(res, str) else res.get("types", m.get("types", []))
             prefixes = m.get("idPrefixes") if isinstance(res, str) else res.get("idPrefixes", m.get("idPrefixes"))

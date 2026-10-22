@@ -283,3 +283,73 @@ def test_just_player_start_reopens_at_the_position():
     justplayer.start(adb, "https://debrid/x.mkv", "The Bear · S3E2", 180_000)
     argv = adb.sent[0]
     assert argv[:3] == ["am", "start", "-S"] and argv[argv.index("--ei") + 2] == "180000"
+
+
+def test_subtitle_languages_and_request_path():
+    from tv_agent.stremio import subtitles as S
+    assert S.language("eng") == "eng" and S.language("Spanish", "es") == "spa"
+    assert S.language("Chinese bilingual", "ze") == "chi" and S.language("chi") == "chi"
+    sub = S.parse("SubSense", {"id": "1", "url": "https://subs/1.srt", "lang": "eng", "label": "OpenSubtitles · [SRT] · x · HI"})
+    assert sub.language == "eng" and sub.impaired
+    assert S.parse("x", {"lang": "eng"}) is None                               # no link, nothing to load
+    s = streams.Stream("AIO", "https://debrid/1", "n", "d", "The Bear S03E02.mkv", 0, video_hash="abc", size=123)
+    assert S.query_path("series", "tt14452776:3:2", s) == \
+        "/subtitles/series/tt14452776:3:2/videoHash=abc&videoSize=123&filename=The%20Bear%20S03E02.mkv.json"
+    assert S.query_path("movie", "tt1", None) == "/subtitles/movie/tt1.json"
+
+
+def test_subtitles_chosen_per_language_in_your_order():
+    from tv_agent.stremio import subtitles as S
+    subs = [S.Subtitle("https://s/eng-hi", "eng", "x HI", "SubSense", impaired=True),
+            S.Subtitle("https://s/eng", "eng", "x", "SubSense"),
+            S.Subtitle("https://s/zh", "chi", "Chinese bilingual", "opensubtitles PRO", ai=True),
+            S.Subtitle("https://s/spa", "spa", "x", "SubSense")]
+    picked = S.choose(subs, ["eng", "cht", "chi", "chs", "spa"])
+    assert [(lang, s.url) for lang, s in picked] == [("eng", "https://s/eng"), ("chi", "https://s/zh"),
+                                                     ("spa", "https://s/spa")]   # no script hint: counted once
+
+
+class _FakeKodi:
+    def __init__(self, subtitles):
+        self.subs, self.added, self.shown = list(subtitles), [], None
+
+    async def tracks(self, pid):
+        return {"audiostreams": [{"index": 0, "language": "eng"}], "currentaudiostream": {"index": 0},
+                "subtitles": self.subs, "subtitleenabled": False}
+
+    async def set_audio(self, pid, index):
+        pass
+
+    async def add_subtitle(self, pid, url):
+        self.added.append(url)
+        self.shown = url
+
+    async def set_subtitle(self, pid, index):
+        self.shown = index
+
+
+def _apply(kodi, offered, langs):
+    import asyncio
+    import types
+    from tv_agent.agent import Agent
+    from tv_agent.stremio import subtitles as S
+
+    async def run():
+        async def player():
+            return 1
+        me = types.SimpleNamespace(kodi=kodi, _kodi_player=player)
+        task = asyncio.create_task(asyncio.sleep(0, result=offered))
+        return await Agent.apply_tracks(me, languages.TrackPlan("eng", langs), addon_subs=task)
+    return asyncio.run(run())
+
+
+def test_kodi_gets_addon_subtitles_only_for_missing_languages():
+    from tv_agent.stremio import subtitles as S
+    offered = [S.Subtitle("https://s/eng", "eng", "x", "SubSense"), S.Subtitle("https://s/spa", "spa", "x", "SubSense")]
+    inside_english = _FakeKodi([{"index": 0, "language": "eng", "name": "English"}])
+    note = _apply(inside_english, offered, ["eng", "spa"])
+    assert inside_english.added == ["https://s/spa"] and inside_english.shown == 0 and note == "eng subs"
+    nothing_inside = _FakeKodi([])
+    note = _apply(nothing_inside, offered, ["eng", "spa"])
+    assert nothing_inside.added == ["https://s/spa", "https://s/eng"]           # the one to show goes last
+    assert nothing_inside.shown == "https://s/eng" and note == "eng subs from SubSense"

@@ -119,5 +119,9 @@ class Kodi:
         await self.call("Player.SetSubtitle", {"playerid": pid, "subtitle": index, "enable": True})
         await self.call("Player.SetSubtitle", {"playerid": pid, "subtitle": "on"})
 
+    async def add_subtitle(self, pid: int, url: str):
+        """Load a subtitle file by link (Kodi detects the format from its content); it becomes the shown one."""
+        await self.call("Player.AddSubtitle", {"playerid": pid, "subtitle": url}, timeout=15)
+
     async def notify(self, title: str, message: str):
         await self.call("GUI.ShowNotification", {"title": title, "message": message, "displaytime": 4000})
