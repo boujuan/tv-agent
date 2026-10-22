@@ -4,10 +4,12 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
-## android — unreleased
+## android 0.7.0 — 2026-10-23
 
 Upgrading from 0.3.0, which was signed with a debug key: uninstall it once (`tv-agent tv shell pm uninstall
-com.boujuan.tvagent`), then `tv-agent tv install tv-agent-android-<version>.apk`, which pairs again.
+com.boujuan.tvagent`), then `tv-agent tv install tv-agent-android-<version>.apk`, which pairs again. Use it with
+server 0.2.0: the lists, the help screen and the streamed microphone come from it (with 0.1.0 the app sends the
+whole recording instead).
 
 ### Added
 - "What can you do?" ("¿qué puedes hacer?"): every command as a pattern with its ‹placeholders› set apart, by
