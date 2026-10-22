@@ -104,6 +104,12 @@ class ShowList(_Action):
     list: Literal["recent", "new", "movies"]   # what you were watching; new episodes of your shows; new films
 
 
+class Recommend(_Action):
+    type: Literal["recommend"] = "recommend"   # "something like Dark", "a short comedy": a list to pick from
+    query: Annotated[str, Field(min_length=1, max_length=300)]   # the request, as said
+    kind: Literal["movie", "series"] | None = None
+
+
 class Pick(_Action):
     type: Literal["pick"] = "pick"             # "number 2": from the list on screen
     number: int = Field(ge=1, le=20)
@@ -148,7 +154,7 @@ class Unclear(_Action):
 
 
 STEPS = (PlayTitle, ContinueWatching, NextEpisode, OpenInStremio, YouTube, Twitch, OpenApp, Home, Transport, Volume,
-         Binge, Timer, Tracks, Replay, ShowList, Pick, LibraryEdit, Skip, AutoSkip, Help, Info, Wrong)
+         Binge, Timer, Tracks, Replay, ShowList, Recommend, Pick, LibraryEdit, Skip, AutoSkip, Help, Info, Wrong)
 Step = Annotated[Union[STEPS], Field(discriminator="type")]
 
 

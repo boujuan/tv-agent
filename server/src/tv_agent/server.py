@@ -46,6 +46,7 @@ from .agent import Agent
 from . import config as config_mod
 from .config import Config, lan_address
 from .decide import evaluate, learned
+from .decide import text as T
 from .decide import rules as R
 from .decide.d1 import WHERE
 from .decide.router import STEPS, Decision, Router, normalize
@@ -116,6 +117,8 @@ def describe(a: A.Action) -> str:
             return f"Back {a.seconds} s"
         case A.ShowList():
             return {"recent": "What you were watching…", "new": "New episodes…", "movies": "New films…"}[a.list]
+        case A.Recommend():
+            return "Buscando recomendaciones…" if T.spanish(a.query) else "Looking for suggestions…"
         case A.Pick():
             return f"Number {a.number}…"
         case A.Skip():

@@ -9,7 +9,9 @@ said, so a misheard name can still be matched ("the bare" -> The Bear), and a ti
 answers (`llm_private` keeps to providers that keep no data). Its answer is checked like everything else: numbers in
 range, an app from the list, one of the agent's own actions; a title it names still has to be found by the title
 search before anything plays. `titles()` asks it which real titles a name the search can't find sounds like
-("ceberance": Severance); the agent keeps the one that sounds closest.
+("ceberance": Severance); the agent keeps the one that sounds closest. `recommend()` suggests real titles for a
+request ("something like Dark", "a short comedy"), with your recent viewing as taste; the agent checks each one with
+the title search before it lists it.
 """
 import json
 import logging
@@ -33,7 +35,7 @@ ACTIONS = ["play_title", "continue_watching", "show_in_stremio", "info", "next_e
            "subtitles_off", "subtitles_toggle", "subtitles", "audio", "skip_intro", "skip_recap", "skip_credits",
            "auto_skip_on", "auto_skip_off", "stop_after_this", "turn_off_after_this", "stop_in", "turn_off_in",
            "cancel_timer", "binge_on", "binge_off", "library_add", "library_remove", "mark_watched", "mark_unwatched",
-           "show_recent", "show_new", "show_movies", "pick", "help", "wrong", "none"]
+           "show_recent", "show_new", "show_movies", "recommend", "pick", "help", "wrong", "none"]
 SLOTS = {"title": "string", "season": "integer", "episode": "integer", "seconds": "integer", "number": "integer",
          "app": "string", "language": "string", "query": "string"}
 SCHEMA = {"type": "object", "additionalProperties": False, "required": ["action", *SLOTS],
@@ -62,7 +64,8 @@ stop_after_this, turn_off_after_this (when what's playing ends) · stop_in, turn
 cancel_timer · binge_on, binge_off (the next episode starts by itself)
 library_add, library_remove, mark_watched, mark_unwatched: title, season, episode, or all null for what's on
 show_recent (a list of what was being watched, not finished yet), show_new ("what's new"), show_movies (new films),
-help ("what can you do")
+help ("what can you do") · recommend: query (they want suggestions: "something like Dark", "a short comedy", "what
+should we watch?"; the query is their request, in their words)
 pick: number (an item of the list on screen) · wrong ("that's wrong": the last command was misunderstood)
 
 Titles: copy one exactly from "candidates" when it's what was said, even misheard ("the bare" is "The Bear"). When
@@ -83,6 +86,7 @@ Examples:
 "empieza el capítulo otra vez" -> {"action":"start_over"}
 "go back to what I was watching yesterday" -> {"action":"continue_watching"}
 "the second thing on the list" -> {"action":"pick","number":2}
+"algo de miedo que no sea muy largo" -> {"action":"recommend","query":"algo de miedo que no sea muy largo"}
 "what was the weather like yesterday" -> {"action":"none"}"""
 
 
@@ -94,6 +98,24 @@ that? Give up to 3 of their real titles (English or original name, as on IMDb), 
 "ceberance" -> Severance, "the bare" -> The Bear, "stranger tings" -> Stranger Things. "watched" lists titles they
 have watched; use one only when it sounds like "spelled". Answer only with the JSON object; an empty list when nothing
 sounds like it."""
+
+
+REC_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["max_minutes", "titles"],
+              "properties": {"max_minutes": {"type": ["integer", "null"]},
+                             "titles": {"type": "array", "maxItems": 10, "items": {
+                  "type": "object", "additionalProperties": False, "required": ["title", "year", "kind", "why"],
+                  "properties": {"title": {"type": "string"}, "year": {"type": ["integer", "null"]},
+                                 "kind": {"type": "string", "enum": ["movie", "series"]},
+                                 "why": {"type": "string"}}}}}}
+REC_SYSTEM = """Someone asked their TV, by voice, for something to watch ("request", from speech-to-text, maybe in
+Spanish). Suggest 10 real films or series that fit it, the best fit first. When they name a title ("something like
+Dark"), suggest similar ones, not that one. When they describe what they want ("a short comedy", "algo de miedo de los
+80"), every suggestion must meet every condition they give: genre, length, decade, country, language, mood, film or
+series ("kind", when given). "taste" lists what they watched lately, newest first: lean towards it when the request
+leaves room. Leave out what's in "seen". Give each title as on IMDb (original or English name), its year of release,
+movie or series, and "why": one short reason, at most 8 words, in "language". "max_minutes": the longest a film may
+run when they set a limit ("under 90 minutes": 90, "menos de hora y media": 90, "something short": 100), else null.
+Answer only with the JSON object."""
 
 
 class Llm:
@@ -162,6 +184,32 @@ class Llm:
             log.info("LLM title fix unavailable (%s)", type(e).__name__)
             return []
         return [t.strip()[:120] for t in got if isinstance(t, str) and t.strip()][:3] if isinstance(got, list) else []
+
+    async def recommend(self, request: str, kind: str | None, taste: list[str], seen: list[str],
+                        language: str) -> tuple[list[dict], int | None]:
+        """Up to 10 suggestions for a request, {title, year, kind, why}, best first (the agent checks each title),
+        and the longest a film may run when the request set a limit."""
+        data = await self._post({
+            "max_tokens": 900,
+            "response_format": {"type": "json_schema",
+                                "json_schema": {"name": "suggestions", "strict": True, "schema": REC_SCHEMA}},
+            "messages": [{"role": "system", "content": REC_SYSTEM},
+                         {"role": "user", "content": json.dumps({"request": request, "kind": kind, "taste": taste,
+                                                                 "seen": seen, "language": language},
+                                                                ensure_ascii=False)}]},
+            12.0)
+        self.last_usage = data.get("usage") or {}
+        content = data["choices"][0]["message"]["content"]
+        answer = json.loads(content) if isinstance(content, str) else content
+        got, limit = answer.get("titles"), answer.get("max_minutes")
+        out = []
+        for t in got if isinstance(got, list) else []:
+            if isinstance(t, dict) and isinstance(t.get("title"), str) and t["title"].strip() \
+                    and t.get("kind") in ("movie", "series"):
+                year = t.get("year") if isinstance(t.get("year"), int) else None
+                out.append({"title": t["title"].strip()[:120], "year": year, "kind": t["kind"],
+                            "why": str(t.get("why") or "").strip()[:80]})
+        return out[:10], limit if isinstance(limit, int) and 20 <= limit <= 400 else None
 
     async def answer(self, said: str, context: dict) -> tuple[bool, A.Action | None]:
         """(whether it answered, its action or None for "not a command")."""
@@ -256,6 +304,8 @@ def to_action(a: dict, said: str, candidates: list[str], rules: Rules) -> A.Acti
                 return A.ShowList(list=kind.removeprefix("show_"))
             case "pick" if num("number"):
                 return A.Pick(number=num("number"))
+            case "recommend":
+                return A.Recommend(query=((a.get("query") or "").strip() or said)[:300])
     except ValidationError:
         log.info("LLM answer out of range: %s", kind)
     return None

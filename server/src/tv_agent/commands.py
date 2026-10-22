@@ -68,6 +68,9 @@ SECTIONS = [
                 "New episodes of your shows", "Capítulos nuevos de tus series", "show_list"),
         Command("new films", "películas nuevas",
                 "Your addons' list of new films", "La lista de películas nuevas de tus addons", "show_list"),
+        Command("recommend ‹something› · something like ‹title›", "recomiéndame ‹algo› · algo como ‹título›",
+                "Suggestions that fit, from what you like, to pick from",
+                "Sugerencias que encajan, según lo que te gusta, para elegir", "recommend"),
         Command("number ‹n› · the ‹first, second…› one", "número ‹n› · el ‹primero, segundo…›",
                 "Plays that one from the list (or OK, or a number key)",
                 "Pone ese de la lista (o OK, o una tecla numérica)", "pick"),
@@ -153,9 +156,11 @@ TV_HINT = {"en": "Press the mic and say one · ▲▼ to scroll · BACK closes",
 EXAMPLES = {
     "en": {"title": "The Bear", "n": "three", "time": "twenty minutes", "language": "Spanish", "app": "YouTube",
            "search": "paella recipes", "channel": "Ibai", "level": "twenty", "first, second…": "third",
+           "something": "a short comedy",
            "command": ["play The Bear season three", "skip the intro"]},
     "es": {"título": "La casa de papel", "n": "tres", "tiempo": "veinte minutos", "idioma": "inglés", "app": "YouTube",
            "búsqueda": "recetas de paella", "canal": "Ibai", "nivel": "veinte", "primero, segundo…": "tercero",
+           "algo": "una serie de miedo",
            "orden": ["pon La casa de papel", "salta la intro"]},
 }
 PLACEHOLDER = re.compile(r"‹([^›]+)›")

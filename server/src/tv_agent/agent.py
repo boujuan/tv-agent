@@ -14,11 +14,12 @@ from rapidfuzz import fuzz
 
 from . import __version__, activity, languages, skips, twitch, youtube
 from .actions import (Action, AutoSkip, Binge, ContinueWatching, Help, Home, Info, LibraryEdit, NextEpisode, OpenApp,
-                      OpenInStremio, Pick, PlayTitle, Replay, Sequence, ShowList, Skip, Timer, Tracks, Transport,
-                      Twitch, Unclear, Volume, Wrong, YouTube)
+                      OpenInStremio, Pick, PlayTitle, Recommend, Replay, Sequence, ShowList, Skip, Timer, Tracks,
+                      Transport, Twitch, Unclear, Volume, Wrong, YouTube)
 from .commands import LEGEND, SECTIONS, TV_HINT
 from .config import CONFIG_DIR, Config, set_value
 from .decide import rules as rules_mod
+from .decide import text as T
 from .decide.d1 import D1
 from .decide.llm import Llm
 from .state import NowPlaying, State
@@ -86,14 +87,23 @@ class DryAdb:
     reconnect = close
 
 
+def _watched_some(item: dict) -> bool:
+    """A library item you've watched (some of): not only added to your list."""
+    st = item.get("state") or {}
+    return bool(st.get("timeWatched") or st.get("timesWatched") or st.get("flaggedWatched") or st.get("video_id"))
+
+
 def _clock(ms: int) -> str:
     s = ms // 1000
     return f"{s // 3600}:{s // 60 % 60:02d}:{s % 60:02d}" if s >= 3600 else f"{s // 60}:{s % 60:02d}"
 
 
 def _runtime_min(meta: dict) -> int | None:
-    m = re.search(r"(\d+)\s*min", str(meta.get("runtime") or ""))
-    return int(m.group(1)) if m else None
+    """Cinemeta's runtime ("99 min", "1h 39min", "2h") in minutes."""
+    text = str(meta.get("runtime") or "")
+    h = re.search(r"(\d+)\s*h", text)
+    m = re.search(r"(\d+)\s*m(?:in)?", text)
+    return (int(h.group(1)) * 60 if h else 0) + (int(m.group(1)) if m else 0) or None
 
 
 def _ago(when: datetime, now: datetime) -> str:
@@ -983,6 +993,12 @@ class Agent:
             if not found:
                 return Outcome(False, f"Didn't get that: “{a.title}”" if a.guess else f"Couldn't find “{a.title}”")
             imdb, kind, name = found
+        return await self._play_found(a, imdb, kind, name, playing_video)
+
+    async def _play_found(self, a: PlayTitle, imdb: str, kind: str, name: str,
+                          playing_video: str | None = None) -> Outcome:
+        """Play a title found: a film, or a series at the season/episode asked, else where you were, else its first
+        episode."""
         state = ((await self.library.get(imdb)) or {}).get("state") or {}
         # The stream lookup (3-6 s) starts now when the video is already known; the metadata comes meanwhile.
         if kind == "movie":
@@ -1106,6 +1122,77 @@ class Agent:
         self._shown = Shown(title, items, time.monotonic())
         await self._show_on_tv(self._shown)
         return Outcome(True, f"{title}: say a number")
+
+    async def _recommend(self, a: Recommend) -> Outcome:
+        """Suggestions for a request ("something like Dark", "a short comedy"): the LLM proposes titles, with your
+        recent viewing as taste; each one must be found by the title search (a real title, with its poster) before
+        it's listed on the TV. "Number 2" then plays it."""
+        es = T.spanish(a.query)
+        if self.llm is None:
+            return Outcome(False, "Las recomendaciones necesitan la clave de OpenRouter" if es else
+                           "Recommendations need the OpenRouter key (Settings › API keys)")
+        items = sorted([i for i in await self.library.items() if i.get("type") in ("movie", "series")],
+                       key=lambda i: (i.get("state") or {}).get("lastWatched") or "", reverse=True)
+        taste = [i.get("name", "") for i in items if _watched_some(i)][:30]
+        seen = [i.get("name", "") for i in items if _watched_some(i)][:150]
+        try:
+            ideas, limit = await self.llm.recommend(a.query, a.kind, taste, seen, "Spanish" if es else "English")
+        except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError, AttributeError) as e:
+            log.info("recommendations unavailable (%s)", type(e).__name__)
+            return Outcome(False, "No hay recomendaciones ahora mismo" if es else "No recommendations right now")
+        watched = {i.get("_id") for i in items if _watched_some(i)}      # already seen or being watched
+        try:
+            addons = await self.addons()         # your metadata addon knows titles by their Spanish names too
+        except Exception as e:
+            log.info("addons unavailable for suggestions (%s); Cinemeta only", type(e).__name__)
+            addons = []
+        picked, ids, tried = [], set(), set()
+        for round_ in (1, 2):                    # a second round when too few fit (a length limit leaves out many)
+            tried |= {x["title"] for x in ideas}
+            found = await asyncio.gather(*(self._recommended(x, es, addons, limit) for x in ideas))
+            for it in found:
+                if it and it.imdb not in ids and it.imdb not in watched:
+                    ids.add(it.imdb)
+                    picked.append(it)
+            if len(picked) >= 3 or round_ == 2:
+                break
+            try:
+                ideas, limit = await self.llm.recommend(a.query, a.kind, taste, seen + sorted(tried),
+                                                        "Spanish" if es else "English")
+            except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError, AttributeError):
+                break
+        if not picked:
+            return Outcome(False, "No encontré nada que encaje" if es else "Couldn't find anything that fits")
+        request = a.query if len(a.query) <= 40 else a.query[:39] + "…"
+        self._shown = Shown(f"Para “{request}”" if es else f"For “{request}”", picked[:8], time.monotonic())
+        await self._show_on_tv(self._shown)
+        return Outcome(True, "Recomendaciones: di un número" if es else "Suggestions: say a number")
+
+    async def _recommended(self, idea: dict, es: bool, addons: list, limit: int | None) -> ListItem | None:
+        """A suggested title as a list item, if the title search knows it by that name (and about that year); a film
+        longer than the request's limit is left out."""
+        try:
+            hits = cinemeta.ranked(idea["title"], await asyncio.wait_for(
+                title_search.search(self.http, idea["title"], addons), 6), idea["kind"])
+            year = idea.get("year")
+            match = next((m for _, m in hits if m.type == idea["kind"] and title_search.said_exactly(idea["title"], m)
+                          and (not year or not m.year[:4].isdigit() or abs(int(m.year[:4]) - year) <= 1)), None)
+            if match is None:
+                log.info("suggestion %r (%s) not found by that name", idea["title"], year)
+                return None
+            meta = await asyncio.wait_for(cinemeta.meta(self.http, match.type, match.id), 4)
+        except Exception as e:               # one suggestion that can't be checked is left out
+            log.info("suggestion %r: %s", idea.get("title"), type(e).__name__)
+            return None
+        if limit and match.type == "movie" and (minutes := _runtime_min(meta)) and minutes > limit:
+            log.info("suggestion %r runs %d min, over %d", idea["title"], minutes, limit)
+            return None
+        rating = meta.get("imdbRating")
+        detail = " · ".join(x for x in (idea.get("why", ""), f"★ {rating}" if rating not in (None, "", "N/A") else "",
+                                         ("serie" if es else "series") if match.type == "series" else "") if x)
+        year = match.year[:4] if match.year else ""
+        label = f"{match.name} ({year})" if year and year not in match.name else match.name
+        return ListItem(match.id, match.type, match.name, label, detail, meta.get("poster") or "")
 
     async def _show_on_tv(self, shown: Shown):
         """The TV app's numbered list (ChoicesActivity); the remote's OK or number keys pick too."""
@@ -1326,6 +1413,8 @@ class Agent:
         it = shown.items[a.number - 1]
         if it.video is None and (item := await self.library.get(it.imdb)) and library_mod.in_continue_watching(item):
             return await self._continue_item(item)
+        if it.video is None and it.kind == "series":        # a recommended series: where you were, or episode 1
+            return await self._play_found(PlayTitle(title=it.name[:120], kind="series"), it.imdb, "series", it.name)
         self.prefetch(it.kind, it.video or it.imdb)
         meta = await cinemeta.meta(self.http, it.kind, it.imdb)
         state = ((await self.library.get(it.imdb)) or {}).get("state") or {}

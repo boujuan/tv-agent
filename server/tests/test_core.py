@@ -1312,3 +1312,80 @@ def test_this_laptop_first_asks_the_hosted_model_when_it_hears_nothing(monkeypat
     svc.stt = types_stt("volume up")
     text, info = asyncio.run(svc.transcribe(b"\0" * 32000))
     assert text == "volume up" and info["stt"] == "local" and "stt_error" not in info
+
+
+@pytest.mark.parametrize("text,recommends", [
+    ("recommend something like dark", True), ("what should we watch tonight", True), ("play a comedy", True),
+    ("put on a horror movie from the 80s", True), ("something like breaking bad", True), ("any suggestions", True),
+    ("recomiéndame algo de miedo", True), ("¿qué vemos hoy?", True), ("algo como la casa de papel", True),
+    ("pon una peli de miedo", True),
+    ("play a series of unfortunate events", False), ("play a quiet place", False), ("play the office", False),
+    ("pon la casa de papel", False), ("play something", False), ("¿qué estoy viendo?", False),
+])
+def test_asking_for_suggestions_isnt_a_title(text, recommends):
+    got = rule_action(text)
+    assert (got is not None and got.type == "recommend") == recommends, got
+
+
+def test_the_llm_can_ask_for_suggestions():
+    from tv_agent.decide.llm import to_action
+    assert to_action({"action": "recommend", "query": "algo de miedo"}, "x", [], RULES) == A.Recommend(query="algo de miedo")
+    assert to_action({"action": "recommend", "query": None}, "something light", [], RULES) == \
+        A.Recommend(query="something light")
+
+
+def test_suggestions_are_real_titles_that_fit_and_play_from_the_list(monkeypatch):
+    import asyncio
+    import types
+    from tv_agent import agent as agent_mod
+    from tv_agent.agent import Agent, Outcome
+    from tv_agent.stremio import cinemeta as C
+    catalog = {"1899": C.Meta("tt1", "series", "1899", "2022", 0), "Coherence": C.Meta("tt2", "movie", "Coherence",
+                                                                                         "2013", 0),
+               "Long Film": C.Meta("tt3", "movie", "Long Film", "2010", 0),
+               "Severance": C.Meta("tt4", "series", "Severance", "2022", 0)}
+    runtimes = {"tt1": "", "tt2": "89 min", "tt3": "2h 10min", "tt4": ""}
+
+    async def search(http, title, addons):
+        return [catalog[title]] if title in catalog else []
+
+    async def meta(http, kind, imdb):
+        return {"runtime": runtimes[imdb], "imdbRating": "7.5", "poster": "p"}
+    monkeypatch.setattr(agent_mod.title_search, "search", search)
+    monkeypatch.setattr(agent_mod.cinemeta, "meta", meta)
+
+    class Llm:
+        seen = []
+
+        async def recommend(self, request, kind, taste, seen, language):
+            self.seen.append(list(seen))
+            return [{"title": t, "year": None, "kind": k, "why": "because"} for t, k in
+                    (("1899", "series"), ("Coherence", "movie"), ("Long Film", "movie"), ("Severance", "series"),
+                     ("Made Up", "movie"))], 100
+
+    class Library:
+        async def items(self):
+            return [{"_id": "tt4", "type": "series", "name": "Severance", "state": {"video_id": "tt4:1:1"}}]
+
+        async def get(self, imdb):
+            return None
+
+    async def addons():
+        return []
+    played = []
+
+    async def show(shown):
+        pass
+
+    async def play_found(a, imdb, kind, name, playing_video=None):
+        played.append((imdb, kind))
+        return Outcome(True, "ok")
+    me = types.SimpleNamespace(llm=Llm(), library=Library(), http=None, _shown=None, addons=addons, _show_on_tv=show,
+                               _play_found=play_found)
+    me._recommended = lambda *a: Agent._recommended(me, *a)
+    out = asyncio.run(Agent._recommend(me, A.Recommend(query="something like dark")))
+    # not the 130-minute film (over the 100 asked), not the series you're watching, not one the search doesn't know
+    assert out.ok and [i.name for i in me._shown.items] == ["1899", "Coherence"]
+    assert me.llm.seen[0] == ["Severance"]
+    asyncio.run(Agent._pick(me, A.Pick(number=1)))
+    assert played == [("tt1", "series")]                # a series from the list: where you were, or its first episode

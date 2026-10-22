@@ -27,6 +27,20 @@ whole recording instead).
   one. Local builds use it when `~/.gradle/gradle.properties` has it and the debug key otherwise;
   `build-and-install.sh` prints which.
 
+## server — unreleased
+
+### Added
+- Suggestions by voice: "recommend something like Dark", "what should we watch?", "put on a comedy under 90
+  minutes", "recomiéndame una serie de miedo", "algo como La casa de papel". The LLM suggests titles that fit, with
+  what you watched lately as taste; each one must be found by the title search (Cinemeta and your metadata addon,
+  so Spanish names work) and fit a length limit you gave (checked against its runtime), and what you've seen or
+  are watching is left out. They're shown as a numbered list on the TV with posters, ratings and a reason; "number 2"
+  plays it (a series where you were, or from its first episode). Rules, the LLM and the decision model all know the
+  new `recommend` action. Needs the OpenRouter key; about $0.0004 and 3-7 s per request.
+
+### Fixed
+- A film's runtime given as "1h 39min" was read as 39 minutes (the length used when Kodi doesn't report one).
+
 ## server 0.2.0 — 2026-10-22
 
 Rules version 2. A `rules.json` you saved before keeps working but doesn't get these: Reset to defaults in the

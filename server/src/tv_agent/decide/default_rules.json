@@ -782,6 +782,46 @@
   ],
   "patterns": [
     {
+      "id": "recommend_ask",
+      "stage": "cue",
+      "match": "^(?P<q>(?:(?:can|could) you |please )?(?:recommend|suggest)\\b.*|(?:what|which) (?:should|could|can|shall) (?:i|we) (?:watch|see)\\b.*|(?:(?:any|got any|give me(?: some)?|i need(?: some)?) )?(?:ideas|suggestions|recommendations) (?:for|of|on) what to watch.*|(?:any|got any) (?:ideas|suggestions|recommendations)\\b.*)$",
+      "do": {
+        "type": "recommend",
+        "query": "{q|text}"
+      },
+      "note": "“recommend something”, “what should we watch?”: suggestions as a list on the TV"
+    },
+    {
+      "id": "recommend_like",
+      "stage": "cue",
+      "match": "^(?P<q>(?:(?:put on|play|find(?: me)?|show me|give me|i want(?: to (?:watch|see))?|i'?d like(?: to (?:watch|see))?|let'?s watch)\\s+)?(?:something|anything|some(?:thing)? good|a (?:good |great )?(?:film|movie|series|show|documentary|comedy|comedies|thriller|horror|drama|cartoon|anime|sitcom|western|romcom))\\s+(?:like|similar to|in the style of|along the lines of)\\s+.+|i (?:feel like|fancy) (?:watching )?(?:something|anything|a (?:film|movie|series|show|documentary|comedy|comedies|thriller|horror|drama|cartoon|anime|sitcom|western|romcom))\\b.*|(?:i'?m|i am) in the mood for (?:something|a (?:film|movie|series|show|documentary|comedy|comedies|thriller|horror|drama|cartoon|anime|sitcom|western|romcom))\\b.*)$",
+      "do": {
+        "type": "recommend",
+        "query": "{q|text}"
+      },
+      "note": "“something like Dark”, “a film like Inception”: not a title to play"
+    },
+    {
+      "id": "recommend_kind",
+      "stage": "cue",
+      "match": "^(?P<q>(?:(?:put on|play|find(?: me)?|show me|give me|i want(?: to (?:watch|see))?|i'?d like(?: to (?:watch|see))?|let'?s watch)\\s+)(?:a|an|some)\\s+(?:\\w+\\s+)?(?:film|movie|series|show|documentary|comedy|comedies|thriller|horror|drama|cartoon|anime|sitcom|western|romcom)s?(?:\\s+(?:like|for|from|with|under|over|about|that|in|set|where|by|of the)\\b.*)?)$",
+      "do": {
+        "type": "recommend",
+        "query": "{q|text}"
+      },
+      "note": "“put on a comedy”, “play a horror film from the 80s”: a kind, not a title (“a series of …” is a title)"
+    },
+    {
+      "id": "recommend_es",
+      "stage": "cue",
+      "match": "^(?P<q>(?:recomi[eé]nda(?:me|nos)|sugi[eé]re(?:me|nos)|recomi[eé]ndame)\\b.*|(?:qu[eé]) (?:puedo|podemos|veo|vemos|pongo|ponemos)(?: ver)?(?: hoy| esta noche| ahora)?|(?:(?:play|busca(?:me)?|dame|quiero ver|vamos a ver)\\s+)?(?:algo|alguna (?:peli|pel[ií]cula|serie)|una (?:peli|pel[ií]cula|serie))\\s+(?:como|parecid[oa] a|similar a|del estilo de|tipo)\\s+.+|(?:me apetece|tengo ganas de) (?:ver )?(?:algo|alguna|una (?:peli|pel[ií]cula|serie))\\b.*|(?:(?:play|busca(?:me)?|dame|quiero ver|vamos a ver)\\s+)(?:una|un|alguna|alg[uú]n)\\s+(?:peli|pel[ií]cula|serie|comedia|documental|thriller|drama|anime)s?(?:\\s+(?:de|del|que|como|parecid[ao]|espa[nñ]ola|americana|coreana|japonesa|corta|nueva|buena|divertida|para|sobre|con|en|de los)\\b.*)?)$",
+      "do": {
+        "type": "recommend",
+        "query": "{q|text}"
+      },
+      "note": "Spanish: recomiéndame algo, ¿qué vemos?, algo como Dark, pon una peli de miedo"
+    },
+    {
       "id": "previous_episode",
       "stage": "grammar",
       "match": "^(?:play |go to |go back to |skip to |jump to |watch |put on )?(?:the )?(?:previous|last|prior)(?: episode| one)?(?: again)?$|^(?:go |skip |jump )?back (?:an|one) episode$|^(?:play |go to )?the episode before(?: this(?: one)?)?$",
@@ -1542,6 +1582,13 @@
         "do": {
           "type": "show_list",
           "list": "movies"
+        }
+      },
+      "recommend": {
+        "describe": "suggest something to watch: like a given title, or a kind of film or series (e.g. 'something like dark', 'a short comedy')",
+        "do": {
+          "type": "recommend",
+          "query": "{text|text}"
         }
       }
     }
