@@ -19,7 +19,9 @@ UNITS.update({"cero": 0, "un": 1, "uno": 1, "una": 1, "dos": 2, "tres": 3, "cuat
 TENS.update({"treinta": 30, "cuarenta": 40, "cincuenta": 50, "sesenta": 60, "setenta": 70, "ochenta": 80,
              "noventa": 90, "cien": 100})
 ORDINALS.update({"primero": 1, "primer": 1, "segundo": 2, "tercero": 3, "tercer": 3, "cuarto": 4, "quinto": 5,
-                 "sexto": 6, "séptimo": 7, "septimo": 7, "octavo": 8, "noveno": 9, "décimo": 10, "decimo": 10})
+                 "sexto": 6, "séptimo": 7, "septimo": 7, "octavo": 8, "noveno": 9, "décimo": 10, "decimo": 10,
+                 "primera": 1, "segunda": 2, "tercera": 3, "cuarta": 4, "quinta": 5, "sexta": 6, "séptima": 7,
+                 "septima": 7, "octava": 8, "novena": 9, "décima": 10, "decima": 10})
 WORD = "|".join(sorted([*UNITS, *TENS, "hundred"], key=len, reverse=True))
 NUMBER = rf"(?:\d+(?:\.\d+)?|(?:(?:{WORD})(?:[ -](?:y[ -])?(?:{WORD}))*))"
 UNIT_S = {"second": 1, "sec": 1, "minute": 60, "min": 60, "hour": 3600}
@@ -48,7 +50,9 @@ def to_int(text: str) -> int | None:
     return total if seen else None
 
 
-DURATION = re.compile(rf"\b({NUMBER}|half an?|a half)\s*(hours?|minutes?|mins?|seconds?|secs?)\b(?:\s+and\s+a\s+half)?")
+FEW = {"a couple of": 2, "a couple": 2, "couple of": 2, "un par de": 2, "par de": 2, "a few": 3}
+DURATION = re.compile(rf"\b({NUMBER}|half an?|a half|{'|'.join(FEW)})\s*(hours?|minutes?|mins?|seconds?|secs?)\b"
+                      rf"(?:\s+and\s+a\s+half)?")
 
 
 def seconds_in(text: str) -> int | None:
@@ -59,6 +63,8 @@ def seconds_in(text: str) -> int | None:
         unit = "min" if unit.startswith("min") else ("sec" if unit.startswith("sec") else unit)
         if amount_text.startswith(("half", "a half")):
             amount = 0.5
+        elif amount_text in FEW:
+            amount = FEW[amount_text]
         else:
             n = float(amount_text) if re.fullmatch(r"\d+(?:\.\d+)?", amount_text) else to_int(amount_text)
             if n is None:

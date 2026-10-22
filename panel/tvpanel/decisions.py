@@ -752,10 +752,20 @@ class Decisions(QWidget):
                     notes["model"] = f"{step.get('intent')} {step.get('confidence', 0):.2f}: not acting"
             elif st == "llm":
                 said = str(step.get("action", "none")).replace("_", " ")
+                if "model" not in path:            # asked before d1: it's the model step
+                    path.append("model")
+                    taken.append((prev, "model"))
+                    prev = "model"
+                if step.get("reached") is False:
+                    lines.append(f"③ <span style='color:{AMBER}'>The LLM ({step.get('model')}) didn't answer</span>; "
+                                 "d1 decides")
+                    continue
                 if step.get("action") not in (None, "none"):
                     hit = "model"
                     notes["model"] = f"LLM: {said}"
-                lines.append(f"④ The LLM ({step.get('model')}) answered <b>{said}</b>, checked like the rest")
+                else:
+                    notes["model"] = "LLM: not a command"
+                lines.append(f"③ The LLM ({step.get('model')}) answered <b>{said}</b>, checked like the rest")
         a = res["action"]
         if a["type"] == "none":
             path.append("unclear")

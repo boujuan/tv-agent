@@ -33,7 +33,7 @@ BUILTIN_INTENTS = ("play_title", "continue_watching", "next_episode", "previous_
                    "twitch", "open_app", "home", "pause", "resume", "stop", "skip_forward", "skip_back", "seek_to",
                    "restart", "volume_set", "volume_up", "volume_down", "mute", "unmute", "binge", "sleep_timer",
                    "subtitles", "audio_language", "replay", "show_recent", "show_new", "pick_number",
-                   "latest_episode", "library", "skip_segment",
+                   "latest_episode", "library", "skip_segment", "help",
                    "transport", "volume", "none")    # transport/volume: the broader intents of rules files before v2
 PLACEHOLDER = re.compile(r"^\{(\w+)(?:\|(\w+)(!)?)?\}$")
 PACKAGE = re.compile(r"^[a-zA-Z][\w]*(?:\.[\w]+)+$")
@@ -160,16 +160,30 @@ def _title(v, _):
 
 NOT_A_TITLE = re.compile(r"^(?:it|this|that|something|anything|again|the movie|the film|the video|"
                          r"(?:the )?(?:next|previous|last|prior) (?:episode|one|part)|"
-                         r"(?:a |some |any )?(?:game|games|music|song|songs|videos?|movies?|films?|shows?|series))$")
+                         r"(?:a |some |any )?(?:game|games|music|song|songs|videos?|movies?|films?|shows?|series))$"
+                         r"|^(?:this|that) (?:episode|movie|film|show|series)\b"          # "start this episode over"
+                         r"|^(?:the |los |las |el |la )?(?:subtitles|subs|captions|subt[ií]tulos)\b")
+# A title described rather than named ("that Nolan film about the atomic bomb", "la de los atracadores"): the models
+# (the LLM knows titles) decide those, not a title search for the description.
+DESCRIBED = re.compile(r"^(?:the one (?:with|where|about|that)|la de|el de|la que|el que|lo de)\b|"
+                       r"\b(?:film|movie|series|show|documentary|peli|pel[ií]cula|serie|documental)\s+"
+                       r"(?:about|where|in which|with the|sobre|donde|en la que|del?)\b")
 
 
 def _play(v, rules):
     """Like title, but not when what follows "play" is an app, the show that's on, or "the next one"."""
     s = T.title_slots(v)
     t = s["title"]
-    if not t or t in T.CURRENT or NOT_A_TITLE.match(t) or _alias(t, rules):
+    if not t or t in T.CURRENT or NOT_A_TITLE.search(t) or DESCRIBED.search(t) or _alias(t, rules):
         return None
     return s
+
+
+def _episode_title(v, rules):
+    """A title said with a season or episode number ("community season two episode two"): like play, but only when
+    a season or episode was actually found ("…once this episode is done" isn't one)."""
+    s = _play(v, rules)
+    return s if s and (s["season"] is not None or s["episode"] is not None) else None
 
 
 THIS = re.compile(r"^(?:this|that|it)(?: one| show| series| movie| film| episode)?$")
@@ -214,13 +228,15 @@ CONVERTERS = {
     "text": lambda v, _: v.strip() or None,
     "seconds": lambda v, _: seconds_in(v),
     "time": _time,
-    "number": lambda v, _: to_int(v),
+    "number": lambda v, _: to_int(re.sub(r"^(?:like|about|around|roughly|maybe|say|unos|unas|como)\s+", "",
+                                         v.strip())),
     "amount": lambda v, _: T.amount(v),
     "direction": lambda v, _: {"louder": "up", "higher": "up", "up": "up", "quieter": "down", "softer": "down",
                                "lower": "down", "down": "down"}.get(v.strip()),
     "query": lambda v, _: T.query(v) or None,
     "title": _title,
     "play": _play,
+    "episode_title": _episode_title,
     "episode_here": lambda v, _: T.episode_here(v),
     "continue": lambda v, _: T.continue_title(v),
     "app": _app,
@@ -239,6 +255,7 @@ CONVERTER_HELP = {
     "query": "a search, without a leading 'some' / 'videos of'",
     "title": "title, season, episode, kind, from-the-start (use with \"*\")",
     "play": "like title, but no match for an app name, 'it' or 'the next one' (use with \"*\")",
+    "episode_title": "like play, only when a season or episode number is said (use with \"*\")",
     "episode_here": "season/episode of the show that's on, when no title is said (use with \"*\")",
     "continue": "a title, or nothing for 'the show' / 'where I left off'",
     "app": "an app from the app list, by name",

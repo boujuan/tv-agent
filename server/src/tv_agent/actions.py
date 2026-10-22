@@ -127,6 +127,10 @@ class AutoSkip(_Action):
     on: bool
 
 
+class Help(_Action):
+    type: Literal["help"] = "help"              # "what can you do?": every command, on the TV
+
+
 class Wrong(_Action):
     type: Literal["wrong"] = "wrong"            # "that's wrong": the last command is marked for teaching
 
@@ -138,13 +142,13 @@ class Unclear(_Action):
 
 Action = Annotated[Union[PlayTitle, ContinueWatching, NextEpisode, OpenInStremio, YouTube, Twitch, OpenApp, Home,
                          Transport, Volume, Binge, Timer, Tracks, Replay, ShowList, Pick, LibraryEdit, Skip,
-                         AutoSkip, Wrong, Unclear],
+                         AutoSkip, Help, Wrong, Unclear],
                    Field(discriminator="type")]
 ACTION = TypeAdapter(Action)
 ACTION_TYPES = {m.model_fields["type"].default: m for m in (PlayTitle, ContinueWatching, NextEpisode, OpenInStremio,
                                                              YouTube, Twitch, OpenApp, Home, Transport, Volume, Binge,
                                                              Timer, Tracks, Replay, ShowList, Pick, LibraryEdit,
-                                                             Skip, AutoSkip, Wrong, Unclear)}
+                                                             Skip, AutoSkip, Help, Wrong, Unclear)}
 
 
 def parse(data: str | dict) -> Action:

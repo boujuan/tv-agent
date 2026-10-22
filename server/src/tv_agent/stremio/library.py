@@ -16,6 +16,19 @@ def _bare(name: str) -> str:
     return ARTICLE.sub("", norm(name))
 
 
+SOUNDS = [(r"ph", "f"), (r"th", "t"), (r"ck|q|c(?=[aou ]|$)", "k"), (r"c", "s"), (r"z", "s"), (r"x", "ks"), (r"v", "b"),
+          (r"[aeiouwhy]", ""), (r"(.)\1+", r"\1")]
+
+
+def _sounds(name: str) -> str:
+    """A rough sound-alike key, so speech-to-text's spelling of a title still finds it: 'the bare' and 'The Bear'
+    both give 'br'."""
+    key = _bare(name)
+    for rx, to in SOUNDS:
+        key = re.sub(rx, to, key)
+    return key.replace(" ", "")
+
+
 def in_continue_watching(item: dict) -> bool:
     # stremio-core LibraryItem::is_in_continue_watching
     return (item.get("type") != "other" and (not item.get("removed") or item.get("temp"))
@@ -51,7 +64,11 @@ class Library:
             hit = process.extractOne(said, names, scorer=fuzz.ratio, score_cutoff=cutoff)
             if hit:
                 return items[hit[2]]
-        return None
+        # Spelled differently but said the same ("the bare" is your "The Bear"): one item only, and close enough.
+        key = _sounds(title)
+        alike = [i for i in items if len(key) >= 2 and _sounds(i.get("name", "")) == key
+                 and fuzz.ratio(said, _bare(i.get("name", ""))) >= 60]
+        return alike[0] if len(alike) == 1 else None
 
     async def continue_watching(self) -> list[dict]:
         """Most recently watched first, like Stremio's Continue Watching row."""

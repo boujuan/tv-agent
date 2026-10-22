@@ -66,7 +66,7 @@
         "note": "the remote's mic opens a moment late and clips the “p” of “play”"
       },
       {
-        "from": "^(?:(?:oye|oiga|venga|vale|bueno|a ver|eh|pues|uh|um|erm|hmm)(?: (?:tele|tv))?[, ]+)+",
+        "from": "^(?:(?:oye|oiga|venga|vale|bueno|a ver|eh|pues|uh|um|erm|hmm|d[eé]jalo|olv[ií]dalo|da igual|nada)(?: (?:tele|tv))?[, ]+)+",
         "to": "",
         "note": "Spanish: “oye”, “venga”, “a ver” (and hesitations) before a command"
       },
@@ -79,6 +79,11 @@
         "from": "^(?:no[, ]+)?(?:eso )?(?:est[aá] mal|no es eso|no era eso|te has equivocado)$",
         "to": "that's wrong",
         "note": "Spanish: eso está mal"
+      },
+      {
+        "from": "^(?:qu[eé] (?:puedes|sabes) hacer|qu[eé] (?:te )?puedo (?:decir|pedir)|ayuda|comandos|qu[eé] entiendes)$",
+        "to": "what can you do",
+        "note": "Spanish: ¿qué puedes hacer?"
       },
       {
         "from": "^(?:pausa|pon pausa|pausar|espera(?: un momento)?|para un momento)$",
@@ -111,7 +116,7 @@
         "note": "Spanish: inicio"
       },
       {
-        "from": "^(?:pon |ve al |pasa al )?(?:el )?(?:siguiente|pr[oó]ximo) (?:cap[ií]tulo|episodio)$|^el siguiente$|^siguiente$",
+        "from": "^(?:pon |ve al |pasa al )?(?:el )?(?:siguiente|pr[oó]ximo) (?:cap[ií]tulo|episodio)$|^el siguiente$|^siguiente$|^(?:pon(?:me)? )?el que viene$|^(?:pon(?:me)? )?el pr[oó]ximo$",
         "to": "next episode",
         "note": "Spanish: siguiente capítulo"
       },
@@ -156,7 +161,7 @@
         "note": "Spanish: volumen al veinte"
       },
       {
-        "from": "^(?:desde el principio|empieza de nuevo|vuelve al principio|desde el inicio|emp[ií]ezalo de nuevo)$",
+        "from": "^(?:desde el principio|empieza de nuevo|vuelve al principio|desde el inicio|emp[ií]ezalo de nuevo)$|^(?:empieza|empi[eé]zalo|vuelve a empezar|pon(?:lo)?) (?:el (?:cap[ií]tulo|episodio)|la peli(?:cula)?) (?:otra vez|de nuevo|desde el principio)$|^otra vez desde el principio$",
         "to": "start over",
         "note": "Spanish: desde el principio"
       },
@@ -226,12 +231,12 @@
         "note": "Spanish: quita los subtítulos"
       },
       {
-        "from": "^(?:pon|activa)(?: los)? subt[ií]tulos$",
+        "from": "^(?:pon(?:me|nos)?|activa)(?: los| unos)? subt[ií]tulos$",
         "to": "subtitles on",
         "note": "Spanish: pon subtítulos"
       },
       {
-        "from": "^(?:pon |activa )?(?:los )?subt[ií]tulos en ",
+        "from": "^(?:pon(?:me|nos)? |activa )?(?:los |unos )?subt[ií]tulos en ",
         "to": "subtitles in ",
         "note": "Spanish: subtítulos en inglés"
       },
@@ -276,6 +281,16 @@
         "note": "Spanish: el sexto"
       },
       {
+        "from": "^(?:.*?[, ]+)?apaga(?: la (?:tele|tv|televisi[oó]n)| todo)? (?:cuando|al) (?:acabe|termine|acabar|terminar)(?: (?:el|este) (?:cap[ií]tulo|episodio))?(?:[, ]+.*)?$",
+        "to": "turn off after this episode",
+        "note": "Spanish: apaga la tele cuando acabe el capítulo"
+      },
+      {
+        "from": "^(?:.*?[, ]+)?para (?:cuando|al) (?:acabe|termine|acabar|terminar)(?: (?:este|el) (?:cap[ií]tulo|episodio)| este)?(?:[, ]+.*)?$",
+        "to": "stop after this episode",
+        "note": "Spanish: para cuando acabe este"
+      },
+      {
         "from": "^(?:apaga(?: la (?:tele|tv|televisi[oó]n))?) (?:despu[eé]s de|al (?:acabar|terminar)) (?:este|el) (?:cap[ií]tulo|episodio)$",
         "to": "turn off after this episode",
         "note": "Spanish: apaga la tele después de este capítulo"
@@ -316,7 +331,7 @@
         "note": "Spanish: ve al minuto veinte"
       },
       {
-        "from": "^(?:ve|vete|ir|salta|pasa) a la mitad$",
+        "from": "^(?:ve|vete|ir|salta|pasa|ll[eé]vame|ponlo) a la mitad(?: del (?:cap[ií]tulo|episodio)| de la peli(?:cula)?)?$",
         "to": "go to the middle",
         "note": "Spanish: ve a la mitad"
       },
@@ -409,6 +424,21 @@
         "from": "\\btradicional\\b",
         "to": "traditional",
         "note": "Spanish: chino tradicional"
+      },
+      {
+        "from": "\\b(?:el )?(?:[uú]ltimo|nuevo) episode de\\b",
+        "to": "the latest episode of",
+        "note": "Spanish: el último capítulo de (after “capítulo” became “episode”)"
+      },
+      {
+        "from": "\\bel (\\w+) episode de la (\\w+) season de\\b",
+        "to": "the \\1 episode of the \\2 season of",
+        "note": "Spanish: el segundo capítulo de la cuarta temporada de …"
+      },
+      {
+        "from": "\\bel episode (\\w+) de la season (\\w+) de\\b",
+        "to": "episode \\1 of season \\2 of",
+        "note": "Spanish: el capítulo dos de la temporada cuatro de …"
       }
     ]
   },
@@ -508,7 +538,12 @@
         "rewind to the beginning",
         "rewind to the start",
         "play it from the beginning",
-        "play from the start"
+        "play from the start",
+        "start this episode over",
+        "start the episode over",
+        "start the movie over",
+        "start this movie over",
+        "start this film over"
       ],
       "do": {
         "type": "transport",
@@ -981,6 +1016,15 @@
       "note": "marks the last command, to teach it in the panel (Activity)"
     },
     {
+      "id": "help",
+      "stage": "grammar",
+      "do": {
+        "type": "help"
+      },
+      "match": "^(?:what (?:can|could) (?:you|i) (?:do|say|ask)(?: (?:here|now|you))?|help(?: me)?|show (?:me )?(?:the |all the |your )?commands|(?:list|what are) (?:the |your )?commands|what do you (?:do|understand))$",
+      "note": "every command, by topic, on the TV"
+    },
+    {
       "id": "show_recent",
       "stage": "grammar",
       "do": {
@@ -1192,7 +1236,7 @@
       "match": "^(?P<all>.+\\b(?:season|episode|ep|s\\d+\\s*e\\d+)\\b.*)$",
       "do": {
         "type": "play_title",
-        "*": "{all|play!}"
+        "*": "{all|episode_title!}"
       },
       "note": "a title said with a season or episode, without “play” (“community season two episode two”)"
     }
@@ -1300,6 +1344,9 @@
       },
       "skip_segment": {
         "describe": "skip the intro, recap or credits that are playing (e.g. 'skip the intro')"
+      },
+      "help": {
+        "describe": "show the list of what I can say (e.g. 'what can you do')"
       },
       "none": {
         "describe": "not a TV command, or not understandable (e.g. 'what time is it')"

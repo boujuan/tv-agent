@@ -13,9 +13,11 @@ import httpx
 from rapidfuzz import fuzz
 
 from . import __version__, activity, languages, skips, twitch, youtube
-from .actions import (Action, AutoSkip, Binge, ContinueWatching, Home, LibraryEdit, NextEpisode, OpenApp, OpenInStremio,
+from .actions import (Action, AutoSkip, Binge, ContinueWatching, Help, Home, LibraryEdit, NextEpisode, OpenApp,
+                      OpenInStremio,
                       Pick, PlayTitle, Replay, ShowList, Skip, Timer, Tracks, Transport, Twitch, Unclear, Volume,
                       Wrong, YouTube)
+from .commands import COMMANDS
 from .config import CONFIG_DIR, Config, set_value
 from .decide import rules as rules_mod
 from .decide.d1 import D1
@@ -118,12 +120,14 @@ class Agent:
         self.account = Account(self.http, key) if key else None
         self.library = Library(self.account)
         self.kodi = Kodi(self.http, self.adb, cfg.kodi_port, cfg.kodi_user, cfg.secret("kodi_password"))
-        self.d1 = D1(self.http, cfg.d1_url, cfg.secret("liquid_api_key") if cfg.hosted_d1 else None)
+        self.d1 = D1(self.http, cfg.d1_url, cfg.secret("liquid_api_key") if cfg.hosted_d1 else None,
+                     cfg.hosted_d1_model)
         self.rules, self.rules_error = rules_mod.load_safe()
         if self.rules_error:
             log.error("rules: %s; using the defaults", self.rules_error)
         key = cfg.secret("openrouter_api_key")
-        self.llm = Llm(self.http, key, cfg.llm_model, self.rules) if key and cfg.llm_fallback else None
+        self.llm = (Llm(self.http, key, cfg.llm_model, self.rules, cfg.llm_reasoning, cfg.llm_private)
+                    if key and cfg.llm_fallback else None)
         self._addons: list[Addon] = []
         self._addons_at = 0.0
         self._progress: asyncio.Task | None = None
@@ -1057,15 +1061,33 @@ class Agent:
 
     async def _show_on_tv(self, shown: Shown):
         """The TV app's numbered list (ChoicesActivity); the remote's OK or number keys pick too."""
-        data = json.dumps({"title": shown.title, "items": [{"label": i.label, "detail": i.detail, "poster": i.poster}
-                                                           for i in shown.items]})
+        if not await self._screen({"title": shown.title, "items": [{"label": i.label, "detail": i.detail,
+                                                                    "poster": i.poster} for i in shown.items]}):
+            await self.notify("  ".join(f"{n}. {i.label}" for n, i in enumerate(shown.items, 1)))
+
+    async def _screen(self, payload: dict) -> bool:
+        """A list screen in the TV app (ChoicesActivity); False for a TV app from before it had one."""
         try:
-            out = await self.tv(lambda adb: adb.run(["am", "start", "-n", CHOICES, "--es", "list", data], timeout=6))
+            out = await self.tv(lambda adb: adb.run(["am", "start", "-n", CHOICES, "--es", "list", json.dumps(payload)],
+                                                    timeout=6))
         except Exception as e:
             out = f"Error: {type(e).__name__}"
-        if "Error" in out:                       # a TV app from before lists: the list as a message
+        if "Error" in out:
             log.info("list on the TV: %s", out.strip()[:120])
-            await self.notify("  ".join(f"{n}. {i.label}" for n, i in enumerate(shown.items, 1)))
+            return False
+        return True
+
+    async def _help(self, a: Help) -> Outcome:
+        """"What can you do?": every command, by topic, on the TV (commands.py), English and Spanish."""
+        items = []
+        for topic, rows in COMMANDS:
+            items.append({"label": topic, "header": True})
+            for en, es, does in rows:
+                items.append({"label": " · ".join(f"“{x}”" for x in en),
+                              "detail": " · ".join([f"“{x}”" for x in es] + ([does] if does else []))})
+        if not await self._screen({"title": "What you can say", "mode": "help", "items": items}):
+            return Outcome(False, "Update the TV app to see the list (android/build-and-install.sh)")
+        return Outcome(True, "What you can say")
 
     async def _recent_items(self) -> list[ListItem]:
         out = []

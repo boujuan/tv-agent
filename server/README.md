@@ -22,6 +22,7 @@ playback and progress sync. Also the `tv-agent` command line and the MCP server.
 | Missed a line | "what did they say?", "say that again" | Back 10 s, subtitles on for a moment |
 | Intro, recap, credits | "skip the intro", "skip the recap", "skip the credits"; "auto skip on" / "off" | Jumps to the end of the part you're in, from TheIntroDB / IntroDB timestamps (or a chapter named "Opening"); credits: the next episode in binge mode. Auto skip (off by default, `auto_skip`) skips intros and recaps by themselves when their timestamps are sure |
 | Lists | "what was I watching?", "what's new?", "new films", then "number 2" / "the second one" | A numbered list on the TV (posters); the remote's OK or number keys pick too |
+| Help | "what can you do?", "help" | Every command, by topic, English and Spanish, on the TV (also the panel's Commands tab) |
 | Newest episode | "play the latest episode of The Bear" | The newest episode out |
 | Your library | "add this to my library", "remove Friends from my library", "mark this as watched", "mark The Bear season 3 as watched", "mark it as unwatched" | Written to your Stremio library, with Stremio's own per-episode watched marks |
 
@@ -153,11 +154,14 @@ op read "op://Personal/<item>/credential" | .venv/bin/tv-agent setup liquid     
 op read "op://Personal/<item>/credential" | .venv/bin/tv-agent setup openrouter  # an LLM for what isn't understood
 ```
 
-The keys are checked with the service, never shown, and kept in `secrets.toml`; `hosted_d1` and `llm_fallback`
-(on by default, panel: Settings) say whether they're used. What goes to them: Liquid's hosted d1 gets what you said
-and the options, only when the local d1 doesn't answer (Liquid's terms allow training on it); the LLM (OpenRouter,
-`llm_model`, zero-data-retention providers only) gets what you said, what's playing, the app names and up to 10 of
-your library's titles, only for commands nothing else understood.
+The keys are checked with the service, never shown, and kept in `secrets.toml` (the panel's Settings can set them
+too); `hosted_d1` and `llm_fallback` (on by default) say whether they're used. With an OpenRouter key, the LLM
+(`llm_model`, Gemini 3.5 Flash-Lite) decides what the rules don't, before d1 (`llm_first`: on unusual phrasings it
+was right 80-90% of the time against d1's 40-70%, at about d1's ~0.85 s; see the research doc); d1 then only
+decides when the LLM can't be reached, and Liquid's hosted d1 only when the local one doesn't answer either. What
+goes to them: the LLM gets what you said, what's playing, the app names and up to 10 of your library's titles
+(fastest provider; `llm_private` for zero-data-retention ones only); Liquid gets what you said and the options
+(its terms allow training on it).
 
 `config.toml` needs at least `tv_hosts` (the TV's address, e.g. Ethernet then Wi-Fi; mDNS is tried otherwise).
 Every setting: [config.example.toml](config.example.toml). Secrets: `~/.config/tv-agent/secrets.toml` (mode 600;

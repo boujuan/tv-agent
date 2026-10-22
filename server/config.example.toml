@@ -30,5 +30,9 @@ auto_skip = false          # skip intros and recaps by themselves when their tim
 
 # Cloud fallbacks, used only with their keys (`tv-agent setup liquid`, `tv-agent setup openrouter`):
 hosted_d1 = true           # the local d1 doesn't answer: Liquid's hosted d1
-llm_fallback = true        # nothing understood a command: an LLM through OpenRouter (zero data retention)
-llm_model = "google/gemini-2.5-flash-lite"
+hosted_d1_model = "d1"     # or "d1-ultra"
+llm_fallback = true        # an LLM through OpenRouter for what the rules don't get
+llm_first = true           # ask it before d1 (more accurate on odd phrasings, about as fast); false: only after d1
+llm_model = "google/gemini-3.5-flash-lite"
+llm_reasoning = "minimal"  # Gemini 3.5 Flash-Lite always reasons a little: keep it at its lowest
+llm_private = false        # true: only providers that keep no data (slower)

@@ -1,0 +1,80 @@
+{"lang": "en", "text": "put that bear show on, third season", "expect": {"type": "play_title", "title_any": ["bear"], "season": 3}}
+{"lang": "en", "text": "can you make it so I can actually hear them", "expect": {"type": "volume", "op": "up"}}
+{"lang": "en", "text": "it's way too loud in here", "expect": {"type": "volume", "op": "down"}}
+{"lang": "en", "text": "I'm going to bed, switch everything off once this episode is done", "expect": {"type": "timer", "then": "off", "minutes": null}}
+{"lang": "en", "text": "let's move on to the next one", "expect": {"type": "next_episode", "offset": 1}}
+{"lang": "en", "text": "go back to whatever I was watching yesterday", "expect": {"type": "continue_watching", "title": null}}
+{"lang": "en", "text": "show me the stuff I haven't finished", "expect": {"type": "show_list", "list": "recent"}}
+{"lang": "en", "text": "did any of my shows get new episodes", "expect": {"type": "show_list", "list": "new"}}
+{"lang": "en", "text": "I didn't catch that line", "expect": {"type": "replay"}}
+{"lang": "en", "text": "get past this boring opening song", "expect": {"type": "skip", "what": "intro"}}
+{"lang": "en", "text": "freeze it for a sec", "expect": {"type": "transport", "op": "pause"}}
+{"lang": "en", "text": "ok carry on", "expect": {"type": "transport", "op": "resume"}}
+{"lang": "en", "text": "jump ahead a couple of minutes", "expect": {"type": "transport", "op": "forward", "seconds": 120}}
+{"lang": "en", "text": "rewind like thirty seconds", "expect": {"type": "transport", "op": "back", "seconds": 30}}
+{"lang": "en", "text": "take me to the halfway point", "expect": {"type": "transport", "op": "seek_to", "percent": 50}}
+{"lang": "en", "text": "start this episode over", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}}
+{"lang": "en", "text": "shut up for a minute", "expect": {"type": "volume", "op": "mute"}}
+{"lang": "en", "text": "bring the sound back", "expect": {"type": "volume", "op": "unmute"}}
+{"lang": "en", "text": "I want a youtube video about making sourdough bread", "expect": {"type": "youtube", "query_any": ["sourdough"]}}
+{"lang": "en", "text": "is ibai streaming right now", "expect": {"type": "twitch", "channel": "ibai"}}
+{"lang": "en", "text": "get me into the movistar app", "expect": {"type": "open_app", "app": "movistar"}}
+{"lang": "en", "text": "take me back to the home screen", "expect": {"type": "home"}}
+{"lang": "en", "text": "put on that dune sequel", "expect": {"type": "play_title", "title_any": ["dune"]}}
+{"lang": "en", "text": "the second episode of the fourth season of community please", "expect": {"type": "play_title", "title_any": ["community"], "season": 4, "episode": 2}}
+{"lang": "en", "text": "I'd like to see that Christopher Nolan film about the atomic bomb", "expect": {"type": "play_title", "title_any": ["oppenheimer"]}}
+{"lang": "en", "text": "the series with the chemistry teacher who cooks meth", "expect": {"type": "play_title", "title_any": ["breaking bad"]}}
+{"lang": "en", "text": "I need english captions on", "expect": {"type": "tracks", "subtitles": "eng"}}
+{"lang": "en", "text": "switch the voices back to the original language", "expect": {"type": "tracks", "audio": "original"}}
+{"lang": "en", "text": "stop playing after this one, I'm tired", "expect": {"type": "timer", "then": "stop", "minutes": null}}
+{"lang": "en", "text": "this one counts as seen", "expect": {"type": "library", "op": "watched"}}
+{"lang": "en", "text": "keep this show for later in my list", "expect": {"type": "library", "op": "add"}}
+{"lang": "en", "text": "what was that list of things I was in the middle of", "expect": {"type": "show_list", "list": "recent"}}
+{"lang": "en", "text": "I'll go with the third one", "expect": {"type": "pick", "number": 3}}
+{"lang": "en", "text": "the fourth", "expect": {"type": "pick", "number": 4}}
+{"lang": "en", "text": "louder please, much louder", "expect": {"type": "volume", "op": "up"}}
+{"lang": "en", "text": "can you turn it down just a tiny bit", "expect": {"type": "volume", "op": "down"}}
+{"lang": "en", "text": "put the volume at like twenty five", "expect": {"type": "volume", "op": "set", "amount": 25}}
+{"lang": "en", "text": "nah forget it, go to the main menu", "expect": {"type": "home"}}
+{"lang": "en", "text": "what's the capital of France", "expect": {"type": "none"}}
+{"lang": "en", "text": "I'm hungry", "expect": {"type": "none"}}
+{"lang": "es", "text": "ponme la de los atracadores con máscaras de Dalí", "expect": {"type": "play_title", "title_any": ["casa de papel", "money heist"]}}
+{"lang": "es", "text": "no se oye nada, sube eso", "expect": {"type": "volume", "op": "up"}}
+{"lang": "es", "text": "está demasiado alto", "expect": {"type": "volume", "op": "down"}}
+{"lang": "es", "text": "me voy a dormir, apaga la tele cuando acabe el capítulo", "expect": {"type": "timer", "then": "off", "minutes": null}}
+{"lang": "es", "text": "pon el que viene", "expect": {"type": "next_episode", "offset": 1}}
+{"lang": "es", "text": "vuelve a lo que estaba viendo ayer", "expect": {"type": "continue_watching", "title": null}}
+{"lang": "es", "text": "enséñame lo que tengo a medias", "expect": {"type": "show_list", "list": "recent"}}
+{"lang": "es", "text": "¿han salido capítulos nuevos de mis series?", "expect": {"type": "show_list", "list": "new"}}
+{"lang": "es", "text": "no he pillado lo que ha dicho", "expect": {"type": "replay"}}
+{"lang": "es", "text": "sáltate la canción del principio", "expect": {"type": "skip", "what": "intro"}}
+{"lang": "es", "text": "páralo un momento", "expect": {"type": "transport", "op": "pause"}}
+{"lang": "es", "text": "venga, dale otra vez", "expect": {"type": "transport", "op": "resume"}}
+{"lang": "es", "text": "adelanta un par de minutos", "expect": {"type": "transport", "op": "forward", "seconds": 120}}
+{"lang": "es", "text": "échalo para atrás medio minuto", "expect": {"type": "transport", "op": "back", "seconds": 30}}
+{"lang": "es", "text": "llévame a la mitad del capítulo", "expect": {"type": "transport", "op": "seek_to", "percent": 50}}
+{"lang": "es", "text": "empieza el capítulo otra vez", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}}
+{"lang": "es", "text": "cállate un rato", "expect": {"type": "volume", "op": "mute"}}
+{"lang": "es", "text": "vuelve a poner el sonido", "expect": {"type": "volume", "op": "unmute"}}
+{"lang": "es", "text": "busca en youtube cómo hacer pan de masa madre", "expect": {"type": "youtube", "query_any": ["masa madre", "sourdough"]}}
+{"lang": "es", "text": "¿está ibai en directo?", "expect": {"type": "twitch", "channel": "ibai"}}
+{"lang": "es", "text": "métete en movistar", "expect": {"type": "open_app", "app": "movistar"}}
+{"lang": "es", "text": "vuelve al menú principal", "expect": {"type": "home"}}
+{"lang": "es", "text": "pon la segunda parte de dune", "expect": {"type": "play_title", "title_any": ["dune"]}}
+{"lang": "es", "text": "pon el segundo capítulo de la cuarta temporada de community", "expect": {"type": "play_title", "title_any": ["community"], "season": 4, "episode": 2}}
+{"lang": "es", "text": "quiero ver la peli de Nolan sobre la bomba atómica", "expect": {"type": "play_title", "title_any": ["oppenheimer"]}}
+{"lang": "es", "text": "la serie del profesor de química que hace droga", "expect": {"type": "play_title", "title_any": ["breaking bad"]}}
+{"lang": "es", "text": "ponme los subtítulos en inglés", "expect": {"type": "tracks", "subtitles": "eng"}}
+{"lang": "es", "text": "ponlo en versión original", "expect": {"type": "tracks", "audio": "original"}}
+{"lang": "es", "text": "para cuando acabe este, que estoy cansado", "expect": {"type": "timer", "then": "stop", "minutes": null}}
+{"lang": "es", "text": "este ya lo he visto", "expect": {"type": "library", "op": "watched"}}
+{"lang": "es", "text": "guárdame esta serie para luego", "expect": {"type": "library", "op": "add"}}
+{"lang": "es", "text": "¿qué tenía a medias?", "expect": {"type": "show_list", "list": "recent"}}
+{"lang": "es", "text": "me quedo con el tercero", "expect": {"type": "pick", "number": 3}}
+{"lang": "es", "text": "el cuarto de la lista", "expect": {"type": "pick", "number": 4}}
+{"lang": "es", "text": "más alto, mucho más", "expect": {"type": "volume", "op": "up"}}
+{"lang": "es", "text": "bájalo un pelín", "expect": {"type": "volume", "op": "down"}}
+{"lang": "es", "text": "pon el volumen a veinticinco", "expect": {"type": "volume", "op": "set", "amount": 25}}
+{"lang": "es", "text": "déjalo, vete al inicio", "expect": {"type": "home"}}
+{"lang": "es", "text": "¿cuál es la capital de Francia?", "expect": {"type": "none"}}
+{"lang": "es", "text": "tengo hambre", "expect": {"type": "none"}}

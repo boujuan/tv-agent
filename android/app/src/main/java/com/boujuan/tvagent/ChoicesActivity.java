@@ -18,6 +18,7 @@ import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import org.json.JSONArray;
@@ -37,7 +38,8 @@ import java.util.concurrent.Executors;
  * A numbered list from tv-agent ("what was I watching?", "what's new?"), opened by the laptop over adb with the list
  * as JSON. Say "number 2" (the pill opens on top; the list stays visible behind it) or pick with the remote: OK on a
  * row, or a number key. Closes when playback takes the screen, on BACK, or after 90 s untouched. Sized for six rows
- * on the TCL's 960×540 dp screen.
+ * on the TCL's 960×540 dp screen. In help mode ("what can you do?") it lists every command by topic instead:
+ * nothing to pick, ▲▼ scrolls.
  */
 public class ChoicesActivity extends Activity {
     private static final long IDLE_CLOSE_MS = 90_000;
@@ -49,7 +51,9 @@ public class ChoicesActivity extends Activity {
     private final Runnable idleClose = this::finish;
     private final List<TextView> details = new ArrayList<>();
     private LinearLayout rows;
+    private ScrollView scroll;
     private TextView title, hint;
+    private boolean help;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -91,7 +95,7 @@ public class ChoicesActivity extends Activity {
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode >= KeyEvent.KEYCODE_1 && keyCode <= KeyEvent.KEYCODE_9) {
+        if (keyCode >= KeyEvent.KEYCODE_1 && keyCode <= KeyEvent.KEYCODE_9 && !help) {
             int n = keyCode - KeyEvent.KEYCODE_0;
             if (n <= rows.getChildCount()) choose(n);
             return true;
@@ -124,13 +128,16 @@ public class ChoicesActivity extends Activity {
         title.setPadding(dp(8), 0, 0, dp(6));
         rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
+        scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(true);
+        scroll.addView(rows);
         hint = new TextView(this);
         hint.setTextColor(0x99FFFFFF);
         hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         hint.setPadding(dp(8), dp(6), 0, 0);
 
         panel.addView(title);
-        panel.addView(rows);
+        panel.addView(scroll);
         panel.addView(hint);
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(500), FrameLayout.LayoutParams.WRAP_CONTENT,
                 Gravity.START | Gravity.CENTER_VERTICAL);
@@ -139,7 +146,10 @@ public class ChoicesActivity extends Activity {
         setContentView(root);
     }
 
-    /** Fills the list from the intent's JSON: {"title": …, "items": [{"label", "detail", "poster"}, …]}. */
+    /**
+     * Fills the list from the intent's JSON: {"title": …, "items": [{"label", "detail", "poster"}, …]}; with
+     * "mode": "help", items marked "header" are topic titles and nothing is numbered or picked.
+     */
     private boolean show(Intent intent) {
         if (intent.getBooleanExtra("close", false)) return false;
         String data = intent.getStringExtra("list");
@@ -149,14 +159,29 @@ public class ChoicesActivity extends Activity {
             JSONArray items = list.getJSONArray("items");
             if (items.length() == 0) return false;
             title.setText(list.optString("title", ""));
+            help = "help".equals(list.optString("mode"));
             rows.removeAllViews();
             details.clear();
-            for (int i = 0; i < Math.min(items.length(), 6); i++) {
+            for (int i = 0; i < (help ? items.length() : Math.min(items.length(), 6)); i++) {
                 JSONObject it = items.getJSONObject(i);
-                rows.addView(row(i + 1, it.optString("label"), it.optString("detail"), it.optString("poster")));
+                if (help) {
+                    rows.addView(it.optBoolean("header") ? header(it.optString("label"))
+                            : helpRow(it.optString("label"), it.optString("detail")));
+                } else {
+                    rows.addView(row(i + 1, it.optString("label"), it.optString("detail"), it.optString("poster")));
+                }
             }
-            hint.setText("Say “number 2”, or pick with OK or a number key");
-            rows.getChildAt(0).requestFocus();
+            // Six picks fit as they are; the help list scrolls in a fixed height.
+            scroll.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                    help ? dp(400) : LinearLayout.LayoutParams.WRAP_CONTENT));
+            hint.setText(help ? "Press the mic and say one · ▲▼ to scroll · BACK closes"
+                    : "Say “number 2”, or pick with OK or a number key");
+            for (int i = 0; i < rows.getChildCount(); i++) {
+                if (rows.getChildAt(i).isFocusable()) {
+                    rows.getChildAt(i).requestFocus();
+                    break;
+                }
+            }
             ui.removeCallbacks(idleClose);
             ui.postDelayed(idleClose, IDLE_CLOSE_MS);
             return true;
@@ -227,6 +252,41 @@ public class ChoicesActivity extends Activity {
         return row;
     }
 
+    private View header(String text) {
+        TextView t = new TextView(this);
+        t.setText(text);
+        t.setTextColor(0xFF6EA8FF);
+        t.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        t.setPadding(dp(8), dp(10), dp(8), dp(2));
+        return t;
+    }
+
+    /** A help line: focusable only so ▲▼ scrolls through them. */
+    private View helpRow(String label, String detail) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(dp(8), dp(3), dp(8), dp(3));
+        row.setFocusable(true);
+        GradientDrawable focused = new GradientDrawable();
+        focused.setColor(0x226EA8FF);
+        focused.setCornerRadius(dp(10));
+        StateListDrawable states = new StateListDrawable();
+        states.addState(new int[]{android.R.attr.state_focused}, focused);
+        states.addState(new int[]{}, new GradientDrawable());
+        row.setBackground(states);
+        TextView main = new TextView(this);
+        main.setText(label);
+        main.setTextColor(Color.WHITE);
+        main.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        TextView sub = new TextView(this);
+        sub.setText(detail);
+        sub.setTextColor(0xB3FFFFFF);
+        sub.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        row.addView(main);
+        if (!detail.isEmpty()) row.addView(sub);
+        return row;
+    }
+
     private void loadPoster(ImageView image, String url) {
         if (!(url.startsWith("https://") || url.startsWith("http://"))) return;
         net.execute(() -> {
@@ -253,7 +313,7 @@ public class ChoicesActivity extends Activity {
 
     /** Tells tv-agent which item was picked; it plays it, and the player covering the list closes it. */
     private void choose(int n) {
-        if (n > details.size()) return;
+        if (help || n > details.size()) return;
         details.get(n - 1).setText("Starting…");
         String base = Pairing.url(this), token = Pairing.token(this);
         net.execute(() -> {

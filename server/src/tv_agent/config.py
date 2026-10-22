@@ -50,8 +50,12 @@ class Config:
     binge: bool = True                      # at the end of an episode the next one starts (also by voice)
     auto_skip: bool = False                 # intros and recaps skipped by themselves when the timestamps are sure
     hosted_d1: bool = True                  # local d1 down: Liquid's hosted d1 (only with `tv-agent setup liquid`)
-    llm_fallback: bool = True               # rules and d1 undecided: an LLM over OpenRouter (`tv-agent setup openrouter`)
-    llm_model: str = "google/gemini-2.5-flash-lite"
+    hosted_d1_model: str = "d1"             # or "d1-ultra" (Liquid's bigger one)
+    llm_fallback: bool = True               # an LLM over OpenRouter for what the rules don't get (`tv-agent setup openrouter`)
+    llm_first: bool = True                  # the LLM before d1 (more accurate, about as fast); false: only after d1
+    llm_model: str = "google/gemini-3.5-flash-lite"
+    llm_reasoning: str = "minimal"          # its lowest; "" for models that take no reasoning setting
+    llm_private: bool = False               # only providers that keep no data (slower for Gemini 3.5 Flash-Lite)
     log_transcripts: bool = True
     secrets: dict[str, str] = field(default_factory=dict, repr=False)
 

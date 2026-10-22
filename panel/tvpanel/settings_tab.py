@@ -7,13 +7,15 @@ import tomllib
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
-                               QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
-                               QPlainTextEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget)
+                               QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+                               QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
 from .common import TV_AGENT, agent_config, agent_stt, card, dim, load_cfg, run_doctor, set_autostart
 
 AUDIO = [("English", "eng"), ("Spanish", "spa"), ("French", "fre"), ("Italian", "ita"), ("German", "ger"),
          ("Portuguese", "por"), ("Japanese", "jpn"), ("Korean", "kor"), ("Chinese", "chi")]
+LLM_MODELS = ["google/gemini-3.5-flash-lite", "google/gemini-3.1-flash-lite", "google/gemini-2.5-flash-lite",
+              "anthropic/claude-haiku-5.5", "openai/gpt-oss-20b"]
 SUBTITLES = [("English", "eng"), ("Spanish", "spa"), ("Chinese (Simplified · 简体)", "chs"),
              ("Chinese (Traditional · 繁體)", "cht"), ("Chinese (either)", "chi"), ("French", "fre"),
              ("Italian", "ita"), ("German", "ger"), ("Portuguese", "por"), ("Japanese", "jpn"), ("Korean", "kor")]
@@ -162,9 +164,37 @@ class Settings(QScrollArea):
         self.llm.setToolTip("~0.7-1 s, only for those. Zero-data-retention providers only. Its answer is checked "
                             "like the rest. Key: op read \"op://Personal/…\" | tv-agent setup openrouter")
         self.cloud_note = dim("")
+        self.hosted_model = QComboBox()
+        self.hosted_model.addItem("d1", "d1")
+        self.hosted_model.addItem("d1-ultra (bigger, a little slower and dearer)", "d1-ultra")
+        self.llm_model = QComboBox()
+        self.llm_model.setEditable(True)                  # any OpenRouter model id
+        self.llm_model.addItems(LLM_MODELS)
+        self.llm_reasoning = QComboBox()
+        for label, v in (("Minimal (fastest; Gemini 3.5 Flash-Lite's lowest)", "minimal"), ("Low", "low"),
+                         ("None (models that allow turning it off)", "none"),
+                         ("Don't send (models with no reasoning setting)", "")):
+            self.llm_reasoning.addItem(label, v)
+        self.llm_private = QCheckBox("Only providers that keep no data (slower for Gemini 3.5 Flash-Lite)")
+        self.llm_first = QCheckBox("Ask the LLM before d1 (more accurate on unusual phrasings, about as fast)")
+        self.llm_first.setToolTip("Off: the LLM only sees what d1 leaves undecided. Measured: "
+                                  "docs/research-2026-10-22.md")
+        keys = QHBoxLayout()
+        for what, label in (("liquid", "Set Liquid key…"), ("openrouter", "Set OpenRouter key…")):
+            b = QPushButton(label)
+            b.setToolTip(f"Checked with the service, then saved in secrets.toml (tv-agent setup {what})")
+            b.clicked.connect(lambda _=False, w=what: self.set_key(w))
+            keys.addWidget(b)
+        keys.addStretch()
         f5.addRow("Cloud", self.hosted_d1)
+        f5.addRow("Hosted d1 model", self.hosted_model)
         f5.addRow("", self.llm)
+        f5.addRow("", self.llm_first)
+        f5.addRow("LLM model", self.llm_model)
+        f5.addRow("LLM reasoning", self.llm_reasoning)
+        f5.addRow("", self.llm_private)
         f5.addRow("", self.cloud_note)
+        f5.addRow("API keys", keys)
         outer.addWidget(voice)
         self._dl_status = None
         self._dl_timer = QTimer(self)
@@ -183,6 +213,35 @@ class Settings(QScrollArea):
         f3.addRow("Twitch favourites", self.twitch)
         f3.addRow("", self.log)
         f3.addRow("TV addresses", self.hosts)
+        outer.addWidget(other)
+
+        self.show_advanced = QCheckBox("Show advanced settings (addresses, ports, model files)")
+        outer.addWidget(self.show_advanced)
+        self.advanced = card()
+        f6 = QFormLayout(self.advanced)
+        f6.setContentsMargins(16, 14, 16, 14)
+        f6.addRow(QLabel("<b>Advanced</b> <span style='color:gray'>· a wrong value can stop the voice agent from "
+                         "starting; “Run checks” tells</span>"))
+        self.adv: dict[str, QWidget] = {}
+        for key, label, tip in (
+                ("lan_host", "This computer on the TV's network", "Empty: worked out (never 0.0.0.0)"),
+                ("lan_port", "Port for the TV app", ""), ("stream_port", "Port for the TV app's audio", ""),
+                ("local_port", "Local API port (panel, CLI)", ""), ("adb_port", "TV's ADB port", ""),
+                ("adb_key", "ADB key file", ""), ("kodi_port", "Kodi web port", ""), ("kodi_user", "Kodi web user", ""),
+                ("d1_url", "d1 server", "llama.cpp's address"),
+                ("d1_model", "d1 model file", "After changing it: tv-agent setup services"),
+                ("llama_server", "llama-server program", "Empty: on PATH or under ~/.local/opt")):
+            if key.endswith("_port"):
+                w = QSpinBox()
+                w.setRange(1, 65535)
+            else:
+                w = QLineEdit()
+            w.setToolTip(tip)
+            self.adv[key] = w
+            f6.addRow(label, w)
+        self.advanced.setVisible(False)
+        self.show_advanced.toggled.connect(self.advanced.setVisible)
+        outer.addWidget(self.advanced)
         row = QHBoxLayout()
         self.note = dim("")
         doctor = QPushButton("Run checks")
@@ -196,8 +255,7 @@ class Settings(QScrollArea):
         row.addWidget(doctor)
         row.addWidget(open_file)
         row.addWidget(save)
-        f3.addRow(row)
-        outer.addWidget(other)
+        outer.addLayout(row)
 
         me = card()
         f4 = QVBoxLayout(me)
@@ -238,6 +296,33 @@ class Settings(QScrollArea):
     def _stt_changed(self, *_):
         key = self.stt.currentData()
         self.download.setVisible(key in agent_stt.MODELS and not agent_stt.installed(key))
+
+    def set_key(self, what: str):
+        """A cloud fallback's key: typed or pasted here, handed to `tv-agent setup <what>` (checked with the service,
+        then saved in secrets.toml); the panel keeps nothing."""
+        label = {"liquid": "Liquid API key", "openrouter": "OpenRouter API key"}[what]
+        key, ok = QInputDialog.getText(self, "TV Agent", f"{label}:", QLineEdit.EchoMode.Password)
+        if not ok or not key.strip():
+            return
+        self.note.setText(f"Checking the {label}…")
+
+        def run():
+            r = subprocess.run([str(TV_AGENT), "setup", what], input=key.strip() + "\n", capture_output=True,
+                               text=True, timeout=60)
+            return r.returncode, "\n".join(l for l in (r.stdout + r.stderr).splitlines() if " INFO " not in l)
+
+        def done(res, err):
+            code, out = res if res else (1, str(err))
+            if code == 0:
+                agent = self.panel.overview.cards["tv-agent"]
+                if agent.active:
+                    agent.act("restart")
+                self.note.setText(f"{label} saved; the voice agent restarted to use it.")
+            else:
+                self.note.setText(out.splitlines()[-1] if out else f"{label} not saved")
+            self.load()
+
+        self.panel.bg.run(run, done)
 
     def _download_stt(self):
         key = self.stt.currentData()
@@ -311,7 +396,18 @@ class Settings(QScrollArea):
         self.binge.setChecked(cfg.binge)
         self.auto_skip.setChecked(cfg.auto_skip)
         self.hosted_d1.setChecked(cfg.hosted_d1)
+        self._select(self.hosted_model, cfg.hosted_d1_model)
         self.llm.setChecked(cfg.llm_fallback)
+        self.llm_model.setCurrentText(cfg.llm_model)
+        self._select(self.llm_reasoning, cfg.llm_reasoning)
+        self.llm_private.setChecked(cfg.llm_private)
+        self.llm_first.setChecked(cfg.llm_first)
+        for key, w in self.adv.items():
+            value = getattr(cfg, key)
+            if isinstance(w, QSpinBox):
+                w.setValue(int(value))
+            else:
+                w.setText(str(value))
         state = lambda name, cmd: "key set" if cfg.secret(name) else f"no key yet (tv-agent setup {cmd})"  # noqa: E731
         self.cloud_note.setText(f"Liquid: {state('liquid_api_key', 'liquid')} · OpenRouter "
                                 f"({cfg.llm_model}): {state('openrouter_api_key', 'openrouter')}")
@@ -333,7 +429,13 @@ class Settings(QScrollArea):
             "binge": self.binge.isChecked(),
             "auto_skip": self.auto_skip.isChecked(),
             "hosted_d1": self.hosted_d1.isChecked(),
+            "hosted_d1_model": self.hosted_model.currentData(),
             "llm_fallback": self.llm.isChecked(),
+            "llm_model": self.llm_model.currentText().strip() or LLM_MODELS[0],
+            "llm_reasoning": self.llm_reasoning.currentData(),
+            "llm_private": self.llm_private.isChecked(),
+            "llm_first": self.llm_first.isChecked(),
+            **{k: (w.value() if isinstance(w, QSpinBox) else w.text().strip()) for k, w in self.adv.items()},
         }
 
     def save(self, values: dict | None = None):

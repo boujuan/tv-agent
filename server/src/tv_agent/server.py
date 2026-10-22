@@ -107,6 +107,8 @@ def describe(a: A.Action) -> str:
             return "Auto skip on" if a.on else "Auto skip off"
         case A.Wrong():
             return "Noted"
+        case A.Help():
+            return "What you can say…"
         case A.LibraryEdit():
             what = a.title.title() if a.title else "this"
             return {"add": f"Adding {what} to your library", "remove": f"Removing {what} from your library",
@@ -119,7 +121,7 @@ class Service:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.agent = Agent(cfg)
-        self.router = Router(self.agent.d1, self.agent.rules, self.agent.llm, self.agent.llm_context)
+        self.router = Router(self.agent.d1, self.agent.rules, self.agent.llm, self.agent.llm_context, cfg.llm_first)
         self._learned_mtime = 0.0
         self._learn(self.agent.rules)
         self.stt: Stt | None = None

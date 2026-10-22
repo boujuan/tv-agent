@@ -563,11 +563,14 @@ def test_library_match_needs_the_whole_name():
     lib._items = [{"_id": "tt1", "type": "movie", "name": "Dune"},
                   {"_id": "tt2", "type": "movie", "name": "El señor de los anillos: La comunidad del anillo"},
                   {"_id": "tt3", "type": "series", "name": "The Office"},
-                  {"_id": "tt4", "type": "series", "name": "Fundación"}]
+                  {"_id": "tt4", "type": "series", "name": "Fundación"},
+                  {"_id": "tt5", "type": "series", "name": "The Bear"}]
     find = lambda t: (asyncio.run(lib.find(t)) or {}).get("_id")   # noqa: E731
     assert find("dune parte dos") is None and find("dune") == "tt1"
     assert find("el señor de los anillos") == "tt2"                # the name before its subtitle
     assert find("office") == "tt3" and find("fundacion") == "tt4"
+    assert find("the bare") == "tt5"                               # spelled otherwise, said the same
+    assert find("dawn") is None                                    # sounds a bit like Dune, but isn't
 
 
 def test_pick_needs_a_list_on_screen():
@@ -780,7 +783,8 @@ def test_llm_answers_become_checked_actions():
     cands = ["The Bear", "Severance"]
     play = to_action({"action": "play_title", "title": "The Bear", "season": 3}, "put that bare show on", cands, RULES)
     assert play == A.PlayTitle(title="The Bear", season=3)
-    assert to_action({"action": "play_title", "title": "Oppenheimer"}, "put that bare show on", cands, RULES) is None
+    described = to_action({"action": "play_title", "title": "La casa de papel"}, "the one with the dali masks", cands, RULES)
+    assert described == A.PlayTitle(title="La casa de papel")          # its own knowledge: the search checks it
     assert to_action({"action": "volume_set", "number": 30}, "x", [], RULES) == A.Volume(op="set", amount=30)
     assert to_action({"action": "volume_set", "number": 300}, "x", [], RULES) is None          # out of range
     assert to_action({"action": "subtitles", "language": "Spanish"}, "x", [], RULES) == A.Tracks(subtitles="spa")
@@ -800,22 +804,26 @@ def test_the_llm_only_sees_what_rules_and_d1_left_undecided():
     class Llm:
         model = "test/model"
 
-        def __init__(self):
-            self.asked = []
+        def __init__(self, reached=True):
+            self.asked, self.reached = [], reached
 
-        async def decide(self, said, context):
+        async def answer(self, said, context):
             self.asked.append((said, context))
-            return A.Transport(op="pause")
+            return (True, A.Transport(op="pause")) if self.reached else (False, None)
 
     async def context(text):
         return {"candidates": []}
 
-    llm = Llm()
-    r = router.Router(D1(), RULES, llm, context)
-    assert asyncio.run(r.decide("pause")).via == "phrase" and not llm.asked          # rules first
-    d = asyncio.run(r.decide("could you freeze the picture for me"))
-    assert d.via == "llm" and d.action.op == "pause" and d.trace[-1]["stage"] == "llm"
-    assert llm.asked[0][0] == "could you freeze the picture for me"
+    for llm_first in (True, False):
+        llm = Llm()
+        r = router.Router(D1(), RULES, llm, context, llm_first)
+        assert asyncio.run(r.decide("pause")).via == "phrase" and not llm.asked          # rules first
+        d = asyncio.run(r.decide("could you freeze the picture for me"))
+        assert d.via == "llm" and d.action.op == "pause" and d.trace[-1]["stage"] == "llm"
+        assert llm.asked[0][0] == "could you freeze the picture for me"
+    unreachable = router.Router(D1(), RULES, Llm(reached=False), context, True)
+    d = asyncio.run(unreachable.decide("could you freeze the picture for me"))
+    assert d.via == "d1" and [s["stage"] for s in d.trace][-2:] == ["llm", "model"]    # d1 when the LLM is out
 
 
 def test_thats_wrong_marks_the_last_command_and_teaching_makes_a_phrase(tmp_path):
@@ -889,3 +897,10 @@ def test_a_start_whose_links_fail_leaves_what_plays_alone():
 
     out, replaced = asyncio.run(run())
     assert not out.ok and "didn't answer" in out.say and replaced == []      # the old session wasn't touched
+
+
+def test_every_example_in_the_command_list_is_understood():
+    from tv_agent.commands import COMMANDS
+    missed = [text for _, rows in COMMANDS for en, es, _ in rows for text in en + es
+              if (got := rule_action(text)) is None or got.type == "none"]
+    assert not missed, missed

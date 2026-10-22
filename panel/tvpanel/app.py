@@ -9,6 +9,7 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMainWindow, QMenu, QSystemTrayIcon, QTabWidget
 
 from .activity_tab import Activity
+from .commands_tab import Commands
 from .common import (APP_ID, ICON, SERVICES, STYLE, Async, Prefs, api, clock, episode_of, gpu_of, gpu_totals, human,
                      pill, unit_info, GREEN, AMBER)
 from .decisions import Decisions
@@ -101,10 +102,11 @@ class Panel(QMainWindow):
         self.tabs.setDocumentMode(True)
         self.overview = Overview(self)
         self.activity = Activity(self)
+        self.commands = Commands(self)
         self.decisions = Decisions(self)
         self.settings = Settings(self)
-        for w, name in ((self.overview, "Overview"), (self.activity, "Activity"), (self.decisions, "Decisions"),
-                        (self.settings, "Settings")):
+        for w, name in ((self.overview, "Overview"), (self.activity, "Activity"), (self.commands, "Commands"),
+                        (self.decisions, "Decisions"), (self.settings, "Settings")):
             self.tabs.addTab(w, name)
         self.tabs.currentChanged.connect(self.tab_changed)
         self.setCentralWidget(self.tabs)

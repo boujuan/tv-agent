@@ -5,8 +5,10 @@
 3. Pattern rules, in order: the first whose regex matches and whose parts convert wins ("skip forward …").
 4. d1-3B picks one of the intents; rules pull out the title, season, episode and numbers. Below the confidence
    threshold, or "none", nothing happens: a misheard sentence does nothing instead of something random.
-5. Only when an LLM is set up (llm.py, an OpenRouter key): what's still undecided goes to it, and its answer is
-   checked like the rest.
+5. Only when an LLM is set up (llm.py, an OpenRouter key): it decides what the rules don't, before d1 (`llm_first`,
+   the default: measured more accurate on unusual phrasings, English and Spanish, at about d1's speed), and d1 only
+   when the LLM can't be reached; with llm_first off, it only sees what d1 leaves undecided. Its answer is checked
+   like the rest.
 Every decision carries a trace of the steps it went through, for the panel's diagram.
 """
 import logging
@@ -149,6 +151,8 @@ def from_intent(intent: str, t: str, rules: Rules) -> A.Action | None:
         s = T.title_slots(re.sub(r"\s+", " ", rest).strip())
         title = None if (s["title"] or "") in T.CURRENT or re.match(r"^(?:this|that|it)\b", s["title"] or "") else s["title"]
         return A.LibraryEdit(op=op, title=title, season=s["season"], episode=s["episode"], kind=s["kind"])
+    if intent == "help":
+        return A.Help()
     if intent == "skip_segment":
         if re.search(r"\b(?:recap|previously|summary)\b", t):
             return A.Skip(what="recap")
@@ -202,21 +206,27 @@ def from_intent(intent: str, t: str, rules: Rules) -> A.Action | None:
 
 
 class Router:
-    def __init__(self, d1: D1, rules: Rules, llm=None, context=None):
+    def __init__(self, d1: D1, rules: Rules, llm=None, context=None, llm_first: bool = True):
         self.d1, self.rules = d1, rules
         self.llm = llm                  # llm.Llm, or None
         self.context = context          # async (text) -> dict for the LLM: what's playing, candidate titles, apps
+        self.llm_first = llm_first
+
+    async def _ask_llm(self, text: str, trace: list) -> Decision | None:
+        """The LLM's decision, or None when it couldn't be reached."""
+        context = await self.context(text) if self.context else {}
+        reached, action = await self.llm.answer(text, context)
+        trace.append({"stage": "llm", "model": self.llm.model, "action": action.type if action else "none",
+                      "reached": reached})
+        if not reached:
+            return None
+        return Decision(action or A.Unclear(heard=text), "llm", 0.9 if action else 0.0, "llm", trace)
 
     async def _last_try(self, text: str, unclear: Decision) -> Decision:
-        """The LLM, for what rules and d1 couldn't decide (when one is set up)."""
-        if self.llm is None:
+        """The LLM, for what rules and d1 couldn't decide (when one is set up and didn't already answer)."""
+        if self.llm is None or self.llm_first:
             return unclear
-        context = await self.context(text) if self.context else {}
-        action = await self.llm.decide(text, context)
-        unclear.trace.append({"stage": "llm", "model": self.llm.model, "action": action.type if action else "none"})
-        if action is None:
-            return unclear
-        return Decision(action, "llm", 0.9, "llm", unclear.trace)
+        return await self._ask_llm(text, unclear.trace) or unclear
 
     async def decide(self, text: str) -> Decision:
         rules = self.rules                      # one consistent set even if a reload lands meanwhile
@@ -226,16 +236,18 @@ class Router:
             return Decision(A.Unclear(heard=text), "none", 0.0, "", trace)
         if hit := match_rules(t, rules, trace):
             return Decision(hit[0], hit[1], 1.0, hit[2], trace)
+        if self.llm is not None and self.llm_first and (d := await self._ask_llm(text, trace)):
+            return d                            # d1 below only when the LLM couldn't be reached
         options = {k: v["describe"] for k, v in rules.intents.items()}
         try:
             pick = await self.d1.choice(t, rules.question, options)
         except (httpx.HTTPError, KeyError) as e:
             log.warning("d1 unavailable (%s); trying %s", type(e).__name__, rules.fallback_intent)
             trace.append({"stage": "model", "available": False})
-            action = from_intent(rules.fallback_intent, t, rules)
-            if action is None:
+            if self.llm is not None and not self.llm_first:   # the LLM before guessing a title from the sentence
                 return await self._last_try(text, Decision(A.Unclear(heard=text), "none", 0.0, "", trace))
-            return Decision(action, "none", 0.0, rules.fallback_intent, trace)
+            action = from_intent(rules.fallback_intent, t, rules)
+            return Decision(action or A.Unclear(heard=text), "none", 0.0, rules.fallback_intent, trace)
         top = sorted(pick.probabilities.items(), key=lambda kv: -kv[1])[:3]
         step = {"stage": "model", "intent": pick.key, "confidence": round(pick.confidence, 3),
                 "threshold": rules.min_confidence, "top": [[k, round(p, 3)] for k, p in top]}

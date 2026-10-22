@@ -10,6 +10,8 @@ Upgrading from 0.3.0, which was signed with a debug key: uninstall it once (`tv-
 com.boujuan.tvagent`), then `tv-agent tv install tv-agent-android-<version>.apk`, which pairs again.
 
 ### Added
+- "What can you do?" ("¿qué puedes hacer?"): every command by topic, English and Spanish, in a scrolling list on
+  the TV (0.6.0).
 - A numbered list on the TV for "what was I watching?", "what's new?" and "new films", with posters: say "number
   2", or pick with OK or a number key. It stays visible while you speak (the pill opens beside it, bottom-right)
   and closes when playback starts, on BACK, or after 90 s (`ChoicesActivity`, opened over adb only).
@@ -88,6 +90,14 @@ panel's Decisions tab, then redo your changes.
   longer carry addon links; a sleep timer turns the TV off even when stopping the player fails.
 - An addon's stream lookup is tried once more a second later after a server error or rate limit (AIOStreams
   answered two lookups with an error once, then was fine).
+- Rules that took too much: "start this episode over", "put the volume at like twenty five", a sentence that
+  merely mentions an episode ("…once this episode is done") and described titles ("that film about the atomic
+  bomb", "la de los atracadores") were played as titles; now the right rule or the models decide them. "A couple
+  of minutes" / "un par de minutos" are read; more Spanish forms ("ponme los subtítulos…", "pon el que viene",
+  "llévame a la mitad", "empieza el capítulo otra vez", "la cuarta temporada", "apaga la tele cuando acabe").
+- A title spelled differently by speech-to-text but said the same finds your library's ("the bare" played "Jamie
+  Oliver: The Naked Chef Bares All" instead of your The Bear).
+- With d1 unreachable, an unmatched sentence went to a title search; the LLM decides it first when set up.
 
 ### Added
 - The TV app's audio stream (port 8767): decided ~0.25-0.3 s after your last word for complete commands
@@ -121,10 +131,18 @@ panel's Decisions tab, then redo your changes.
   (titles stay as said, Spanish numbers are read); 49 Spanish test sentences. They need a multilingual speech model
   to be heard as Spanish.
 - Liquid's hosted d1 as a fallback when the local d1 doesn't answer (`hosted_d1`, `tv-agent setup liquid`).
-- An LLM after d1, for commands nothing else understood (`llm_fallback`, `llm_model` =
-  google/gemini-2.5-flash-lite through OpenRouter, `tv-agent setup openrouter`): one action in a strict JSON
-  shape, zero-data-retention providers only; a title has to be said or be among up to 10 of your library's
-  titles that sound like it; everything is checked like the rules' answers.
+- An LLM for what the rules don't catch (`llm_fallback`, `tv-agent setup openrouter`; `llm_model` =
+  google/gemini-3.5-flash-lite through OpenRouter, reasoning at its "minimal" floor): asked before d1 by default
+  (`llm_first`; measured more accurate in English and Spanish at about d1's speed), d1 only when it can't be
+  reached. One action in a fixed JSON shape covering every command; it gets up to 10 of your library's titles that
+  sound like what you said, and names described titles itself ("the series with the chemistry teacher" is Breaking
+  Bad); its answer is checked like the rules', and a title it names still has to be found. Fastest provider by
+  default; `llm_private` keeps to zero-data-retention providers (slower).
+- `hosted_d1_model` ("d1" or "d1-ultra").
+- "What can you do?" / "help": every command on the TV; the same list (`tv_agent/commands.py`) is the panel's
+  Commands tab, and a test checks every example in it is understood.
+- `scripts/bench_fallbacks.py` and `eval/hard.jsonl` (80 hard commands, English and Spanish): accuracy and delay of
+  each decision path.
 - "That's wrong" ("eso está mal") marks the last command in the history; the panel teaches it the right action,
   saved as that exact sentence (`learned.json`, checked before the rules, apart from `rules.json`). `tv-agent
   review` lists marked and not-understood commands, with the LLM's guess when one is set up.
@@ -151,6 +169,11 @@ panel's Decisions tab, then redo your changes.
 ## panel — unreleased
 
 ### Added
+- Commands: everything you can say, by topic, English and Spanish, with a filter; right-click to copy an example
+  or try it on the TV.
+- Settings covers every setting now: the LLM's model, reasoning, "before d1" and private mode, the hosted d1
+  model, buttons to set the Liquid and OpenRouter keys (checked, then saved; the panel keeps nothing), and an
+  Advanced section (addresses, ports, model files, Kodi user).
 - Settings: a Voice card: the speech model (with "Download and use" for one not on this computer yet), binge
   mode, auto skip, and the cloud fallbacks (Liquid's hosted d1, an LLM) with whether their keys are set. The tab
   reloads when shown, so a binge mode changed by voice isn't overwritten.
