@@ -19,9 +19,9 @@ WATCHED_AT = 0.9
 
 
 def updated(item: dict | None, np: NowPlaying, offset_ms: int, duration_ms: int, watched_ms: int, meta: dict,
-            video_ids: list[str] | None = None) -> dict:
+            videos: list[dict] | None = None) -> dict:
     """The library item after watching np up to offset_ms (a new temp item if it wasn't in the library).
-    video_ids: the show's episodes in your Stremio's order, for the episode's watched mark."""
+    videos: the show's videos as your Stremio gets them, for the episode's watched mark."""
     now = now_iso()
     if item is None:
         item = {"_id": np.imdb_id, "name": np.name, "type": np.kind, "poster": meta.get("poster"),
@@ -44,8 +44,7 @@ def updated(item: dict | None, np: NowPlaying, offset_ms: int, duration_ms: int,
     if done:
         state["timesWatched"] = state.get("timesWatched", 0) + 1
         state["flaggedWatched"] = 1
-        if np.kind == "series" and video_ids and (marks := watched.mark(state.get("watched"), video_ids,
-                                                                         [np.video_id])):
+        if np.kind == "series" and videos and (marks := watched.mark(state.get("watched"), videos, [np.video_id])):
             state["watched"] = marks
     return {**item, "state": state, "_mtime": now}
 
@@ -63,7 +62,7 @@ async def _pause(stop: asyncio.Event | None, seconds: float) -> bool:
 
 
 async def track(poll, account: Account, library: Library, np: NowPlaying, meta: dict, every_s: float = 10,
-                write_every_s: float = 120, video_ids: list[str] | None = None,
+                write_every_s: float = 120, videos: list[dict] | None = None,
                 stop: asyncio.Event | None = None) -> tuple[str, int | None, int]:
     """Follow the player until it stops; write on pause, every 2 minutes, and at the end.
     poll() returns (position ms, duration ms, speed) while something plays, None once it has stopped.
@@ -84,7 +83,7 @@ async def track(poll, account: Account, library: Library, np: NowPlaying, meta: 
         if last_pos is None:
             return
         item = await library.get(np.imdb_id)
-        await account.put([updated(item, np, last_pos, duration, unwritten, meta, video_ids)])
+        await account.put([updated(item, np, last_pos, duration, unwritten, meta, videos)])
         library.invalidate()
         unwritten, last_write = 0, time.monotonic()
         log.info("progress saved: %s at %d s of %d s", np.video_id, last_pos // 1000, duration // 1000)

@@ -79,6 +79,15 @@ panel's Decisions tab, then redo your changes.
 ### Fixed
 - Progress could go unsaved when something new started right after a stop: the previous session's follower was
   cancelled in the middle of its last write. It's now told to stop and finishes the write.
+- Found by review before release: watched marks use Stremio's own episode order (stremio-core: specials last), and
+  marks that would read differently in another order are left alone instead of rewritten; a start whose links
+  fail leaves what's playing alone (its progress, binge mode and sleep timer used to stop); the end of an episode starts nothing when something else was started meanwhile, and a new command
+  replaces a binge start in progress (a volume, binge, timer or auto-skip command no longer cancels a start); the
+  previous title's track fixes stop when a new one opens; addon subtitles are asked for the stream actually
+  chosen; library edits start from a fresh copy; the history file is changed under its lock; error tracebacks no
+  longer carry addon links; a sleep timer turns the TV off even when stopping the player fails.
+- An addon's stream lookup is tried once more a second later after a server error or rate limit (AIOStreams
+  answered two lookups with an error once, then was fine).
 
 ### Added
 - The TV app's audio stream (port 8767): decided ~0.25-0.3 s after your last word for complete commands

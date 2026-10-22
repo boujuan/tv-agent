@@ -35,6 +35,12 @@ def read(path: Path = FILE, limit: int | None = None) -> list[dict]:
         lines = path.read_text().splitlines()
     except OSError:
         return []
+    out = _parse(lines)
+    out.sort(key=lambda e: e["t"], reverse=True)
+    return out[:limit] if limit else out
+
+
+def _parse(lines: list[str]) -> list[dict]:
     out = []
     for line in lines:
         try:
@@ -43,46 +49,50 @@ def read(path: Path = FILE, limit: int | None = None) -> list[dict]:
             continue
         if isinstance(e, dict) and "t" in e:
             out.append(e)
-    out.sort(key=lambda e: e["t"], reverse=True)
-    return out[:limit] if limit else out
+    return out
 
 
-def _rewrite(entries: list[dict], path: Path):
+def _update(change, path: Path):
+    """Read, change and write the whole file under its lock, so an entry appended meanwhile isn't lost."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     with os.fdopen(fd, "r+") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
+        entries = _parse(f.read().splitlines())
+        result = change(entries)
         f.seek(0)
         f.truncate()
         for e in sorted(entries, key=lambda e: e["t"]):
             f.write(json.dumps(e, ensure_ascii=False) + "\n")
+    return result
 
 
 def merge(new: list[dict], path: Path = FILE) -> int:
     """Add entries (e.g. imported), skipping ones already there (same time and words). Returns how many."""
-    have = read(path)
-    seen = {(round(float(e["t"]), 1), e.get("heard", "")) for e in have}
-    added = [e for e in new if isinstance(e, dict) and "t" in e and (round(float(e["t"]), 1), e.get("heard", "")) not in seen]
-    if added:
-        _rewrite(have + added, path)
-    return len(added)
+    def change(have: list[dict]) -> int:
+        seen = {(round(float(e["t"]), 1), e.get("heard", "")) for e in have}
+        added = [e for e in new if isinstance(e, dict) and "t" in e
+                 and (round(float(e["t"]), 1), e.get("heard", "")) not in seen]
+        have.extend(added)
+        return len(added)
+    return _update(change, path)
 
 
 def erase(path: Path = FILE):
-    _rewrite([], path)
+    _update(lambda entries: entries.clear(), path)
 
 
 def mark(t: float, wrong: bool, path: Path = FILE, heard: str | None = None, **extra) -> dict | None:
     """Mark the entry at time t (with these words, when given) as wrong or not, with any extra fields (e.g. what it
     was taught as)."""
-    entries = read(path)
-    for e in entries:
-        if abs(float(e["t"]) - t) < 0.001 and (heard is None or e.get("heard") == heard):
-            e["wrong"] = wrong
-            e.update(extra)
-            _rewrite(entries, path)
-            return e
-    return None
+    def change(entries: list[dict]) -> dict | None:
+        for e in entries:
+            if abs(float(e["t"]) - t) < 0.001 and (heard is None or e.get("heard") == heard):
+                e["wrong"] = wrong
+                e.update(extra)
+                return e
+        return None
+    return _update(change, path)
 
 
 def mark_last_wrong(path: Path = FILE) -> dict | None:

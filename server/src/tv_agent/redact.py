@@ -24,9 +24,18 @@ def scrub(text: str) -> str:
 
 
 class RedactFilter(logging.Filter):
+    _format = logging.Formatter()
+
     def filter(self, record: logging.LogRecord) -> bool:
         record.msg = scrub(record.getMessage())
         record.args = None
+        # Tracebacks too: an HTTP error's message carries the full request URL (an addon's, with its keys).
+        if record.exc_info and not record.exc_text:
+            record.exc_text = self._format.formatException(record.exc_info)
+        if record.exc_text:
+            record.exc_text = scrub(record.exc_text)
+        if record.stack_info:
+            record.stack_info = scrub(record.stack_info)
         return True
 
 

@@ -198,8 +198,12 @@ class Service:
             await self.agent.notify(out.say)
 
     def start(self, d: Decision, heard: str, source: str):
-        if self._running and not self._running.done():
-            self._running.cancel()    # a new request replaces one still looking for a stream
+        if d.action.type not in ("volume", "binge", "timer", "auto_skip"):
+            # A new request replaces one still starting something (a stream search, a binge start); a volume or
+            # mode change on the way doesn't.
+            for task in (self._running, self.agent._end_task):
+                if task and not task.done():
+                    task.cancel()
         self._running = asyncio.create_task(self.run(d, heard, source))
 
     async def decide(self, text: str) -> Decision:

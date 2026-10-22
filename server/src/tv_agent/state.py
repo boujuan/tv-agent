@@ -20,6 +20,7 @@ class NowPlaying:
     size: int = 0
     video_hash: str = ""
     stopped_at: int | None = None   # the exact position when "stop" was said (polls are 10 s apart)
+    stopped_mono: float = field(default=0.0, repr=False)    # and when (time.monotonic())
 
 
 class Timings:

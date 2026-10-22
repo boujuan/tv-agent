@@ -473,7 +473,7 @@ def test_end_of_playback_starts_the_next_episode_goes_home_or_turns_off():
     from tv_agent.agent import Agent, Outcome
     from tv_agent.tv import apps
 
-    def ended(kind, last, after=None, binge=True, user_stopped=False):
+    def ended(kind, last, after=None, binge=True, user_stopped=False, replaced=False):
         done = []
 
         async def tv(fn, *args):
@@ -489,9 +489,10 @@ def test_end_of_playback_starts_the_next_episode_goes_home_or_turns_off():
         async def notify(text):
             pass
 
-        me = types.SimpleNamespace(_user_stopped=user_stopped, dry_run=False, _after_this=after, tv=tv, notify=notify,
-                                   _next_episode=next_episode, _turn_off=turn_off, cfg=types.SimpleNamespace(binge=binge))
         np = NowPlaying("tt1", kind, "tt1:1:3" if kind == "series" else "tt1", "X")
+        me = types.SimpleNamespace(_user_stopped=user_stopped, dry_run=False, _after_this=after, tv=tv, notify=notify,
+                                   _next_episode=next_episode, _turn_off=turn_off, cfg=types.SimpleNamespace(binge=binge),
+                                   state=types.SimpleNamespace(now_playing=None if replaced else np))
         asyncio.run(Agent._ended(me, np, "stopped", last, 3_000_000))
         return done
 
@@ -502,28 +503,40 @@ def test_end_of_playback_starts_the_next_episode_goes_home_or_turns_off():
     assert ended("series", 2_995_000, after="off") == ["off"]
     assert ended("series", 1_000_000) == ["home"]                        # stopped on the remote: Home, not Kodi's menus
     assert ended("series", 2_995_000, user_stopped=True) == []          # "stop" already went Home
+    assert ended("series", 2_995_000, replaced=True) == []              # something else started meanwhile
 
 
-def test_watched_marks_round_trip_realign_and_never_wipe():
+def test_watched_marks_follow_stremios_order_and_never_wipe():
     from tv_agent.stremio import watched as W
-    ids = ["tt1:0:1", "tt1:1:1", "tt1:1:2", "tt1:1:3", "tt1:2:1"]
-    marks = W.mark(None, ids, ["tt1:1:1", "tt1:1:2"])
-    assert marks.startswith("tt1:1:2:3:") and W.decode(marks, ids) == [False, True, True, False, False]
-    longer = ["tt1:0:1", "tt1:0:2"] + ids[1:]                  # a special added in front: lined up on the anchor
-    assert W.decode(marks, longer) == [False, False, True, True, False, False]
-    assert W.decode(marks, ["tt1:3:1", "tt1:3:2"]) is None      # anchor missing: can't be lined up
-    assert W.mark(marks, ["tt1:3:1", "tt1:3:2"], ["tt1:3:1"]) is None    # so nothing is rewritten
-    assert W.decode(W.mark(marks, ids, ["tt1:1:1"], on=False), ids) == [False, False, True, False, False]
-    assert W.decode("undefined:1:eJwDAAAAAAE=", ids) == [False] * 5   # what Stremio writes for films
+    ep = lambda s, e: {"id": f"tt1:{s}:{e}", "season": s, "episode": e}               # noqa: E731
+    videos = [ep(0, 1), ep(0, 2)] + [ep(1, e) for e in range(1, 9)]                    # specials first, as AIOMetadata
+    assert W.stremio_order(videos + [ep(1, 1)]) == [f"tt1:1:{e}" for e in range(1, 9)] + ["tt1:0:1", "tt1:0:2"]
+    ids = W.stremio_order(videos)
+    # Stremio (stremio-core) watched E1-E5 and the first special: its anchor is that special, last in its order.
+    stremio = W.encode([i < 5 or ids[i] == "tt1:0:1" for i in range(len(ids))], ids)
+    assert stremio.startswith("tt1:0:1:9:")
+    marks = W.mark(stremio, videos, ["tt1:1:6"])
+    got = W.decode(marks, ids)
+    assert {ids[i] for i, b in enumerate(got) if b} == {f"tt1:1:{e}" for e in range(1, 7)} | {"tt1:0:1"}  # none lost
+    # An older client that wrote them in the addon's order (specials first), anchored on an episode: same reading.
+    raw = [v["id"] for v in videos]
+    older = W.encode([raw[i] in ("tt1:1:1", "tt1:1:2") for i in range(len(raw))], raw)
+    assert {ids[i] for i, b in enumerate(W.decode(W.mark(older, videos, ["tt1:1:3"]), ids)) if b} == \
+        {"tt1:1:1", "tt1:1:2", "tt1:1:3"}
+    # Odd marks the two orders read differently, or an anchor not in the list: left alone.
+    odd = "tt1:0:1:1:" + W.encode([False] * 3 + [True] + [False] * 6, raw).rsplit(":", 1)[1]
+    assert W.mark(odd, videos, ["tt1:1:3"]) is None
+    assert W.mark(W.encode([True], ["tt9:1:1"]), videos, ["tt1:1:3"]) is None
+    assert W.decode("undefined:1:eJwDAAAAAAE=", ids) == [False] * len(ids)    # what Stremio writes for films
 
 
 def test_progress_marks_the_episode_watched_at_90_percent():
     from tv_agent.stremio import watched as W
-    ids = ["tt1:1:1", "tt1:1:2"]
+    videos = [{"id": "tt1:1:1", "season": 1, "episode": 1}, {"id": "tt1:1:2", "season": 1, "episode": 2}]
     np = NowPlaying("tt1", "series", "tt1:1:2", "X")
-    item = updated(None, np, 950_000, 1_000_000, 60_000, {}, ids)
-    assert W.decode(item["state"]["watched"], ids) == [False, True]
-    assert "watched" not in updated(None, np, 500_000, 1_000_000, 60_000, {}, ids)["state"]
+    item = updated(None, np, 950_000, 1_000_000, 60_000, {}, videos)
+    assert W.decode(item["state"]["watched"], ["tt1:1:1", "tt1:1:2"]) == [False, True]
+    assert "watched" not in updated(None, np, 500_000, 1_000_000, 60_000, {}, videos)["state"]
 
 
 def test_search_merges_names_and_popularity_settles_namesakes():
@@ -823,3 +836,56 @@ def test_thats_wrong_marks_the_last_command_and_teaching_makes_a_phrase(tmp_path
     assert learned.remove("FREEZE IT", store) and learned.load(store) == []
     for text in ("that's wrong", "no, that's not what i said", "wrong", "Eso está mal."):
         assert rule_action(text).type == "wrong", text
+
+
+def test_tracebacks_lose_their_links_too():
+    import io
+    import logging
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.addFilter(redact.RedactFilter())
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    log = logging.getLogger("test-redact-traceback")
+    log.addHandler(handler)
+    log.propagate = False
+    try:
+        raise RuntimeError("Server error '500' for url 'https://addon.example/abcdefsecret123/catalog/movie/x.json'")
+    except RuntimeError:
+        log.exception("films list failed")
+    out = stream.getvalue()
+    assert "abcdefsecret123" not in out and "https://addon.example/…" in out and "Traceback" in out
+
+
+def test_a_start_whose_links_fail_leaves_what_plays_alone():
+    import asyncio
+    import types
+    from tv_agent.agent import Agent
+    from tv_agent.stremio import streams as S
+
+    async def run():
+        a = Agent.__new__(Agent)
+        replaced = []
+
+        async def nothing(*args, **kw):
+            return None
+
+        async def ready():
+            return True
+
+        async def found(kind, video, meta):
+            return [S.Stream("AIOStreams", "https://x/1", "n", "", "f.mkv", 0)]
+
+        async def tv(fn, *args):
+            return ""
+        a.account, a.dry_run, a.notify, a.tv = object(), False, nothing, tv
+        a.cfg = types.SimpleNamespace(player="kodi", probe_streams=True)
+        a._start_kodi, a.streams_for, a._first_playable = ready, found, nothing      # no link answers
+        a.track_plan = lambda meta: languages.TrackPlan("eng", None)
+        a.kodi = types.SimpleNamespace(prefer=nothing)
+        a._home_unless_playing = nothing
+        a._replace_session = lambda *args: replaced.append(args)
+        out = await Agent.play(a, "tt1", "movie", "X", "tt1", "X", {})
+        return out, replaced
+
+    out, replaced = asyncio.run(run())
+    assert not out.ok and "didn't answer" in out.say and replaced == []      # the old session wasn't touched

@@ -164,14 +164,22 @@ async def fetch(http: httpx.AsyncClient, addons: list[Addon], kind: str, video_i
                 timeout: float = 8.0) -> list[Stream]:
     """All playable streams from every addon that serves this id, in addon order."""
     async def one(addon: Addon) -> list[dict]:
-        try:
-            r = await http.get(f"{addon.base}/stream/{kind}/{video_id}.json", timeout=timeout,
-                               headers={"User-Agent": USER_AGENT})
-            r.raise_for_status()
-            return r.json().get("streams") or []
-        except (httpx.HTTPError, ValueError) as e:
-            log.warning("addon %s: %s", addon.name, type(e).__name__)
-            return []
+        for attempt in (1, 2):    # one retry a second later when the addon has a hiccup (5xx, rate limit)
+            try:
+                r = await http.get(f"{addon.base}/stream/{kind}/{video_id}.json", timeout=timeout,
+                                   headers={"User-Agent": USER_AGENT})
+                r.raise_for_status()
+                return r.json().get("streams") or []
+            except httpx.HTTPStatusError as e:
+                code = e.response.status_code
+                log.warning("addon %s: HTTP %d%s", addon.name, code, ", trying again" if attempt == 1 else "")
+                if attempt == 2 or not (code >= 500 or code == 429):
+                    return []
+                await asyncio.sleep(1.0)
+            except (httpx.HTTPError, ValueError) as e:
+                log.warning("addon %s: %s", addon.name, type(e).__name__)
+                return []
+        return []
 
     serving = [a for a in addons if a.serves_streams(kind, video_id)]
     results = await asyncio.gather(*(one(a) for a in serving))
