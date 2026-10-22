@@ -1,7 +1,7 @@
 """Settings (~/.config/tv-agent/config.toml) and secrets (secrets.toml next to it, mode 0600).
 
-The secrets file holds the agent token the TV app sends, the Stremio auth key (full account access) and the
-Kodi web password. The daemon refuses to start if the folder or that file can be read by other accounts.
+The secrets file holds the agent token the TV app sends, the Stremio auth key (full account access), the Kodi
+web password and, when set, the Liquid and OpenRouter API keys of the cloud fallbacks. The daemon refuses to start if the folder or that file can be read by other accounts.
 """
 import json
 import os
@@ -17,7 +17,8 @@ DATA_DIR = Path.home() / ".local/share/tv-agent"
 CONFIG_FILE = CONFIG_DIR / "config.toml"
 SECRETS_FILE = CONFIG_DIR / "secrets.toml"
 
-SECRET_NAMES = ("agent_token", "stremio_auth_key", "kodi_password")
+SECRET_NAMES = ("agent_token", "stremio_auth_key", "kodi_password", "liquid_api_key", "openrouter_api_key")
+OPTIONAL_SECRETS = ("liquid_api_key", "openrouter_api_key")     # only for the cloud fallbacks
 
 
 @dataclass
@@ -32,7 +33,7 @@ class Config:
     d1_url: str = "http://127.0.0.1:8091"
     d1_model: Path = DATA_DIR / "models/d1-3B/d1-3B-Q4_K_M.gguf"
     llama_server: str = ""                  # llama.cpp's llama-server; empty: on PATH or under ~/.local/opt
-    stt_model: Path = DATA_DIR / "models/parakeet-v2/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8"
+    stt_model: str = "parakeet-v2"          # speech model: "parakeet-v2" (English), "parakeet-v3" (25 languages), a path
     kodi_port: int = 8080
     kodi_user: str = "kodi"
     max_height: int = 2160                  # preferred maximum resolution (lines)
@@ -48,6 +49,9 @@ class Config:
     twitch_favorites: list[str] = field(default_factory=list)
     binge: bool = True                      # at the end of an episode the next one starts (also by voice)
     auto_skip: bool = False                 # intros and recaps skipped by themselves when the timestamps are sure
+    hosted_d1: bool = True                  # local d1 down: Liquid's hosted d1 (only with `tv-agent setup liquid`)
+    llm_fallback: bool = True               # rules and d1 undecided: an LLM over OpenRouter (`tv-agent setup openrouter`)
+    llm_model: str = "google/gemini-2.5-flash-lite"
     log_transcripts: bool = True
     secrets: dict[str, str] = field(default_factory=dict, repr=False)
 

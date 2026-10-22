@@ -13,11 +13,12 @@ import argparse
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
 
 import httpx
 
-from . import __version__, config
+from . import __version__, config, stt
 from .actions import parse
 from .agent import Agent
 from .decide.d1 import D1
@@ -52,6 +53,97 @@ async def _setup_stremio() -> int:
         config.save_secret("stremio_auth_key", key)
         addons = await Account(http, key).addons()
         print(f"Signed in. Auth key saved in {config.SECRETS_FILE}. Addons: {', '.join(a.name for a in addons)}")
+    return 0
+
+
+KEY_CHECKS = {
+    # what to call, and what to show from the answer (never the key)
+    "liquid": ("Liquid API key", "liquid_api_key", "https://api.liquid.ai/decisions/v1/models",
+               lambda j: "models: " + ", ".join(m.get("id", "?") for m in j.get("data", []))),
+    "openrouter": ("OpenRouter API key", "openrouter_api_key", "https://openrouter.ai/api/v1/key",
+                   lambda j: f"key “{(j.get('data') or {}).get('label') or 'unnamed'}”"),
+}
+
+
+def _setup_key(what: str) -> int:
+    """Saves a cloud fallback's API key after checking it works. Piped in (`op read "op://…" | tv-agent setup
+    liquid`) or typed at a hidden prompt; it's never shown or logged."""
+    import getpass
+    label, name, url, describe = KEY_CHECKS[what]
+    key = sys.stdin.read().strip() if not sys.stdin.isatty() else getpass.getpass(f"{label}: ").strip()
+    if not key or any(c.isspace() for c in key):
+        print(f"No {label} given; nothing saved")
+        return 1
+    remember(key)
+    try:
+        r = httpx.get(url, headers={"Authorization": f"Bearer {key}", "User-Agent": f"tv-agent/{__version__}"},
+                      timeout=15)
+    except httpx.HTTPError as e:
+        print(f"Not saved: couldn't reach {httpx.URL(url).host} ({type(e).__name__})")
+        return 1
+    if r.status_code != 200:
+        print(f"Not saved: {httpx.URL(url).host} answered {r.status_code} (is the key right?)")
+        return 1
+    config.save_secret(name, key)
+    print(f"{label} saved in {config.SECRETS_FILE} ({describe(r.json())}). Restart the voice agent to use it: "
+          "systemctl --user restart tv-agent")
+    return 0
+
+
+async def _review(n: int) -> int:
+    """The history's commands marked wrong or not understood, newest first; with an OpenRouter key, the LLM's guess
+    at what was meant. Teach one in the panel (Activity: right-click, Teach the right action…)."""
+    from . import activity
+    from .decide import rules as R
+    from .decide.llm import Llm
+    cfg = config.load()
+    rows = [e for e in activity.read(limit=1000)
+            if (e.get("wrong") or e.get("type") == "none") and e.get("heard", "").strip()][:n]
+    if not rows:
+        print("Nothing marked wrong or left not understood.")
+        return 0
+    key = cfg.secret("openrouter_api_key")
+    async with httpx.AsyncClient(headers={"User-Agent": f"tv-agent/{__version__}"}) as http:
+        llm = Llm(http, key, cfg.llm_model, R.load_safe()[0]) if key else None
+        for e in rows:
+            when = time.strftime("%d %b %H:%M", time.localtime(e["t"]))
+            why = "marked wrong" if e.get("wrong") else "not understood"
+            taught = f", taught: {e['taught']}" if e.get("taught") else ""
+            line = f"{when}  “{e.get('heard', '')}” -> {e.get('type')} ({why}{taught})"
+            if llm and not e.get("taught"):
+                guess = await llm.decide(e.get("heard", ""), {})
+                line += f"\n               LLM's guess: {guess.model_dump(exclude_none=True) if guess else 'not a command'}"
+            print(line)
+    print("Teach one in the panel: Activity, right-click it, “Teach the right action…”.")
+    return 0
+
+
+def _setup_stt(name: str | None) -> int:
+    """Without a name: the speech models and which is in use. With one: download it if needed, then use it."""
+    cfg = config.load()
+    if not name:
+        for key, m in stt.MODELS.items():
+            state = "in use" if key == cfg.stt_model else "downloaded" if stt.installed(key) else \
+                f"{m.size / 1e6:.0f} MB download"
+            print(f"{key:12} {m.label} · {m.languages} · {state}")
+        return 0
+    if name not in stt.MODELS:
+        print(f"unknown speech model {name!r}; choose from {', '.join(stt.MODELS)}")
+        return 2
+    if not stt.installed(name):
+        m = stt.MODELS[name]
+        print(f"Downloading {m.archive}.tar.bz2 ({m.size / 1e6:.0f} MB) from GitHub (k2-fsa/sherpa-onnx)…", flush=True)
+        shown = [-1]
+
+        def progress(done, total):
+            pct = done * 100 // max(total, 1)
+            if pct >= shown[0] + 10:
+                shown[0] = pct
+                print(f"  {pct}%", flush=True)
+        with httpx.Client(headers={"User-Agent": f"tv-agent/{__version__}"}) as http:
+            print(f"Installed in {stt.download(name, http, progress)}")
+    config.set_value(cfg, "stt_model", name)
+    print(f"Using {name}. Restart the voice agent to load it: systemctl --user restart tv-agent")
     return 0
 
 
@@ -203,8 +295,16 @@ def _doctor() -> int:
     agent = Agent(cfg)
     check("ADB", lambda: f"{agent.adb.run(['getprop', 'ro.product.model']).strip()} at {agent.adb.host}")
     check("d1-3B", lambda: httpx.get(f"{cfg.d1_url}/v1/models", timeout=3).json()["data"][0]["id"])
-    check("speech model", lambda: cfg.stt_model.name if (cfg.stt_model / "tokens.txt").exists() else 1 / 0)
+    def speech():
+        if not stt.installed(cfg.stt_model):
+            raise RuntimeError(f"{cfg.stt_model} isn't downloaded (tv-agent setup stt {cfg.stt_model})")
+        return cfg.stt_model
+    check("speech model", speech)
     for name in config.SECRET_NAMES:
+        if name in config.OPTIONAL_SECRETS:
+            what = name.removesuffix("_api_key")
+            print(f"ok    secret {name}: {'set' if cfg.secret(name) else f'not set (optional: tv-agent setup {what})'}")
+            continue
         check(f"secret {name}", lambda name=name: "set" if cfg.secret(name) else "missing (see README setup)")
     agent.adb.close()
     return 0 if ok else 1
@@ -227,7 +327,8 @@ def main(argv=None):
     sy.add_argument("text")
     sy.add_argument("--dry-run", action="store_true")
     s = sub.add_parser("setup", help="one-time setup steps")
-    s.add_argument("what", choices=["token", "stremio", "kodi", "services"])
+    s.add_argument("what", choices=["token", "stremio", "kodi", "services", "stt", "liquid", "openrouter"])
+    s.add_argument("name", nargs="?", help="stt: the speech model to download (if needed) and use")
     s.add_argument("--rotate", action="store_true", help="token: replace it (then run `tv-agent tv pair`)")
     s.add_argument("--enable", action="store_true", help="services: also enable and start them")
     tv = sub.add_parser("tv", help="the TV over ADB: find it, run a command, install and pair its app")
@@ -237,6 +338,8 @@ def main(argv=None):
     st.add_argument("title")
     st.add_argument("--season", type=int)
     st.add_argument("--episode", type=int)
+    rv = sub.add_parser("review", help="commands marked “that's wrong” or not understood (with an LLM's guess)")
+    rv.add_argument("-n", type=int, default=20, help="how many (newest first)")
     sub.add_parser("logout", help="sign the agent out of Stremio (invalidates its auth key)")
     sec = sub.add_parser("secret", help="print one secret (for build scripts)")
     sec.add_argument("name", choices=["agent_token"])
@@ -274,12 +377,18 @@ def main(argv=None):
         return 0
     if args.cmd == "tv":
         return _tv(args.what, args.args)
+    if args.cmd == "setup" and args.what == "stt":
+        return _setup_stt(args.name)
+    if args.cmd == "setup" and args.what in ("liquid", "openrouter"):
+        return _setup_key(args.what)
     if args.cmd == "setup" and args.what == "stremio":
         return asyncio.run(_setup_stremio())
     if args.cmd == "setup" and args.what == "kodi":
         return asyncio.run(_setup_kodi())
     if args.cmd == "streams":
         return asyncio.run(_streams(args.title, args.season, args.episode))
+    if args.cmd == "review":
+        return asyncio.run(_review(args.n))
     if args.cmd == "logout":
         return asyncio.run(_logout())
     if args.cmd == "secret":

@@ -1,13 +1,15 @@
 """Activity tab: give a command (typed, or spoken into the laptop's mic), see what was said and done, and
-export, import or erase that history (~/.local/share/tv-agent/activity.jsonl)."""
+export, import or erase that history (~/.local/share/tv-agent/activity.jsonl). Commands marked “that's wrong” (by
+voice or here) can be taught the right action: that sentence then does it (learned.json)."""
 import csv
 import json
 import time
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QColor, QGuiApplication
-from PySide6.QtWidgets import (QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu,
-                               QMessageBox, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
+                               QLineEdit, QMenu, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem,
+                               QVBoxLayout, QWidget)
 
 from .common import AMBER, GREEN, RED, LevelBar, agent_activity, api, card, dim, journal_history
 
@@ -70,6 +72,11 @@ class Activity(QWidget):
         self.count = dim("")
         top.addWidget(self.count)
         top.addStretch()
+        self.only_wrong = QCheckBox("Only wrong or not understood")
+        self.only_wrong.setToolTip("Commands you said “that's wrong” to, and ones it didn't get: teach them "
+                                   "(right-click)")
+        self.only_wrong.toggled.connect(lambda _: self.load())
+        top.addWidget(self.only_wrong)
         for label, fn, tip in (("Refresh", self.load, ""), ("Export…", self.export, "Save as JSON lines or CSV"),
                                ("Import…", self.import_, "Add entries from an exported file"),
                                ("Erase…", self.erase, "Delete the whole history")):
@@ -95,8 +102,8 @@ class Activity(QWidget):
                                   QHeaderView.ResizeMode.Stretch)):
             hh.setSectionResizeMode(c, mode)
         h.addWidget(self.table)
-        h.addWidget(dim("Double-click (or right-click) a line to see in Decisions how it was decided, and add a "
-                        "rule for it."))
+        h.addWidget(dim("Double-click a line to see in Decisions how it was decided. Right-click to mark it "
+                        "wrong or teach it the right action (saying “that's wrong” marks the last one)."))
         lay.addWidget(hist, 3)
 
         lat = card()
@@ -158,19 +165,29 @@ class Activity(QWidget):
 
     def load(self):
         def done(rows, err):
-            self.rows = rows or []
+            rows = rows or []
+            if self.only_wrong.isChecked():
+                rows = [e for e in rows if (e.get("wrong") or e.get("type") == "none") and e.get("heard", "").strip()]
+            self.rows = rows
             self.count.setText(f"· {len(self.rows)} command{'s' if len(self.rows) != 1 else ''}")
             shown = self.rows[:500]
             self.table.setRowCount(len(shown))
             for i, e in enumerate(shown):
                 when = time.strftime("%a %d %b %H:%M:%S", time.localtime(e["t"]))
                 result = (e.get("say") or "") + (f"  ({e['ms']} ms)" if e.get("ms") else "")
-                vals = (when, SOURCES.get(e.get("source", "unknown"), e.get("source", "")), e.get("heard", ""),
+                heard = e.get("heard", "")
+                if e.get("taught"):
+                    heard = f"✓ {heard}   (taught: {e['taught'].replace('_', ' ')})"
+                elif e.get("wrong"):
+                    heard = f"✗ {heard}"
+                vals = (when, SOURCES.get(e.get("source", "unknown"), e.get("source", "")), heard,
                         describe_how(e), result)
                 for j, v in enumerate(vals):
                     item = QTableWidgetItem(v)
                     if j == 4 and e.get("ok") is False:
                         item.setForeground(QColor(AMBER))
+                    if j == 2 and e.get("wrong"):
+                        item.setForeground(QColor(RED))
                     self.table.setItem(i, j, item)
 
         self.panel.bg.run(agent_activity.read, done)
@@ -203,9 +220,60 @@ class Activity(QWidget):
         again.triggered.connect(lambda: (self.cmd.setText(self.rows[row].get("heard", "")), self.send()))
         copy = QAction("Copy what was said", m)
         copy.triggered.connect(lambda: QGuiApplication.clipboard().setText(self.rows[row].get("heard", "")))
+        e = self.rows[row]
+        teach = QAction("Teach the right action…", m)
+        teach.triggered.connect(lambda: self.teach(e))
+        wrong = QAction("Not wrong after all" if e.get("wrong") else "Mark as wrong", m)
+        wrong.triggered.connect(lambda: (agent_activity.mark(float(e["t"]), not e.get("wrong"), heard=e.get("heard")),
+                                         self.load()))
+        forget = QAction("Forget what it was taught", m)
+        forget.triggered.connect(lambda: self.forget(e))
         for a in (explain, again, copy):
             m.addAction(a)
+        m.addSeparator()
+        for a in (teach, wrong) + ((forget,) if e.get("taught") else ()):
+            m.addAction(a)
         m.exec(self.table.viewport().mapToGlobal(pos))
+
+    def teach(self, e: dict):
+        """“When I say this, do what that command does”: the agent decides the command typed here, and once you
+        agree, the sentence said is saved with that action (learned.json, checked before the rules)."""
+        heard = e.get("heard", "").strip()
+        if not heard:
+            return
+        meant, ok = QInputDialog.getText(self, "Teach the right action",
+                                         f"When I say “{heard}”, do what this command does\n"
+                                         "(say it the way the agent understands, e.g. “pause”, "
+                                         "“play the bear season 3”):")
+        if not ok or not meant.strip():
+            return
+        try:
+            d = api("/v1/decide", {"text": meant.strip()})
+        except Exception as err:
+            QMessageBox.warning(self, "TV Agent", f"The voice agent isn't answering: {err}")
+            return
+        if d["action"]["type"] == "none":
+            QMessageBox.information(self, "TV Agent", f"“{meant}” isn't understood either; say it another way.")
+            return
+        if QMessageBox.question(self, "TV Agent", f"From now on, “{heard}” will do: {d.get('describe', '')} "
+                                f"({d['action']['type'].replace('_', ' ')}). Save?") != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            api("/v1/learn", {"say": heard, "do": d["action"], "t": e["t"], "heard": e.get("heard")})
+        except Exception as err:
+            QMessageBox.warning(self, "TV Agent", f"Not saved: {err}")
+            return
+        self.reply.setText(f"<span style='color:{GREEN}'>Taught: “{heard}” → {d.get('describe', '')}</span>")
+        self.load()
+
+    def forget(self, e: dict):
+        try:
+            api("/v1/learned/remove", {"say": e.get("heard", "")})
+        except Exception as err:
+            QMessageBox.warning(self, "TV Agent", f"Not removed: {err}")
+            return
+        agent_activity.mark(float(e["t"]), False, heard=e.get("heard"), taught=None)
+        self.load()
 
     def explain_row(self, row: int):
         if 0 <= row < len(self.rows):

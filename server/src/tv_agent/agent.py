@@ -10,14 +10,16 @@ from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 import httpx
+from rapidfuzz import fuzz
 
-from . import __version__, languages, skips, twitch, youtube
+from . import __version__, activity, languages, skips, twitch, youtube
 from .actions import (Action, AutoSkip, Binge, ContinueWatching, Home, LibraryEdit, NextEpisode, OpenApp, OpenInStremio,
                       Pick, PlayTitle, Replay, ShowList, Skip, Timer, Tracks, Transport, Twitch, Unclear, Volume,
-                      YouTube)
+                      Wrong, YouTube)
 from .config import CONFIG_DIR, Config, set_value
 from .decide import rules as rules_mod
 from .decide.d1 import D1
+from .decide.llm import Llm
 from .state import NowPlaying, State
 from .stremio import cinemeta, progress, streams, subtitles, watched
 from .stremio import search as title_search
@@ -116,10 +118,12 @@ class Agent:
         self.account = Account(self.http, key) if key else None
         self.library = Library(self.account)
         self.kodi = Kodi(self.http, self.adb, cfg.kodi_port, cfg.kodi_user, cfg.secret("kodi_password"))
-        self.d1 = D1(self.http, cfg.d1_url)
+        self.d1 = D1(self.http, cfg.d1_url, cfg.secret("liquid_api_key") if cfg.hosted_d1 else None)
         self.rules, self.rules_error = rules_mod.load_safe()
         if self.rules_error:
             log.error("rules: %s; using the defaults", self.rules_error)
+        key = cfg.secret("openrouter_api_key")
+        self.llm = Llm(self.http, key, cfg.llm_model, self.rules) if key and cfg.llm_fallback else None
         self._addons: list[Addon] = []
         self._addons_at = 0.0
         self._progress: asyncio.Task | None = None
@@ -172,7 +176,7 @@ class Agent:
 
     async def execute(self, action: Action) -> Outcome:
         handler = getattr(self, "_" + action.type.replace("none", "unclear"))
-        if action.type not in ("volume", "none", "binge", "timer", "auto_skip") and not self.dry_run:
+        if action.type not in ("volume", "none", "binge", "timer", "auto_skip", "wrong") and not self.dry_run:
             asyncio.create_task(self._wake())
         try:
             return await handler(action)
@@ -990,6 +994,20 @@ class Agent:
         return await self.play(imdb, "series", name, eps[i]["id"], _episode_label(name, eps[i]), meta,
                                prepared=prepared)
 
+    async def llm_context(self, said: str) -> dict:
+        """What the LLM step gets besides what you said: what's playing, the apps, and up to 10 of your library's
+        titles that sound like it (llm.py)."""
+        np = self.state.now_playing
+        try:
+            names = list({i.get("name", "") for i in await self.library.items()
+                          if i.get("type") in ("movie", "series") and (not i.get("removed") or i.get("temp"))} - {""})
+        except Exception:
+            names = []
+        names.sort(key=lambda n: -fuzz.partial_ratio(n.lower(), said.lower()))
+        return {"playing": f"{np.name} ({np.kind}, {np.video_id.split(':', 1)[-1] if np.kind == 'series' else ''})"
+                if np else None,
+                "apps": sorted(a.label for a in self.rules.apps.values()), "candidates": names[:10]}
+
     # ---- lists on the TV: what you were watching, what's new; "number 2" ----
 
     async def _show_list(self, a: ShowList) -> Outcome:
@@ -1152,6 +1170,15 @@ class Agent:
             return False
         await self.kodi.action("chapterorbigstepforward")
         return True
+
+    async def _wrong(self, a: Wrong) -> Outcome:
+        """"That's wrong": the last command is marked in the history, to be taught in the panel."""
+        if not self.cfg.log_transcripts:
+            return Outcome(False, "The history is off, so there's nothing to mark (panel: Settings)")
+        e = await asyncio.to_thread(activity.mark_last_wrong)
+        if not e:
+            return Outcome(False, "Nothing to mark yet")
+        return Outcome(True, f"Noted: “{e.get('heard', '')}”. Teach it in the panel (Activity)")
 
     async def _auto_skip(self, a: AutoSkip) -> Outcome:
         set_value(self.cfg, "auto_skip", a.on)

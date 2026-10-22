@@ -319,6 +319,54 @@ for text, what in [("skip the intro", "intro"), ("skip intro", "intro"), ("skip 
 for text, on in [("turn on auto skip", True), ("auto skip intros", True), ("always skip intros", True),
                  ("turn off auto skip", False), ("stop skipping intros", False), ("auto skip off", False)]:
     add(maybe_noise(text), {"type": "auto_skip", "on": on}, "auto_skip")
+# ---- Spanish (for a multilingual speech model): the clean-up turns it into the English the rules know
+SPANISH = [
+    ("pausa", {"type": "transport", "op": "pause"}), ("oye, pausa por favor", {"type": "transport", "op": "pause"}),
+    ("sigue", {"type": "transport", "op": "resume"}), ("continúa", {"type": "transport", "op": "resume"}),
+    ("para", {"type": "transport", "op": "stop"}), ("silencio", {"type": "volume", "op": "mute"}),
+    ("pon el sonido", {"type": "volume", "op": "unmute"}), ("inicio", {"type": "home"}),
+    ("siguiente capítulo", {"type": "next_episode", "offset": 1}),
+    ("el capítulo anterior", {"type": "next_episode", "offset": -1}),
+    ("sube el volumen", {"type": "volume", "op": "up"}), ("baja el volumen un poco", {"type": "volume", "op": "down", "amount": 3}),
+    ("volumen al veinte", {"type": "volume", "op": "set", "amount": 20}),
+    ("pon el volumen al treinta y cinco", {"type": "volume", "op": "set", "amount": 35}),
+    ("desde el principio", {"type": "transport", "op": "seek_to", "seconds": 0}),
+    ("¿qué ha dicho?", {"type": "replay"}), ("¿qué estaba viendo?", {"type": "show_list", "list": "recent"}),
+    ("¿qué hay de nuevo?", {"type": "show_list", "list": "new"}), ("películas nuevas", {"type": "show_list", "list": "movies"}),
+    ("número dos", {"type": "pick", "number": 2}), ("el segundo", {"type": "pick", "number": 2}),
+    ("tres", {"type": "pick", "number": 3}),
+    ("pon la casa de papel", {"type": "play_title", "title": "la casa de papel"}),
+    ("pon la casa de papel temporada dos capítulo tres",
+     {"type": "play_title", "title": "la casa de papel", "season": 2, "episode": 3}),
+    ("quiero ver el hoyo", {"type": "play_title", "title": "el hoyo"}),
+    ("pon el paciente inglés", {"type": "play_title", "title": "el paciente inglés"}),
+    ("pon the bear desde el principio", {"type": "play_title", "title": "the bear", "restart": True}),
+    ("ve a la temporada tres capítulo cuatro", {"type": "play_title", "title": None, "season": 3, "episode": 4}),
+    ("adelanta treinta segundos", {"type": "transport", "op": "forward", "seconds": 30}),
+    ("atrasa diez segundos", {"type": "transport", "op": "back", "seconds": 10}),
+    ("ve al minuto veinte", {"type": "transport", "op": "seek_to", "seconds": 1200}),
+    ("ve a la mitad", {"type": "transport", "op": "seek_to", "percent": 50}),
+    ("salta la intro", {"type": "skip", "what": "intro"}), ("sáltate los créditos", {"type": "skip", "what": "credits"}),
+    ("añádelo a mi biblioteca", {"type": "library", "op": "add"}),
+    ("márcalo como visto", {"type": "library", "op": "watched"}),
+    ("activa el modo maratón", {"type": "binge", "on": True}),
+    ("quita los subtítulos", {"type": "tracks", "subtitles": "off"}),
+    ("pon subtítulos en inglés", {"type": "tracks", "subtitles": "eng"}),
+    ("subtítulos en chino simplificado", {"type": "tracks", "subtitles": "chs"}),
+    ("ponlo en inglés", {"type": "tracks", "audio": "eng"}), ("versión original", {"type": "tracks", "audio": "original"}),
+    ("apaga la tele en media hora", {"type": "timer", "minutes": 30, "then": "off"}),
+    ("para después de este capítulo", {"type": "timer", "minutes": None, "then": "stop"}),
+    ("cancela el temporizador", {"type": "timer", "cancel": True}),
+    ("abre youtube", {"type": "open_app", "app": "tizentube"}),
+    ("busca recetas de paella en youtube", {"type": "youtube", "query": "recetas de paella"}),
+    ("ibai en twitch", {"type": "twitch", "channel": "ibai"}),
+    ("sigue viendo the bear", {"type": "continue_watching", "title": "the bear"}),
+]
+for text, expect in SPANISH:
+    add(text[0].upper() + text[1:] + "." if rng.random() < 0.4 and not text.startswith("¿") else text, expect, "spanish")
+for text in ["that's wrong", "no that's not what i said", "wrong", "that's not what i meant", "you got it wrong",
+             "eso está mal"]:
+    add(maybe_noise(text), {"type": "wrong"}, "wrong")
 for text in ["no one", "one more thing", "two people walked in", "number one fan"]:
     add(text, {"type": "none"}, "not_a_command")
 

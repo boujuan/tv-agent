@@ -706,7 +706,11 @@ class Decisions(QWidget):
                 path.append("phrase")
                 taken.append((prev, "phrase"))
                 prev = "phrase"
-                if step.get("matched"):
+                if step.get("matched") and step.get("rule") == "learned":
+                    hit = "phrase"
+                    notes["phrase"] = "matched: taught"
+                    lines.append("① A sentence you taught (Activity tab) matches exactly")
+                elif step.get("matched"):
                     hit = "phrase"
                     notes["phrase"] = f"matched: {step.get('rule')}"
                     lines.append(f"① Fixed phrase <b>{step.get('rule')}</b> matches exactly")
@@ -738,13 +742,20 @@ class Decisions(QWidget):
                     lines.append(f"③ <span style='color:{AMBER}'>d1 isn't running</span>; tried the offline fallback")
                     continue
                 top = " · ".join(f"{k} {p:.2f}" for k, p in step.get("top", []))
-                lines.append(f"③ d1 picked <b>{step.get('intent')}</b> with confidence "
+                who = "Liquid's hosted d1 (the local one didn't answer)" if step.get("hosted") else "d1"
+                lines.append(f"③ {who} picked <b>{step.get('intent')}</b> with confidence "
                              f"{step.get('confidence', 0):.2f} (needs ≥ {step.get('threshold', 0):.2f}) — top: {top}")
                 if step.get("accepted"):
                     hit = "model"
                     notes["model"] = f"{step.get('intent')} {step.get('confidence', 0):.2f}"
                 else:
                     notes["model"] = f"{step.get('intent')} {step.get('confidence', 0):.2f}: not acting"
+            elif st == "llm":
+                said = str(step.get("action", "none")).replace("_", " ")
+                if step.get("action") not in (None, "none"):
+                    hit = "model"
+                    notes["model"] = f"LLM: {said}"
+                lines.append(f"④ The LLM ({step.get('model')}) answered <b>{said}</b>, checked like the rest")
         a = res["action"]
         if a["type"] == "none":
             path.append("unclear")

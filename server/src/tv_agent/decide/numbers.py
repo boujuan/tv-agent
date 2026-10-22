@@ -1,4 +1,6 @@
-"""Spoken numbers and durations: "three", "twenty one", "third", "1 hour 5 minutes", "a minute and a half"."""
+"""Spoken numbers and durations: "three", "twenty one", "third", "1 hour 5 minutes", "a minute and a half"; Spanish
+numbers too ("tres", "treinta y cinco", "segundo"), for Spanish commands (the clean-up turns their words into these
+English ones: "temporada" -> "season"). "once" (11) is left out: it's an English word."""
 import re
 
 UNITS = {"zero": 0, "oh": 0, "one": 1, "a": 1, "an": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
@@ -8,8 +10,18 @@ TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seve
         "ninety": 90}
 ORDINALS = {"first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8,
             "ninth": 9, "tenth": 10, "eleventh": 11, "twelfth": 12}
+UNITS.update({"cero": 0, "un": 1, "uno": 1, "una": 1, "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5, "seis": 6,
+              "siete": 7, "ocho": 8, "nueve": 9, "diez": 10, "doce": 12, "trece": 13, "catorce": 14, "quince": 15,
+              "dieciséis": 16, "dieciseis": 16, "diecisiete": 17, "dieciocho": 18, "diecinueve": 19, "veinte": 20,
+              "veintiuno": 21, "veintiún": 21, "veintidós": 22, "veintidos": 22, "veintitrés": 23, "veintitres": 23,
+              "veinticuatro": 24, "veinticinco": 25, "veintiséis": 26, "veintiseis": 26, "veintisiete": 27,
+              "veintiocho": 28, "veintinueve": 29})
+TENS.update({"treinta": 30, "cuarenta": 40, "cincuenta": 50, "sesenta": 60, "setenta": 70, "ochenta": 80,
+             "noventa": 90, "cien": 100})
+ORDINALS.update({"primero": 1, "primer": 1, "segundo": 2, "tercero": 3, "tercer": 3, "cuarto": 4, "quinto": 5,
+                 "sexto": 6, "séptimo": 7, "septimo": 7, "octavo": 8, "noveno": 9, "décimo": 10, "decimo": 10})
 WORD = "|".join(sorted([*UNITS, *TENS, "hundred"], key=len, reverse=True))
-NUMBER = rf"(?:\d+(?:\.\d+)?|(?:(?:{WORD})(?:[ -](?:{WORD}))*))"
+NUMBER = rf"(?:\d+(?:\.\d+)?|(?:(?:{WORD})(?:[ -](?:y[ -])?(?:{WORD}))*))"
 UNIT_S = {"second": 1, "sec": 1, "minute": 60, "min": 60, "hour": 3600}
 
 
@@ -28,7 +40,7 @@ def to_int(text: str) -> int | None:
             total += TENS[w]
         elif w == "hundred":
             total = max(total, 1) * 100
-        elif w == "and":
+        elif w in ("and", "y"):
             continue
         else:
             return None

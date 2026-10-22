@@ -35,6 +35,10 @@ you asked about contains where you are: timestamps made on another cut of the ep
 wrong. Skipping by itself needs timestamps made on a file within 2 s of yours' length, from 3 or more people (or
 both databases agreeing). Rules and coverage: [research §2.6](../docs/research-2026-10-22.md).
 
+In Spanish too, with the multilingual speech model (`tv-agent setup stt parakeet-v3`): "pausa", "siguiente
+capítulo", "pon la casa de papel temporada dos capítulo tres", "sube el volumen", "¿qué hay de nuevo?", "salta la
+intro", "eso está mal". A clean-up layer turns the Spanish into the English the rules know; titles stay as said.
+
 Anything it doesn't understand shows "Didn't get that: …" and does nothing. While the pill listens, the volume
 is halved (Kodi's own volume when Kodi plays, else the TV's) and comes back afterwards; nothing is paused.
 
@@ -140,6 +144,21 @@ uv sync --extra mcp --group dev             # Python 3.13 environment in .venv
 .venv/bin/tv-agent doctor                   # all "ok"
 ```
 
+Optional:
+
+```bash
+.venv/bin/tv-agent setup stt                # the speech models; `setup stt parakeet-v3` downloads (487 MB) and uses
+                                            # the multilingual one (Spanish commands), checked against its SHA-256
+op read "op://Personal/<item>/credential" | .venv/bin/tv-agent setup liquid      # hosted d1 as a fallback
+op read "op://Personal/<item>/credential" | .venv/bin/tv-agent setup openrouter  # an LLM for what isn't understood
+```
+
+The keys are checked with the service, never shown, and kept in `secrets.toml`; `hosted_d1` and `llm_fallback`
+(on by default, panel: Settings) say whether they're used. What goes to them: Liquid's hosted d1 gets what you said
+and the options, only when the local d1 doesn't answer (Liquid's terms allow training on it); the LLM (OpenRouter,
+`llm_model`, zero-data-retention providers only) gets what you said, what's playing, the app names and up to 10 of
+your library's titles, only for commands nothing else understood.
+
 `config.toml` needs at least `tv_hosts` (the TV's address, e.g. Ethernet then Wi-Fi; mDNS is tried otherwise).
 Every setting: [config.example.toml](config.example.toml). Secrets: `~/.config/tv-agent/secrets.toml` (mode 600;
 the daemon refuses to start otherwise). For services across logouts: `loginctl enable-linger`.
@@ -157,6 +176,7 @@ the daemon refuses to start otherwise). For services across logouts: `loginctl e
 | Re-pair the TV app (new token or address) | `tv-agent tv pair` |
 | Let Claude Code drive the TV | `claude mcp add --scope user tv-agent -- $PWD/.venv/bin/tv-agent-mcp` (12 tools, no shell) |
 | Stop it for a while | `systemctl --user stop tv-agent llama-d1` (the mic button then says "Agent offline") |
+| Fix a command it got wrong | Say "that's wrong" right after; then in the panel's Activity tab right-click it, "Teach the right action…" (or `tv-agent review` for the list, with an LLM's guess) |
 
 ## HTTP API
 

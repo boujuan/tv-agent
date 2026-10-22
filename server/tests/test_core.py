@@ -702,3 +702,124 @@ def test_auto_skip_jumps_a_sure_intro_as_it_comes_and_leaves_the_rest():
     assert watch([sure], 200_000) == [233_000]          # skipped once, as it came
     assert watch([unsure], 200_000) == []                # not sure: only when asked
     assert watch([sure], 400_000) == []                  # resumed after it
+
+
+def test_speech_model_download_is_checked_and_unpacked(tmp_path, monkeypatch):
+    import contextlib
+    import hashlib
+    import io
+    import tarfile
+    from tv_agent import stt
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:bz2") as tar:
+        for name in stt.FILES:
+            data = name.encode()
+            info = tarfile.TarInfo(f"fake-model/{name}")
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    archive = buf.getvalue()
+
+    class Http:
+        @contextlib.contextmanager
+        def stream(self, method, url, **kw):
+            assert url == stt.RELEASE + "fake-model.tar.bz2"
+            yield type("R", (), {"raise_for_status": lambda self: None,
+                                 "iter_bytes": lambda self, n: iter([archive[:100], archive[100:]])})()
+
+    monkeypatch.setattr(stt, "DATA_DIR", tmp_path)
+    monkeypatch.setitem(stt.MODELS, "fake", stt.Model("Fake", "none", "fake-model", "0" * 64, len(archive)))
+    with pytest.raises(ValueError):
+        stt.download("fake", Http())                                   # wrong SHA-256: nothing installed
+    assert not stt.installed("fake") and not list((tmp_path / "models/fake").iterdir())
+    monkeypatch.setitem(stt.MODELS, "fake", stt.Model("Fake", "none", "fake-model",
+                                                      hashlib.sha256(archive).hexdigest(), len(archive)))
+    assert stt.download("fake", Http()) == tmp_path / "models/fake/fake-model" and stt.installed("fake")
+
+
+def test_d1_falls_back_to_the_hosted_one_only_with_a_key():
+    import asyncio
+    import httpx
+    from tv_agent.decide.d1 import D1, HOSTED
+
+    class Http:
+        def __init__(self):
+            self.calls = []
+
+        async def post(self, url, json=None, timeout=None, headers=None):
+            self.calls.append((url, json.get("model"), (headers or {}).get("Authorization")))
+            if url != HOSTED:
+                raise httpx.ConnectError("llama-d1 is down")
+            return httpx.Response(200, request=httpx.Request("POST", url), json={"answers": {"q": {
+                "choice": "pause", "confidence": 0.9, "probabilities": {"pause": 0.95, "none": 0.05}}}})
+
+    http = Http()
+    d1 = D1(http, "http://127.0.0.1:8091", hosted_key="k")
+    pick = asyncio.run(d1.choice("hold it", "Which action?", {"pause": "pause", "none": "nothing"}))
+    assert pick.key == "pause" and d1.last_source == "hosted"
+    assert http.calls[-1] == (HOSTED, "d1", "Bearer k")
+    with pytest.raises(httpx.ConnectError):                    # no key: the error surfaces as before
+        asyncio.run(D1(Http(), "http://127.0.0.1:8091").choice("x", "?", {"a": "a"}))
+
+
+def test_llm_answers_become_checked_actions():
+    from tv_agent.decide.llm import to_action
+    cands = ["The Bear", "Severance"]
+    play = to_action({"action": "play_title", "title": "The Bear", "season": 3}, "put that bare show on", cands, RULES)
+    assert play == A.PlayTitle(title="The Bear", season=3)
+    assert to_action({"action": "play_title", "title": "Oppenheimer"}, "put that bare show on", cands, RULES) is None
+    assert to_action({"action": "volume_set", "number": 30}, "x", [], RULES) == A.Volume(op="set", amount=30)
+    assert to_action({"action": "volume_set", "number": 300}, "x", [], RULES) is None          # out of range
+    assert to_action({"action": "subtitles", "language": "Spanish"}, "x", [], RULES) == A.Tracks(subtitles="spa")
+    assert to_action({"action": "open_app", "app": "YouTube"}, "x", [], RULES) == A.OpenApp(app="tizentube")
+    assert to_action({"action": "pick", "number": 2}, "x", [], RULES) == A.Pick(number=2)
+    assert to_action({"action": "none"}, "what's the weather", [], RULES) is None
+
+
+def test_the_llm_only_sees_what_rules_and_d1_left_undecided():
+    import asyncio
+    from tv_agent.decide.d1 import Choice
+
+    class D1:
+        async def choice(self, state, question, options):
+            return Choice("none", 0.9, {"none": 0.9, "pause": 0.1})
+
+    class Llm:
+        model = "test/model"
+
+        def __init__(self):
+            self.asked = []
+
+        async def decide(self, said, context):
+            self.asked.append((said, context))
+            return A.Transport(op="pause")
+
+    async def context(text):
+        return {"candidates": []}
+
+    llm = Llm()
+    r = router.Router(D1(), RULES, llm, context)
+    assert asyncio.run(r.decide("pause")).via == "phrase" and not llm.asked          # rules first
+    d = asyncio.run(r.decide("could you freeze the picture for me"))
+    assert d.via == "llm" and d.action.op == "pause" and d.trace[-1]["stage"] == "llm"
+    assert llm.asked[0][0] == "could you freeze the picture for me"
+
+
+def test_thats_wrong_marks_the_last_command_and_teaching_makes_a_phrase(tmp_path):
+    from tv_agent import activity
+    from tv_agent.decide import learned
+    log = tmp_path / "activity.jsonl"
+    activity.append({"heard": "freeze it", "type": "none"}, log)
+    activity.append({"heard": "that's wrong", "type": "wrong"}, log)
+    marked = activity.mark_last_wrong(log)
+    assert marked["heard"] == "freeze it"
+    assert {e["heard"]: e.get("wrong") for e in activity.read(log)} == {"freeze it": True, "that's wrong": None}
+    store = tmp_path / "learned.json"
+    learned.add("Freeze it", {"type": "transport", "op": "pause"}, store)
+    learned.add("freeze it", {"type": "transport", "op": "stop"}, store)            # taught again: replaced
+    assert [(x["say"], x["do"]) for x in learned.load(store)] == [("freeze it", {"op": "stop", "type": "transport"})]
+    with pytest.raises(ValueError):
+        learned.add("blah", {"type": "none"}, store)
+    assert learned.remove("FREEZE IT", store) and learned.load(store) == []
+    for text in ("that's wrong", "no, that's not what i said", "wrong", "Eso está mal."):
+        assert rule_action(text).type == "wrong", text

@@ -88,9 +88,9 @@ panel's Decisions tab, then redo your changes.
 - Subtitles from your Stremio subtitle addons in Kodi: asked like Stremio asks (the chosen file's hash, size and
   name), and added with `Player.AddSubtitle` for the languages of your list the file doesn't have, the one to show
   last. The file's own subtitles still come first for a language it has.
-- `eval/commands.jsonl`: 777 generated, labelled commands (564 for tuning, 213 held out) from
+- `eval/commands.jsonl`: 832 generated, labelled commands (600 for tuning, 232 held out, 49 in Spanish) from
   `eval/build_commands.py`; `tv-agent eval --file … --split dev|test` scores them by category. Current rules:
-  777/777, with d1 needed for ~4% of them.
+  832/832, with d1 needed for ~4% of them.
 - Binge mode, on by default ("binge mode on/off", `binge` in config.toml): when an episode ends, the next one
   starts by itself. It's found, its stream chosen and its link checked 20 s into the episode, so it starts in
   ~3-4 s (measured: The Office S3E2 → S3E3). After a film or a season's last episode, back to Home instead of
@@ -104,6 +104,21 @@ panel's Decisions tab, then redo your changes.
   shows that you haven't got to), "new films" (your addons' "Latest" list); "number 2", "the second one" or the
   remote plays from it (`/v1/choose` for the TV app).
 - "Play the latest episode of The Bear": the newest episode out.
+- A choice of speech model (`stt_model`, panel: Settings): `parakeet-v2` (English, the default) or `parakeet-v3`
+  (25 European languages, Spanish included, found by itself). `tv-agent setup stt [name]` lists them, downloads
+  one (checked against the SHA-256 GitHub publishes for it) and uses it.
+- Spanish commands: "pausa", "siguiente capítulo", "pon la casa de papel temporada dos capítulo tres", "sube el
+  volumen", "¿qué hay de nuevo?", "salta la intro"… A clean-up layer turns them into the English the rules know
+  (titles stay as said, Spanish numbers are read); 49 Spanish test sentences. They need a multilingual speech model
+  to be heard as Spanish.
+- Liquid's hosted d1 as a fallback when the local d1 doesn't answer (`hosted_d1`, `tv-agent setup liquid`).
+- An LLM after d1, for commands nothing else understood (`llm_fallback`, `llm_model` =
+  google/gemini-2.5-flash-lite through OpenRouter, `tv-agent setup openrouter`): one action in a strict JSON
+  shape, zero-data-retention providers only; a title has to be said or be among up to 10 of your library's
+  titles that sound like it; everything is checked like the rules' answers.
+- "That's wrong" ("eso está mal") marks the last command in the history; the panel teaches it the right action,
+  saved as that exact sentence (`learned.json`, checked before the rules, apart from `rules.json`). `tv-agent
+  review` lists marked and not-understood commands, with the LLM's guess when one is set up.
 - "Skip the intro", "skip the recap", "skip the credits" (the next episode in binge mode, else Home), from
   TheIntroDB's timestamps for a file of this length and IntroDB's; it only jumps when you're in that part, so
   timestamps from another cut can't send you somewhere wrong; a chapter named "Opening" or "Recap" counts too.
@@ -123,6 +138,16 @@ panel's Decisions tab, then redo your changes.
 - The volume halves while the pill listens (the remote's mic hears the TV) and comes back after: Kodi's own
   volume while Kodi plays, otherwise the TV's. Nothing is paused; "louder" said meanwhile starts from the level
   before.
+
+## panel — unreleased
+
+### Added
+- Settings: a Voice card: the speech model (with "Download and use" for one not on this computer yet), binge
+  mode, auto skip, and the cloud fallbacks (Liquid's hosted d1, an LLM) with whether their keys are set. The tab
+  reloads when shown, so a binge mode changed by voice isn't overwritten.
+- Activity: "Only wrong or not understood"; right-click a command to mark it wrong, teach it the right action
+  (type what you meant, see how the agent takes it, save) or forget what it was taught.
+- Decisions: explains sentences you taught, answers from Liquid's hosted d1 and the LLM step.
 
 ## server 0.1.0 — 2026-10-22
 

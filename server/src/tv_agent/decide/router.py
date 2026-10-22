@@ -5,6 +5,8 @@
 3. Pattern rules, in order: the first whose regex matches and whose parts convert wins ("skip forward …").
 4. d1-3B picks one of the intents; rules pull out the title, season, episode and numbers. Below the confidence
    threshold, or "none", nothing happens: a misheard sentence does nothing instead of something random.
+5. Only when an LLM is set up (llm.py, an OpenRouter key): what's still undecided goes to it, and its answer is
+   checked like the rest.
 Every decision carries a trace of the steps it went through, for the panel's diagram.
 """
 import logging
@@ -200,8 +202,21 @@ def from_intent(intent: str, t: str, rules: Rules) -> A.Action | None:
 
 
 class Router:
-    def __init__(self, d1: D1, rules: Rules):
+    def __init__(self, d1: D1, rules: Rules, llm=None, context=None):
         self.d1, self.rules = d1, rules
+        self.llm = llm                  # llm.Llm, or None
+        self.context = context          # async (text) -> dict for the LLM: what's playing, candidate titles, apps
+
+    async def _last_try(self, text: str, unclear: Decision) -> Decision:
+        """The LLM, for what rules and d1 couldn't decide (when one is set up)."""
+        if self.llm is None:
+            return unclear
+        context = await self.context(text) if self.context else {}
+        action = await self.llm.decide(text, context)
+        unclear.trace.append({"stage": "llm", "model": self.llm.model, "action": action.type if action else "none"})
+        if action is None:
+            return unclear
+        return Decision(action, "llm", 0.9, "llm", unclear.trace)
 
     async def decide(self, text: str) -> Decision:
         rules = self.rules                      # one consistent set even if a reload lands meanwhile
@@ -218,15 +233,21 @@ class Router:
             log.warning("d1 unavailable (%s); trying %s", type(e).__name__, rules.fallback_intent)
             trace.append({"stage": "model", "available": False})
             action = from_intent(rules.fallback_intent, t, rules)
-            return Decision(action or A.Unclear(heard=text), "none", 0.0, rules.fallback_intent, trace)
+            if action is None:
+                return await self._last_try(text, Decision(A.Unclear(heard=text), "none", 0.0, "", trace))
+            return Decision(action, "none", 0.0, rules.fallback_intent, trace)
         top = sorted(pick.probabilities.items(), key=lambda kv: -kv[1])[:3]
         step = {"stage": "model", "intent": pick.key, "confidence": round(pick.confidence, 3),
                 "threshold": rules.min_confidence, "top": [[k, round(p, 3)] for k, p in top]}
+        if getattr(self.d1, "last_source", "local") == "hosted":
+            step["hosted"] = True                # Liquid's hosted d1 answered (the local one didn't)
         trace.append(step)
         ratio = top[0][1] / max(top[1][1], 1e-9) if len(top) > 1 else float("inf")
         if pick.key == "none" or pick.confidence < rules.min_confidence or ratio < rules.min_ratio:
             step["accepted"] = False
-            return Decision(A.Unclear(heard=text), "d1", pick.confidence, pick.key, trace)
+            return await self._last_try(text, Decision(A.Unclear(heard=text), "d1", pick.confidence, pick.key, trace))
         action = from_intent(pick.key, t, rules)
         step["accepted"] = action is not None
-        return Decision(action or A.Unclear(heard=text), "d1", pick.confidence, pick.key, trace)
+        if action is None:
+            return await self._last_try(text, Decision(A.Unclear(heard=text), "d1", pick.confidence, pick.key, trace))
+        return Decision(action, "d1", pick.confidence, pick.key, trace)

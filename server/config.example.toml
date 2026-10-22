@@ -1,10 +1,11 @@
 # ~/.config/tv-agent/config.toml (optional: these are the defaults). Secrets live in secrets.toml next to it,
-# written by `tv-agent setup token|stremio|kodi`, never here.
+# written by `tv-agent setup token|stremio|kodi|liquid|openrouter`, never here.
 
 tv_hosts = ["192.168.1.41", "192.168.1.40"]   # Ethernet, Wi-Fi; also the only addresses the LAN listener accepts
 lan_host = "192.168.1.51"                     # this laptop on bond0; never 0.0.0.0 (tailscale0 is up too)
 lan_port = 8765
 local_port = 8766
+stream_port = 8767         # the TV app's live audio
 d1_url = "http://127.0.0.1:8091"
 kodi_port = 8080
 kodi_user = "kodi"
@@ -22,3 +23,12 @@ native_language = "spa"
 
 twitch_favorites = []      # e.g. ["ibai", "auronplay"]: matched first, since speech-to-text spells names freely
 log_transcripts = true     # what you said, in `journalctl --user -u tv-agent`
+
+stt_model = "parakeet-v2"  # speech: "parakeet-v2" (English) or "parakeet-v3" (25 languages; `tv-agent setup stt`)
+binge = true               # when an episode ends, the next one starts ("binge mode on / off")
+auto_skip = false          # skip intros and recaps by themselves when their timestamps are sure ("auto skip on")
+
+# Cloud fallbacks, used only with their keys (`tv-agent setup liquid`, `tv-agent setup openrouter`):
+hosted_d1 = true           # the local d1 doesn't answer: Liquid's hosted d1
+llm_fallback = true        # nothing understood a command: an LLM through OpenRouter (zero data retention)
+llm_model = "google/gemini-2.5-flash-lite"

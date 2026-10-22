@@ -5,12 +5,12 @@ import os
 import subprocess
 import tomllib
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
                                QPlainTextEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
-from .common import agent_config, card, dim, load_cfg, run_doctor, set_autostart
+from .common import TV_AGENT, agent_config, agent_stt, card, dim, load_cfg, run_doctor, set_autostart
 
 AUDIO = [("English", "eng"), ("Spanish", "spa"), ("French", "fre"), ("Italian", "ita"), ("German", "ger"),
          ("Portuguese", "por"), ("Japanese", "jpn"), ("Korean", "kor"), ("Chinese", "chi")]
@@ -134,6 +134,42 @@ class Settings(QScrollArea):
                       "knows “Chinese” and shows the first Chinese track."))
         outer.addWidget(lang)
 
+        voice = card()
+        f5 = QFormLayout(voice)
+        f5.setContentsMargins(16, 14, 16, 14)
+        f5.addRow(QLabel("<b>Voice</b>"))
+        self.stt = QComboBox()
+        self.stt.currentIndexChanged.connect(self._stt_changed)
+        self.download = QPushButton("Download and use")
+        self.download.clicked.connect(self._download_stt)
+        stt_row = QHBoxLayout()
+        stt_row.addWidget(self.stt, 1)
+        stt_row.addWidget(self.download)
+        self.binge = QCheckBox("Binge mode: when an episode ends, the next one starts")
+        self.binge.setToolTip("Also by voice: “binge mode on / off”. “Stop after this episode” wins for one episode.")
+        self.auto_skip = QCheckBox("Skip intros and recaps by themselves when their timestamps are sure")
+        self.auto_skip.setToolTip("From TheIntroDB and IntroDB; “skip the intro” works either way. "
+                                  "Also by voice: “auto skip on / off”.")
+        f5.addRow("Speech model", stt_row)
+        f5.addRow(dim("Parakeet v3 understands Spanish commands too (“pon la casa de papel”, “siguiente capítulo”) "
+                      "and works out the language by itself; v2 is a little better at English."))
+        f5.addRow("", self.binge)
+        f5.addRow("", self.auto_skip)
+        self.hosted_d1 = QCheckBox("When the local d1 doesn't answer, ask Liquid's hosted d1")
+        self.hosted_d1.setToolTip("~0.3 s. Liquid may use what it's sent for training (what you said and the "
+                                  "options). Key: op read \"op://Personal/…\" | tv-agent setup liquid")
+        self.llm = QCheckBox("For commands nothing else understood, ask an LLM (OpenRouter)")
+        self.llm.setToolTip("~0.7-1 s, only for those. Zero-data-retention providers only. Its answer is checked "
+                            "like the rest. Key: op read \"op://Personal/…\" | tv-agent setup openrouter")
+        self.cloud_note = dim("")
+        f5.addRow("Cloud", self.hosted_d1)
+        f5.addRow("", self.llm)
+        f5.addRow("", self.cloud_note)
+        outer.addWidget(voice)
+        self._dl_status = None
+        self._dl_timer = QTimer(self)
+        self._dl_timer.timeout.connect(self._show_download)
+
         other = card()
         f3 = QFormLayout(other)
         f3.setContentsMargins(16, 14, 16, 14)
@@ -182,6 +218,65 @@ class Settings(QScrollArea):
         outer.addStretch()
         self.load()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._dl_status is None:
+            self.load()           # binge mode and auto skip can change by voice meanwhile
+
+    def _fill_stt(self, current: str):
+        self.stt.blockSignals(True)
+        self.stt.clear()
+        for key, m in agent_stt.MODELS.items():
+            extra = "" if agent_stt.installed(key) else f" · {m.size / 1e6:.0f} MB download"
+            self.stt.addItem(f"{m.label} · {m.languages}{extra}", key)
+        if current not in agent_stt.MODELS:
+            self.stt.addItem(f"Custom: {current}", current)
+        self.stt.setCurrentIndex(max(0, self.stt.findData(current)))
+        self.stt.blockSignals(False)
+        self._stt_changed()
+
+    def _stt_changed(self, *_):
+        key = self.stt.currentData()
+        self.download.setVisible(key in agent_stt.MODELS and not agent_stt.installed(key))
+
+    def _download_stt(self):
+        key = self.stt.currentData()
+        m = agent_stt.MODELS[key]
+        if QMessageBox.question(self, "TV Agent", f"Download {m.label} ({m.size / 1e6:.0f} MB) from GitHub "
+                                f"(k2-fsa/sherpa-onnx), check it against its published SHA-256 and use it?") \
+                != QMessageBox.StandardButton.Yes:
+            return
+        self._dl_status = "Starting the download…"
+        self.download.setEnabled(False)
+        self._dl_timer.start(400)
+
+        def run():
+            p = subprocess.Popen([str(TV_AGENT), "setup", "stt", key], stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, text=True)
+            for line in p.stdout:
+                if line.strip() and " INFO " not in line:
+                    self._dl_status = line.strip()
+            return p.wait()
+
+        def done(code, err):
+            self._dl_timer.stop()
+            self._dl_status = None
+            self.download.setEnabled(True)
+            if err or code:
+                self.note.setText(f"Download failed: {err or 'see the panel log'}")
+                return
+            agent = self.panel.overview.cards["tv-agent"]
+            if agent.active:
+                agent.act("restart")
+            self.note.setText(f"{m.label} downloaded and in use (the voice agent restarted).")
+            self.load()
+
+        self.panel.bg.run(run, done)
+
+    def _show_download(self):
+        if self._dl_status:
+            self.note.setText(self._dl_status)
+
     def set_pref(self, key: str, on: bool):
         self.panel.prefs.set(key, on)
         if key == "autostart":
@@ -212,6 +307,14 @@ class Settings(QScrollArea):
         self.twitch.setText(", ".join(cfg.twitch_favorites))
         self.log.setChecked(cfg.log_transcripts)
         self.hosts.setText(", ".join(cfg.tv_hosts))
+        self._fill_stt(cfg.stt_model)
+        self.binge.setChecked(cfg.binge)
+        self.auto_skip.setChecked(cfg.auto_skip)
+        self.hosted_d1.setChecked(cfg.hosted_d1)
+        self.llm.setChecked(cfg.llm_fallback)
+        state = lambda name, cmd: "key set" if cfg.secret(name) else f"no key yet (tv-agent setup {cmd})"  # noqa: E731
+        self.cloud_note.setText(f"Liquid: {state('liquid_api_key', 'liquid')} · OpenRouter "
+                                f"({cfg.llm_model}): {state('openrouter_api_key', 'openrouter')}")
 
     def values(self) -> dict:
         split = lambda s: [x.strip() for x in s.split(",") if x.strip()]  # noqa: E731
@@ -226,16 +329,26 @@ class Settings(QScrollArea):
             "twitch_favorites": split(self.twitch.text()),
             "log_transcripts": self.log.isChecked(),
             "tv_hosts": split(self.hosts.text()) or agent_config.Config().tv_hosts,
+            "stt_model": self.stt.currentData(),
+            "binge": self.binge.isChecked(),
+            "auto_skip": self.auto_skip.isChecked(),
+            "hosted_d1": self.hosted_d1.isChecked(),
+            "llm_fallback": self.llm.isChecked(),
         }
 
     def save(self, values: dict | None = None):
+        values = values or self.values()
+        if values.get("stt_model") in agent_stt.MODELS and not agent_stt.installed(values["stt_model"]):
+            QMessageBox.information(self, "TV Agent", "That speech model isn't downloaded yet: "
+                                    "use “Download and use” next to it.")
+            return False
         path = agent_config.CONFIG_FILE
         old = path.read_text() if path.exists() else None
         try:
             current = tomllib.loads(old) if old else {}
         except ValueError:
             current = {}
-        merged = {**current, **(values or self.values())}     # settings not shown here are kept
+        merged = {**current, **values}                        # settings not shown here are kept
         lines = ["# tv-agent settings (written by the TV Agent panel; see config.example.toml for all of them).\n"]
         lines += [f"{k} = {toml(v)}\n" for k, v in merged.items()]
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)

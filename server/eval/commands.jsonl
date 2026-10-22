@@ -771,6 +771,61 @@
 {"text": "okay turn off auto skip", "expect": {"type": "auto_skip", "on": false}, "cat": "auto_skip", "split": "dev"}
 {"text": "can you stop skipping intros", "expect": {"type": "auto_skip", "on": false}, "cat": "auto_skip", "split": "test"}
 {"text": "auto skip off", "expect": {"type": "auto_skip", "on": false}, "cat": "auto_skip", "split": "dev"}
+{"text": "pausa", "expect": {"type": "transport", "op": "pause"}, "cat": "spanish", "split": "dev"}
+{"text": "oye, pausa por favor", "expect": {"type": "transport", "op": "pause"}, "cat": "spanish", "split": "dev"}
+{"text": "Sigue.", "expect": {"type": "transport", "op": "resume"}, "cat": "spanish", "split": "dev"}
+{"text": "Continúa.", "expect": {"type": "transport", "op": "resume"}, "cat": "spanish", "split": "test"}
+{"text": "para", "expect": {"type": "transport", "op": "stop"}, "cat": "spanish", "split": "dev"}
+{"text": "Silencio.", "expect": {"type": "volume", "op": "mute"}, "cat": "spanish", "split": "test"}
+{"text": "pon el sonido", "expect": {"type": "volume", "op": "unmute"}, "cat": "spanish", "split": "dev"}
+{"text": "Inicio.", "expect": {"type": "home"}, "cat": "spanish", "split": "dev"}
+{"text": "siguiente capítulo", "expect": {"type": "next_episode", "offset": 1}, "cat": "spanish", "split": "dev"}
+{"text": "El capítulo anterior.", "expect": {"type": "next_episode", "offset": -1}, "cat": "spanish", "split": "dev"}
+{"text": "Sube el volumen.", "expect": {"type": "volume", "op": "up"}, "cat": "spanish", "split": "dev"}
+{"text": "baja el volumen un poco", "expect": {"type": "volume", "op": "down", "amount": 3}, "cat": "spanish", "split": "test"}
+{"text": "volumen al veinte", "expect": {"type": "volume", "op": "set", "amount": 20}, "cat": "spanish", "split": "test"}
+{"text": "pon el volumen al treinta y cinco", "expect": {"type": "volume", "op": "set", "amount": 35}, "cat": "spanish", "split": "dev"}
+{"text": "desde el principio", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}, "cat": "spanish", "split": "dev"}
+{"text": "¿qué ha dicho?", "expect": {"type": "replay"}, "cat": "spanish", "split": "dev"}
+{"text": "¿qué estaba viendo?", "expect": {"type": "show_list", "list": "recent"}, "cat": "spanish", "split": "dev"}
+{"text": "¿qué hay de nuevo?", "expect": {"type": "show_list", "list": "new"}, "cat": "spanish", "split": "dev"}
+{"text": "películas nuevas", "expect": {"type": "show_list", "list": "movies"}, "cat": "spanish", "split": "dev"}
+{"text": "Número dos.", "expect": {"type": "pick", "number": 2}, "cat": "spanish", "split": "dev"}
+{"text": "El segundo.", "expect": {"type": "pick", "number": 2}, "cat": "spanish", "split": "dev"}
+{"text": "tres", "expect": {"type": "pick", "number": 3}, "cat": "spanish", "split": "dev"}
+{"text": "Pon la casa de papel.", "expect": {"type": "play_title", "title": "la casa de papel"}, "cat": "spanish", "split": "test"}
+{"text": "Pon la casa de papel temporada dos capítulo tres.", "expect": {"type": "play_title", "title": "la casa de papel", "season": 2, "episode": 3}, "cat": "spanish", "split": "dev"}
+{"text": "Quiero ver el hoyo.", "expect": {"type": "play_title", "title": "el hoyo"}, "cat": "spanish", "split": "dev"}
+{"text": "Pon el paciente inglés.", "expect": {"type": "play_title", "title": "el paciente inglés"}, "cat": "spanish", "split": "test"}
+{"text": "pon the bear desde el principio", "expect": {"type": "play_title", "title": "the bear", "restart": true}, "cat": "spanish", "split": "dev"}
+{"text": "ve a la temporada tres capítulo cuatro", "expect": {"type": "play_title", "title": null, "season": 3, "episode": 4}, "cat": "spanish", "split": "dev"}
+{"text": "adelanta treinta segundos", "expect": {"type": "transport", "op": "forward", "seconds": 30}, "cat": "spanish", "split": "test"}
+{"text": "Atrasa diez segundos.", "expect": {"type": "transport", "op": "back", "seconds": 10}, "cat": "spanish", "split": "dev"}
+{"text": "ve al minuto veinte", "expect": {"type": "transport", "op": "seek_to", "seconds": 1200}, "cat": "spanish", "split": "test"}
+{"text": "Ve a la mitad.", "expect": {"type": "transport", "op": "seek_to", "percent": 50}, "cat": "spanish", "split": "test"}
+{"text": "Salta la intro.", "expect": {"type": "skip", "what": "intro"}, "cat": "spanish", "split": "dev"}
+{"text": "Sáltate los créditos.", "expect": {"type": "skip", "what": "credits"}, "cat": "spanish", "split": "test"}
+{"text": "añádelo a mi biblioteca", "expect": {"type": "library", "op": "add"}, "cat": "spanish", "split": "dev"}
+{"text": "márcalo como visto", "expect": {"type": "library", "op": "watched"}, "cat": "spanish", "split": "dev"}
+{"text": "activa el modo maratón", "expect": {"type": "binge", "on": true}, "cat": "spanish", "split": "test"}
+{"text": "Quita los subtítulos.", "expect": {"type": "tracks", "subtitles": "off"}, "cat": "spanish", "split": "dev"}
+{"text": "Pon subtítulos en inglés.", "expect": {"type": "tracks", "subtitles": "eng"}, "cat": "spanish", "split": "dev"}
+{"text": "Subtítulos en chino simplificado.", "expect": {"type": "tracks", "subtitles": "chs"}, "cat": "spanish", "split": "dev"}
+{"text": "ponlo en inglés", "expect": {"type": "tracks", "audio": "eng"}, "cat": "spanish", "split": "test"}
+{"text": "versión original", "expect": {"type": "tracks", "audio": "original"}, "cat": "spanish", "split": "dev"}
+{"text": "apaga la tele en media hora", "expect": {"type": "timer", "minutes": 30, "then": "off"}, "cat": "spanish", "split": "test"}
+{"text": "Para después de este capítulo.", "expect": {"type": "timer", "minutes": null, "then": "stop"}, "cat": "spanish", "split": "test"}
+{"text": "Cancela el temporizador.", "expect": {"type": "timer", "cancel": true}, "cat": "spanish", "split": "test"}
+{"text": "Abre youtube.", "expect": {"type": "open_app", "app": "tizentube"}, "cat": "spanish", "split": "test"}
+{"text": "busca recetas de paella en youtube", "expect": {"type": "youtube", "query": "recetas de paella"}, "cat": "spanish", "split": "dev"}
+{"text": "ibai en twitch", "expect": {"type": "twitch", "channel": "ibai"}, "cat": "spanish", "split": "dev"}
+{"text": "sigue viendo the bear", "expect": {"type": "continue_watching", "title": "the bear"}, "cat": "spanish", "split": "test"}
+{"text": "that's wrong", "expect": {"type": "wrong"}, "cat": "wrong", "split": "dev"}
+{"text": "no that's not what i said", "expect": {"type": "wrong"}, "cat": "wrong", "split": "dev"}
+{"text": "Wrong.", "expect": {"type": "wrong"}, "cat": "wrong", "split": "test"}
+{"text": "That's not what i meant.", "expect": {"type": "wrong"}, "cat": "wrong", "split": "test"}
+{"text": "You got it wrong.", "expect": {"type": "wrong"}, "cat": "wrong", "split": "dev"}
+{"text": "Uh eso está mal.", "expect": {"type": "wrong"}, "cat": "wrong", "split": "dev"}
 {"text": "no one", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
 {"text": "one more thing", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
 {"text": "two people walked in", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}

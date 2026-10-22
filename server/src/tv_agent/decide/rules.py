@@ -187,7 +187,13 @@ def _subject(v, _):
 LANGUAGE_NAMES = {"english": "eng", "spanish": "spa", "castilian": "spa", "castellano": "spa", "chinese": "chi",
                   "mandarin": "chi", "simplified chinese": "chs", "chinese simplified": "chs", "traditional chinese": "cht",
                   "chinese traditional": "cht", "french": "fre", "italian": "ita", "german": "ger",
-                  "portuguese": "por", "japanese": "jpn", "korean": "kor"}
+                  "portuguese": "por", "japanese": "jpn", "korean": "kor",
+                  # Spanish names, for Spanish commands ("subtítulos en inglés")
+                  "español": "spa", "espanol": "spa", "inglés": "eng", "ingles": "eng", "chino": "chi",
+                  "chino simplificado": "chs", "chino tradicional": "cht", "chino simplified": "chs",
+                  "chino traditional": "cht", "francés": "fre", "frances": "fre",
+                  "italiano": "ita", "alemán": "ger", "aleman": "ger", "portugués": "por", "portugues": "por",
+                  "japonés": "jpn", "japones": "jpn", "coreano": "kor"}
 
 
 def _language(v, _):

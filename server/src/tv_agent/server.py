@@ -36,12 +36,13 @@ from . import actions as A
 from . import activity
 from .agent import Agent
 from .config import Config, lan_address
-from .decide import evaluate
+from .decide import evaluate, learned
 from .decide import rules as R
 from .decide.router import Decision, Router, normalize
 from .languages import name as language_name
 from .listen_stream import StreamSession
 from .stt import Stt
+from .stt import model_dir as stt_model_dir
 
 log = logging.getLogger("tv_agent")
 MAX_BODY = 400_000          # 12 s of 16 kHz PCM16
@@ -104,6 +105,8 @@ def describe(a: A.Action) -> str:
             return f"Skipping the {a.what}"
         case A.AutoSkip():
             return "Auto skip on" if a.on else "Auto skip off"
+        case A.Wrong():
+            return "Noted"
         case A.LibraryEdit():
             what = a.title.title() if a.title else "this"
             return {"add": f"Adding {what} to your library", "remove": f"Removing {what} from your library",
@@ -116,7 +119,9 @@ class Service:
     def __init__(self, cfg: Config):
         self.cfg = cfg
         self.agent = Agent(cfg)
-        self.router = Router(self.agent.d1, self.agent.rules)
+        self.router = Router(self.agent.d1, self.agent.rules, self.agent.llm, self.agent.llm_context)
+        self._learned_mtime = 0.0
+        self._learn(self.agent.rules)
         self.stt: Stt | None = None
         self.token = cfg.secret("agent_token") or ""
         self._busy = asyncio.Lock()
@@ -132,15 +137,25 @@ class Service:
         except OSError:
             return 0.0
 
+    def _learn(self, rules: R.Rules):
+        """The sentences you taught (learned.json) on top of the rules' fixed phrases."""
+        for x in learned.load():
+            rules.phrases[normalize(x["say"], rules)] = (x["do"], "learned")
+        self._learned_mtime = learned.mtime()
+
     def use_rules(self, rules: R.Rules, error: str | None = None):
+        self._learn(rules)
         self.agent.rules = self.router.rules = rules
+        if self.agent.llm:
+            self.agent.llm.rules = rules
         self.agent.rules_error = error
         self._rules_mtime = self._mtime()
         log.info("rules: %s (%s)", rules.source, ", ".join(f"{v} {k}" for k, v in rules.counts.items()))
 
     def maybe_reload(self):
-        """Pick up a hand-edited rules.json; a broken one is reported and the current rules stay."""
-        if self._mtime() == self._rules_mtime:
+        """Pick up a hand-edited rules.json (or newly taught sentences); a broken one is reported and the current
+        rules stay."""
+        if self._mtime() == self._rules_mtime and learned.mtime() == self._learned_mtime:
             return
         try:
             self.use_rules(R.load())
@@ -179,7 +194,7 @@ class Service:
         """Execute in the background so the pill can close; the result arrives on the TV as a toast."""
         out = await self.execute(d, heard, source)
         if d.action.type in ("play_title", "continue_watching", "next_episode", "youtube", "twitch", "pick",
-                             "library", "skip") or not out.ok:
+                             "library", "skip", "wrong") or not out.ok:
             await self.agent.notify(out.say)
 
     def start(self, d: Decision, heard: str, source: str):
@@ -435,6 +450,32 @@ def local_app(svc: Service) -> FastAPI:
         raw = await request.json()
         return rules_reply(lambda: R.save(raw))
 
+    @app.get("/v1/learned")
+    async def learned_list(request: Request):
+        svc.check(request, lan=False)
+        return {"learned": learned.load()}
+
+    @app.post("/v1/learn")
+    async def learn(request: Request):
+        """Teach one sentence its action (the panel's Activity tab); `t` marks that history entry as taught."""
+        svc.check(request, lan=False)
+        body = await request.json()
+        try:
+            item = learned.add(str(body.get("say", ""))[:300], body.get("do") or {})
+        except (ValidationError, ValueError) as e:
+            raise HTTPException(422, str(e)[:200]) from None
+        if body.get("t"):
+            activity.mark(float(body["t"]), False, heard=body.get("heard"), taught=item["do"]["type"])
+        svc.use_rules(*R.load_safe())
+        return {"ok": True, "learned": item}
+
+    @app.post("/v1/learned/remove")
+    async def learned_remove(request: Request):
+        svc.check(request, lan=False)
+        removed = learned.remove(str((await request.json()).get("say", "")))
+        svc.use_rules(*R.load_safe())
+        return {"ok": removed}
+
     @app.post("/v1/rules/reset")
     async def reset_rules(request: Request):
         svc.check(request, lan=False)
@@ -463,8 +504,8 @@ async def serve(cfg: Config):
     if not cfg.secret("agent_token"):
         raise SystemExit("no agent token: run `tv-agent setup token` and rebuild the TV app")
     svc = Service(cfg)
-    log.info("loading speech model")
-    svc.stt = await asyncio.to_thread(Stt, cfg.stt_model)
+    log.info("loading speech model %s", cfg.stt_model)
+    svc.stt = await asyncio.to_thread(Stt, stt_model_dir(cfg.stt_model))
     try:
         await svc.agent.restore()
         asyncio.create_task(svc.agent.warm())

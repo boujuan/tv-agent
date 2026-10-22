@@ -21,6 +21,7 @@ except ImportError:
     sys.path.insert(0, str(REPO / "server" / "src"))
 from tv_agent import activity as agent_activity  # noqa: E402,F401  (stdlib only)
 from tv_agent import config as agent_config  # noqa: E402  (stdlib only; the daemon's own checks)
+from tv_agent import stt as agent_stt  # noqa: E402  (stdlib only until a model is loaded)
 
 from PySide6.QtCore import QSettings, QSize, QTimer  # noqa: E402
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen  # noqa: E402

@@ -64,6 +64,351 @@
         "from": "^(?:clay|klay|blay|flay)\\b",
         "to": "play",
         "note": "the remote's mic opens a moment late and clips the “p” of “play”"
+      },
+      {
+        "from": "^(?:(?:oye|oiga|venga|vale|bueno|a ver|eh|pues|uh|um|erm|hmm)(?: (?:tele|tv))?[, ]+)+",
+        "to": "",
+        "note": "Spanish: “oye”, “venga”, “a ver” (and hesitations) before a command"
+      },
+      {
+        "from": "[, ]+(?:por favor|porfa|porfi|gracias)$",
+        "to": "",
+        "note": "Spanish: “por favor” at the end"
+      },
+      {
+        "from": "^(?:no[, ]+)?(?:eso )?(?:est[aá] mal|no es eso|no era eso|te has equivocado)$",
+        "to": "that's wrong",
+        "note": "Spanish: eso está mal"
+      },
+      {
+        "from": "^(?:pausa|pon pausa|pausar|espera(?: un momento)?|para un momento)$",
+        "to": "pause",
+        "note": "Spanish: pausa"
+      },
+      {
+        "from": "^(?:sigue|contin[uú]a|reanuda|dale|dale al play|quita la pausa|seguir)$",
+        "to": "resume",
+        "note": "Spanish: sigue, continúa"
+      },
+      {
+        "from": "^(?:para|det[eé]n|detener|para la (?:peli|pel[ií]cula|serie)|para (?:el|este) (?:cap[ií]tulo|episodio))$",
+        "to": "stop",
+        "note": "Spanish: para"
+      },
+      {
+        "from": "^(?:silencio|silencia|quita el sonido|sin sonido)$",
+        "to": "mute",
+        "note": "Spanish: silencio"
+      },
+      {
+        "from": "^(?:pon el sonido|activa el sonido|quita el silencio|vuelve a poner el sonido)$",
+        "to": "unmute",
+        "note": "Spanish: pon el sonido"
+      },
+      {
+        "from": "^(?:inicio|ve al inicio|vete al inicio|vuelve al inicio|pantalla de inicio|men[uú] principal)$",
+        "to": "go home",
+        "note": "Spanish: inicio"
+      },
+      {
+        "from": "^(?:pon |ve al |pasa al )?(?:el )?(?:siguiente|pr[oó]ximo) (?:cap[ií]tulo|episodio)$|^el siguiente$|^siguiente$",
+        "to": "next episode",
+        "note": "Spanish: siguiente capítulo"
+      },
+      {
+        "from": "^(?:pon |ve al |vuelve al )?(?:el )?(?:cap[ií]tulo|episodio) anterior$|^el anterior$|^anterior$",
+        "to": "previous episode",
+        "note": "Spanish: capítulo anterior"
+      },
+      {
+        "from": "^(?:sube(?: el)? volumen|sube) (?:un poco|un poquito)$",
+        "to": "volume up a bit",
+        "note": "Spanish: sube un poco"
+      },
+      {
+        "from": "^(?:sube(?: el)? volumen|sube) mucho$",
+        "to": "volume up a lot",
+        "note": "Spanish: sube mucho"
+      },
+      {
+        "from": "^(?:sube(?: el)? volumen|m[aá]s volumen|m[aá]s alto|sube)$",
+        "to": "volume up",
+        "note": "Spanish: sube el volumen"
+      },
+      {
+        "from": "^(?:baja(?: el)? volumen|baja) (?:un poco|un poquito)$",
+        "to": "volume down a bit",
+        "note": "Spanish: baja un poco"
+      },
+      {
+        "from": "^(?:baja(?: el)? volumen|baja) mucho$",
+        "to": "volume down a lot",
+        "note": "Spanish: baja mucho"
+      },
+      {
+        "from": "^(?:baja(?: el)? volumen|menos volumen|m[aá]s bajo|baja)$",
+        "to": "volume down",
+        "note": "Spanish: baja el volumen"
+      },
+      {
+        "from": "^(?:pon |sube |baja )?(?:el )?volumen (?:al?|en) ",
+        "to": "volume ",
+        "note": "Spanish: volumen al veinte"
+      },
+      {
+        "from": "^(?:desde el principio|empieza de nuevo|vuelve al principio|desde el inicio|emp[ií]ezalo de nuevo)$",
+        "to": "start over",
+        "note": "Spanish: desde el principio"
+      },
+      {
+        "from": "^(?:qu[eé] (?:ha|han|has) dicho|qu[eé] dijo|qu[eé] dijeron|rep[ií]te(?:lo)?|no lo he o[ií]do)$",
+        "to": "what did they say",
+        "note": "Spanish: ¿qué ha dicho?"
+      },
+      {
+        "from": "^(?:qu[eé] estaba(?:mos)? viendo|qu[eé] (?:he|hemos) estado viendo)$",
+        "to": "what was i watching",
+        "note": "Spanish: ¿qué estaba viendo?"
+      },
+      {
+        "from": "^(?:qu[eé] hay de nuevo|qu[eé] hay nuevo|novedades|hay algo nuevo|hay (?:cap[ií]tulo|episodio)s nuevos|(?:cap[ií]tulo|episodio)s nuevos)$",
+        "to": "what's new",
+        "note": "Spanish: ¿qué hay de nuevo?"
+      },
+      {
+        "from": "^(?:pel[ií]culas nuevas|qu[eé] pel[ií]culas nuevas hay|estrenos|[uú]ltimas pel[ií]culas)$",
+        "to": "new movies",
+        "note": "Spanish: películas nuevas"
+      },
+      {
+        "from": "^(?:salta|s[aá]ltate|quita) (?:la )?(?:intro|introducci[oó]n|cabecera|sinton[ií]a)$",
+        "to": "skip the intro",
+        "note": "Spanish: salta la intro"
+      },
+      {
+        "from": "^(?:salta|s[aá]ltate|quita) (?:el )?resumen$",
+        "to": "skip the recap",
+        "note": "Spanish: salta el resumen"
+      },
+      {
+        "from": "^(?:salta|s[aá]ltate|quita) (?:los )?cr[eé]ditos$",
+        "to": "skip the credits",
+        "note": "Spanish: salta los créditos"
+      },
+      {
+        "from": "^(?:a[nñ]ade|guarda|a[nñ][aá]delo|gu[aá]rdalo) (?:a|en) (?:mi |la )?(?:biblioteca|lista)$",
+        "to": "add this to my library",
+        "note": "Spanish: añádelo a mi biblioteca"
+      },
+      {
+        "from": "^(?:m[aá]rcalo|marca|ponlo) como no visto$",
+        "to": "mark as unwatched",
+        "note": "Spanish: márcalo como no visto"
+      },
+      {
+        "from": "^(?:m[aá]rcalo|marca|ponlo) como visto$|^ya lo he visto$",
+        "to": "mark as watched",
+        "note": "Spanish: márcalo como visto"
+      },
+      {
+        "from": "^(?:activa|pon|enciende) (?:el )?modo marat[oó]n$",
+        "to": "binge mode on",
+        "note": "Spanish: activa el modo maratón"
+      },
+      {
+        "from": "^(?:desactiva|quita|apaga) (?:el )?modo marat[oó]n$",
+        "to": "binge mode off",
+        "note": "Spanish: desactiva el modo maratón"
+      },
+      {
+        "from": "^(?:quita|desactiva|sin)(?: los)? subt[ií]tulos$",
+        "to": "subtitles off",
+        "note": "Spanish: quita los subtítulos"
+      },
+      {
+        "from": "^(?:pon|activa)(?: los)? subt[ií]tulos$",
+        "to": "subtitles on",
+        "note": "Spanish: pon subtítulos"
+      },
+      {
+        "from": "^(?:pon |activa )?(?:los )?subt[ií]tulos en ",
+        "to": "subtitles in ",
+        "note": "Spanish: subtítulos en inglés"
+      },
+      {
+        "from": "^(?:audio|idioma) (?:en )?original$|^versi[oó]n original$",
+        "to": "original audio",
+        "note": "Spanish: versión original"
+      },
+      {
+        "from": "^(?:p[oó]n(?:lo|la)|c[aá]mbia(?:lo|la)|cambia el (?:audio|idioma)|audio) (?:en|a) ",
+        "to": "audio in ",
+        "note": "Spanish: ponlo en inglés"
+      },
+      {
+        "from": "^el primero(?: de la lista)?$",
+        "to": "the first one",
+        "note": "Spanish: el primero"
+      },
+      {
+        "from": "^el segundo(?: de la lista)?$",
+        "to": "the second one",
+        "note": "Spanish: el segundo"
+      },
+      {
+        "from": "^el tercero(?: de la lista)?$",
+        "to": "the third one",
+        "note": "Spanish: el tercero"
+      },
+      {
+        "from": "^el cuarto(?: de la lista)?$",
+        "to": "the fourth one",
+        "note": "Spanish: el cuarto"
+      },
+      {
+        "from": "^el quinto(?: de la lista)?$",
+        "to": "the fifth one",
+        "note": "Spanish: el quinto"
+      },
+      {
+        "from": "^el sexto(?: de la lista)?$",
+        "to": "the sixth one",
+        "note": "Spanish: el sexto"
+      },
+      {
+        "from": "^(?:apaga(?: la (?:tele|tv|televisi[oó]n))?) (?:despu[eé]s de|al (?:acabar|terminar)) (?:este|el) (?:cap[ií]tulo|episodio)$",
+        "to": "turn off after this episode",
+        "note": "Spanish: apaga la tele después de este capítulo"
+      },
+      {
+        "from": "^para (?:despu[eé]s de|al (?:acabar|terminar)) (?:este|el) (?:cap[ií]tulo|episodio)$",
+        "to": "stop after this episode",
+        "note": "Spanish: para después de este capítulo"
+      },
+      {
+        "from": "^(?:apaga(?: la (?:tele|tv|televisi[oó]n))?|ap[aá]gate) (?:en|dentro de) ",
+        "to": "turn off in ",
+        "note": "Spanish: apaga la tele en media hora"
+      },
+      {
+        "from": "^para (?:en|dentro de) ",
+        "to": "stop in ",
+        "note": "Spanish: para en veinte minutos"
+      },
+      {
+        "from": "^(?:cancela|quita) (?:el )?temporizador$",
+        "to": "cancel the sleep timer",
+        "note": "Spanish: cancela el temporizador"
+      },
+      {
+        "from": "^(?:adelanta|avanza)\\b",
+        "to": "skip forward",
+        "note": "Spanish: adelanta treinta segundos"
+      },
+      {
+        "from": "^(?:atrasa|retrocede|rebobina|vuelve atr[aá]s|echa atr[aá]s)\\b",
+        "to": "go back",
+        "note": "Spanish: atrasa diez segundos"
+      },
+      {
+        "from": "^(?:ve|vete|ir|salta|pasa) al minuto\\b",
+        "to": "go to minute",
+        "note": "Spanish: ve al minuto veinte"
+      },
+      {
+        "from": "^(?:ve|vete|ir|salta|pasa) a la mitad$",
+        "to": "go to the middle",
+        "note": "Spanish: ve a la mitad"
+      },
+      {
+        "from": "^(?:ve|vete|ir|salta|pasa|pon) (?:a la |al )(temporada|cap[ií]tulo|episodio)\\b",
+        "to": "go to \\1",
+        "note": "Spanish: ve a la temporada tres"
+      },
+      {
+        "from": "^(?:busca|buscar)\\s+(.+?)\\s+en\\s+youtube$",
+        "to": "\\1 on youtube",
+        "note": "Spanish: busca paella en youtube"
+      },
+      {
+        "from": "^(?:pon(?:me|nos)?|reproduce|quiero ver|queremos ver|vamos a ver|echa)\\s+(.+?)\\s+en\\s+youtube$",
+        "to": "\\1 on youtube",
+        "note": "Spanish: pon lofi en youtube"
+      },
+      {
+        "from": "^(?:pon(?:me|nos)?|mira|ver)?\\s*(.+?)\\s+en\\s+twitch$",
+        "to": "\\1 on twitch",
+        "note": "Spanish: ibai en twitch"
+      },
+      {
+        "from": "^(?:abre|abrir|ve a|vete a|cambia a)\\s+",
+        "to": "open ",
+        "note": "Spanish: abre youtube"
+      },
+      {
+        "from": "^(?:sigue|contin[uú]a)(?: viendo| con)\\s+",
+        "to": "continue ",
+        "note": "Spanish: sigue viendo the bear"
+      },
+      {
+        "from": "^(?:pon(?:me|nos)?|reproduce|quiero ver|queremos ver|vamos a ver|echa)\\s+",
+        "to": "play ",
+        "note": "Spanish: pon la casa de papel"
+      },
+      {
+        "from": "\\b(?:desde el principio|desde el inicio)\\b",
+        "to": "from the start",
+        "note": "Spanish: desde el principio"
+      },
+      {
+        "from": "\\btemporada\\b",
+        "to": "season",
+        "note": "Spanish: temporada"
+      },
+      {
+        "from": "\\b(?:cap[ií]tulo|episodio)\\b",
+        "to": "episode",
+        "note": "Spanish: capítulo, episodio"
+      },
+      {
+        "from": "\\bn[uú]mero\\b",
+        "to": "number",
+        "note": "Spanish: número"
+      },
+      {
+        "from": "\\bmedia hora\\b",
+        "to": "half an hour",
+        "note": "Spanish: media hora"
+      },
+      {
+        "from": "\\bsegundos\\b",
+        "to": "seconds",
+        "note": "Spanish: segundos"
+      },
+      {
+        "from": "\\bminutos?\\b",
+        "to": "minutes",
+        "note": "Spanish: minutos"
+      },
+      {
+        "from": "\\bhoras?\\b",
+        "to": "hours",
+        "note": "Spanish: horas"
+      },
+      {
+        "from": "\\by medio\\b",
+        "to": "and a half",
+        "note": "Spanish: y medio"
+      },
+      {
+        "from": "\\bsimplificado\\b",
+        "to": "simplified",
+        "note": "Spanish: chino simplificado"
+      },
+      {
+        "from": "\\btradicional\\b",
+        "to": "traditional",
+        "note": "Spanish: chino tradicional"
       }
     ]
   },
@@ -578,7 +923,7 @@
         "type": "tracks",
         "subtitles": "{lang|language!}"
       },
-      "match": "^(?:(?:turn on|switch to|put on|put|show|use|change to|set|i want|give me)\\s+)?(?:the\\s+)?(?P<lang>(?:simplified |traditional )?[a-z]+(?: (?:simplified|traditional))?)\\s+(?:subtitles|subtitle|subs|captions)(?:\\s+on)?$"
+      "match": "^(?:(?:turn on|switch to|put on|put|show|use|change to|set|i want|give me)\\s+)?(?:the\\s+)?(?P<lang>(?:simplified |traditional )?[a-zà-ÿ]+(?: (?:simplified|traditional))?)\\s+(?:subtitles|subtitle|subs|captions)(?:\\s+on)?$"
     },
     {
       "id": "subtitles_in",
@@ -587,7 +932,7 @@
         "type": "tracks",
         "subtitles": "{lang|language!}"
       },
-      "match": "^(?:(?:turn on|switch|change|put|set)\\s+)?(?:the\\s+)?(?:subtitles|subtitle|subs|captions)\\s+(?:in|to|into)\\s+(?P<lang>(?:simplified |traditional )?[a-z]+(?: (?:simplified|traditional))?)$"
+      "match": "^(?:(?:turn on|switch|change|put|set)\\s+)?(?:the\\s+)?(?:subtitles|subtitle|subs|captions)\\s+(?:in|to|into)\\s+(?P<lang>(?:simplified |traditional )?[a-zà-ÿ]+(?: (?:simplified|traditional))?)$"
     },
     {
       "id": "audio_original",
@@ -605,7 +950,7 @@
         "type": "tracks",
         "audio": "{lang|language!}"
       },
-      "match": "^(?:(?:switch to|change to|put on|put|use|set|i want)\\s+)?(?:the\\s+)?(?P<lang>(?:simplified |traditional )?[a-z]+(?: (?:simplified|traditional))?)\\s+(?:audio|dub|dubbing|voices|soundtrack|audio track)$"
+      "match": "^(?:(?:switch to|change to|put on|put|use|set|i want)\\s+)?(?:the\\s+)?(?P<lang>(?:simplified |traditional )?[a-zà-ÿ]+(?: (?:simplified|traditional))?)\\s+(?:audio|dub|dubbing|voices|soundtrack|audio track)$"
     },
     {
       "id": "audio_in",
@@ -614,7 +959,7 @@
         "type": "tracks",
         "audio": "{lang|language!}"
       },
-      "match": "^(?:(?:play|put|switch|change|watch)(?: it)?|audio|sound)\\s+(?:in|to|into)\\s+(?P<lang>(?:simplified |traditional )?[a-z]+(?: (?:simplified|traditional))?)$"
+      "match": "^(?:(?:play|put|switch|change|watch)(?: it)?|audio|sound)\\s+(?:in|to|into)\\s+(?P<lang>(?:simplified |traditional )?[a-zà-ÿ]+(?: (?:simplified|traditional))?)$"
     },
     {
       "id": "what_did_they_say",
@@ -625,6 +970,15 @@
       },
       "match": "^what (?:did|was|were) (?:he|she|they|it|that|you) (?:just )?(?:say|saying)$",
       "note": "back 10 seconds with subtitles on for a moment"
+    },
+    {
+      "id": "thats_wrong",
+      "stage": "grammar",
+      "do": {
+        "type": "wrong"
+      },
+      "match": "^(?:no[, ]+)?(?:that'?s|that is|it'?s|this is|that was) (?:wrong|not (?:right|it|what i (?:said|meant|asked(?: for)?|wanted)))$|^(?:wrong|you got it wrong|you got that wrong|not that(?: one)?)$",
+      "note": "marks the last command, to teach it in the panel (Activity)"
     },
     {
       "id": "show_recent",
@@ -682,7 +1036,7 @@
         "type": "pick",
         "number": "{n|number!}"
       },
-      "match": "^(?P<n>one|two|three|four|five|six|seven|eight|nine|ten|[1-9]|1[0-9]|20)$",
+      "match": "^(?P<n>one|two|three|four|five|six|seven|eight|nine|ten|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|[1-9]|1[0-9]|20)$",
       "note": "a number on its own; does nothing without a list on screen"
     },
     {

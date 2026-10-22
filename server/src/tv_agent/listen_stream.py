@@ -97,7 +97,7 @@ def ready(action, via: str, text: str, stage: int) -> bool:
     if via not in ("phrase", "pattern") or TRAILING_NUMBER.search(text):
         return False
     if action.type in ("volume", "home", "next_episode", "open_in_stremio", "open_app", "transport", "show_list",
-                       "pick", "library", "skip", "auto_skip"):
+                       "pick", "library", "skip", "auto_skip", "wrong"):
         return True
     return action.type == "play_title"   # with an episode (title-only waited above); continue_watching waits
 

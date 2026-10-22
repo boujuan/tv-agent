@@ -1,6 +1,7 @@
 """The activity log: one JSON line per command (what was heard, how it was decided, what happened), in
 ~/.local/share/tv-agent/activity.jsonl (mode 600). The panel shows, exports, imports and erases it; both sides
-lock the file while writing. Nothing is written when log_transcripts is off."""
+lock the file while writing. Nothing is written when log_transcripts is off. "That's wrong" marks the last entry
+(`wrong`); the panel lists those and teaches the right action (learned.json)."""
 import fcntl
 import json
 import os
@@ -69,3 +70,24 @@ def merge(new: list[dict], path: Path = FILE) -> int:
 
 def erase(path: Path = FILE):
     _rewrite([], path)
+
+
+def mark(t: float, wrong: bool, path: Path = FILE, heard: str | None = None, **extra) -> dict | None:
+    """Mark the entry at time t (with these words, when given) as wrong or not, with any extra fields (e.g. what it
+    was taught as)."""
+    entries = read(path)
+    for e in entries:
+        if abs(float(e["t"]) - t) < 0.001 and (heard is None or e.get("heard") == heard):
+            e["wrong"] = wrong
+            e.update(extra)
+            _rewrite(entries, path)
+            return e
+    return None
+
+
+def mark_last_wrong(path: Path = FILE) -> dict | None:
+    """"That's wrong": the newest command before it is marked."""
+    for e in read(path, limit=5):
+        if e.get("type") != "wrong":
+            return mark(float(e["t"]), True, path, heard=e.get("heard"))
+    return None
