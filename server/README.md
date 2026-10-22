@@ -73,8 +73,13 @@ understood) but doesn't get the new phrases, patterns and intents: in the panel,
 your own changes.
 Every decision records the path it took, which the panel draws.
 
-Stream choice (`stremio/streams.py`): your addons' order (AIOStreams already sorts to your taste), but only direct
-debrid links, cached, ≤ `max_height`, ≤ `max_mbps`, no cam rips; a one-byte request checks the link.
+Stream choice (`stremio/streams.py`): only direct debrid links, cached, ≤ `max_height`, ≤ `max_mbps`, no cam rips.
+Of those: the file has the audio the title should play in (English, or Spanish for Spanish-made titles), then the
+highest resolution, then AIOStreams' own score for the release (its ★: release-group tier, source, HDR, audio, your
+ranked expressions), then already in your debrid library, then the higher bitrate. AIOStreams sends those facts as
+structured `streamData` to an AIOStreams-compatible client, which the agent identifies as; other addons are read
+from their text. A one-byte request checks the link, following redirects by hand so that AIOStreams' "can't play
+this" videos (uncached after all, failed, rate-limited) count as failures.
 
 The model never gets a shell. Actions are a closed, validated set (`actions.py`); every TV command goes through
 `tv/adb.py`, which quotes each argument; stream URLs reach Kodi as JSON, never through a shell; link values are
@@ -117,7 +122,7 @@ the daemon refuses to start otherwise). For services across logouts: `loginctl e
 | See what it heard and did | `journalctl --user -u tv-agent -f`, or the panel's Activity tab |
 | Try a sentence without the remote | `tv-agent say "play the bear season 3 episode 2"` (`--dry-run` only prints what it would do) |
 | Run one action | `tv-agent do '{"type":"volume","op":"set","amount":15}'` |
-| See the streams it would choose from | `tv-agent streams "the bear" --season 3 --episode 2` (names only, never links) |
+| See the streams it would choose from, best first | `tv-agent streams "the bear" --season 3 --episode 2` (resolution, quality, HDR, languages, bitrate, cached; never links) |
 | Check after changing the rules | `tv-agent eval`, `tv-agent eval --file eval/commands.jsonl --split test`, `uv run pytest` |
 | Run a command on the TV | `tv-agent tv shell dumpsys media_session` |
 | Re-pair the TV app (new token or address) | `tv-agent tv pair` |

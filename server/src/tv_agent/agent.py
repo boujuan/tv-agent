@@ -135,8 +135,9 @@ class Agent:
     async def streams_for(self, kind: str, video_id: str, meta: dict | None = None) -> list[streams.Stream]:
         meta = meta or {}
         found = await streams.fetch(self.http, await self.addons(), kind, video_id)
-        native = self.track_plan(meta).subtitles is None
-        return streams.rank(found, self.cfg.max_height, self.cfg.max_mbps, _runtime_min(meta), native)
+        plan = self.track_plan(meta)
+        return streams.rank(found, self.cfg.max_height, self.cfg.max_mbps, _runtime_min(meta),
+                            plan.subtitles is None, plan.audio)
 
     async def apply_tracks(self, plan: languages.TrackPlan, wait_s: float = 12.0) -> str:
         """Once Kodi knows the file's tracks, switch audio and subtitles per the plan. Returns a short note."""

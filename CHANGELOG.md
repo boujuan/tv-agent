@@ -33,6 +33,11 @@ panel's Decisions tab, then redo your changes.
   "rewind to the beginning"; "skip back …" and "skip to …" no longer read as skipping forward; "the tenth episode
   of season five" and "Next of Kin" are read correctly.
 
+- Stream choice: the right audio language first, then resolution, then AIOStreams' score for the release (its ★),
+  then already in your debrid library, then bitrate. The facts come from AIOStreams' structured `streamData`
+  instead of being guessed from its names. The link check no longer mistakes AIOStreams' "can't play" redirect
+  videos for a working file.
+
 ### Added
 - `eval/commands.jsonl`: 654 generated, labelled commands (476 for tuning, 178 held out) from
   `eval/build_commands.py`; `tv-agent eval --file … --split dev|test` scores them by category. Current rules:

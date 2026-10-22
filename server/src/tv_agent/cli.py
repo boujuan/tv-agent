@@ -92,7 +92,11 @@ async def _streams(title, season, episode) -> int:
         meta = await cinemeta.meta(agent.http, m.type, m.id)
         print(f"{m.label} -> {video} ({meta.get('country')}; tracks {agent.track_plan(meta)})")
         for s in await agent.streams_for(m.type, video, meta):
-            print(f"[{s.score:7.1f}] {s.filename or s.name!r} {s.why_dropped}")
+            rate = s.mbps(None)
+            facts = " ".join(x for x in (f"{s.height}p" if s.height else "", s.quality, "/".join(s.visual),
+                                         "/".join(s.languages), f"{rate:.0f} Mbit/s" if rate else "",
+                                         "library" if s.library else ("cached" if s.cached else "")) if x)
+            print(f"[{s.score:7.1f}] {s.filename or s.name!r}  {facts}  {s.why_dropped}")
         return 0
     finally:
         await agent.close()

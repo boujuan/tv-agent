@@ -124,6 +124,56 @@ def test_stream_parse_and_rank():
     assert {s.why_dropped for s in ranked[2:]} == {"not cached", "cam/ts"}
 
 
+def _aio(url, resolution, score, languages, cached=True, size=3_200_000_000, quality="WEB-DL", visual=()):
+    return {"name": "x", "description": "y", "url": url, "behaviorHints": {"filename": f"{url}.mkv"},
+            "streamData": {"type": "debrid", "service": {"id": "premiumize", "cached": cached}, "size": size,
+                           "duration": 1_630_000, "streamExpressionScore": score,
+                           "parsedFile": {"resolution": resolution, "quality": quality, "visualTags": list(visual),
+                                          "languages": languages}}}
+
+
+def test_streams_ranked_by_language_resolution_score_and_bitrate():
+    raw = [
+        _aio("https://debrid/italian-only", "2160p", 9000, ["Italian"]),
+        _aio("https://debrid/1080-best", "1080p", 5000, ["English"]),
+        _aio("https://debrid/4k-ok", "2160p", 3000, ["English"]),
+        _aio("https://debrid/4k-better", "2160p", 3600, ["French", "English"]),
+        _aio("https://debrid/uncached", "2160p", 9999, ["English"], cached=False),
+        _aio("https://debrid/too-fast", "2160p", 9999, ["English"], size=60_000_000_000),   # ~290 Mbit/s
+        _aio("https://debrid/cam", "1080p", 9999, ["English"], quality="CAM"),
+        {"name": "error", "externalUrl": "https://aio/error", "streamData": {"type": "error"}},
+    ]
+    parsed = [s for i, r in enumerate(raw) if (s := streams.parse("AIOStreams", r, i))]
+    ranked = streams.rank(parsed, 2160, 60, 27, audio="eng")
+    assert [s.url for s in ranked[:4]] == ["https://debrid/4k-better", "https://debrid/4k-ok",
+                                           "https://debrid/1080-best", "https://debrid/italian-only"]
+    assert {s.why_dropped.split()[-1] for s in ranked[4:]} == {"cached", "Mbit/s", "cam/ts"}
+    parsed += [streams.parse("AIOStreams", _aio("https://debrid/castellano", "1080p", 100, ["Spanish"]), 9),
+               streams.parse("AIOStreams", _aio("https://debrid/latino", "2160p", 100, ["Latino"]), 10)]
+    spanish = streams.rank(parsed, 2160, 60, 27, native_original=True, audio="spa")
+    assert [s.url for s in spanish[:2]] == ["https://debrid/castellano", "https://debrid/latino"]   # Spanish-made
+
+
+def test_playable_follows_redirects_but_not_to_a_problem_video():
+    import asyncio
+    import httpx
+
+    def handler(request):
+        if request.url.path == "/play/ok":
+            return httpx.Response(307, headers={"location": "https://cdn.example/file.mkv"})
+        if request.url.path == "/play/uncached":
+            return httpx.Response(307, headers={"location": "/static/downloading.mp4"})
+        return httpx.Response(206, headers={"content-type": "application/force-download"}, content=b"\0")
+
+    async def check(path):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            s = streams.Stream("AIO", f"https://aio.example{path}", "n", "d", "f", 0)
+            return await streams.playable(http, s)
+
+    assert asyncio.run(check("/play/ok")) is True
+    assert asyncio.run(check("/play/uncached")) is False
+
+
 def test_progress_update_marks_watched_at_90_percent():
     np = NowPlaying("tt14452776", "series", "tt14452776:3:2", "The Bear")
     item = updated(None, np, 950_000, 1_000_000, 60_000, {})
