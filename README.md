@@ -29,7 +29,7 @@ CachyOS (KDE Plasma). Anything it doesn't understand does nothing ("Didn't get t
 | [`panel/`](panel/README.md) | Desktop app with a tray icon: status, services, resource use, activity, decision rules, settings, laptop mic | Linux (Qt 6 / PySide6) | `panel-vX.Y.Z` |
 | [`android/`](android/README.md) | The TV app the mic button opens (records, sends, shows the reply) | Android TV 14 (API 34) | `android-vX.Y.Z` |
 | [`packaging/`](packaging/README.md) | Package recipes (AUR drafts for now) | | |
-| [`docs/`](docs/phase0/README.md) | Phase 0 measurements (mic path, models) | | |
+| `docs/` | [Phase 0](docs/phase0/README.md) measurements (mic path, models); [research and decisions, 2026-10-22](docs/research-2026-10-22.md) (players, decision model, speech-to-text, add-on data, roadmap) | | |
 
 They talk over one HTTP API (the server's), so each can be released on its own. Versions and tags:
 [RELEASING.md](RELEASING.md); what changed: [CHANGELOG.md](CHANGELOG.md).
