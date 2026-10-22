@@ -13,12 +13,16 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
                                QPushButton, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget,
                                QToolButton, QVBoxLayout, QWidget)
 
-from .common import AMBER, BLUE, GREEN, GREY, RED, ApiError, api, card, dim, systemctl
+from .common import AMBER, BLUE, GREEN, GREY, RED, ApiError, api, card, dim, openrouter_check, systemctl
 
 # ---------------------------------------------------------------- the diagram
 
 LLM_MODELS = ["deepseek/deepseek-v4.1-flash-1017", "google/gemini-3.5-flash-lite", "google/gemini-3.1-flash-lite",
-              "anthropic/claude-haiku-5.5", "openai/gpt-5.6-luna", "z-ai/glm-5.3-flash"]
+              "google/gemini-2.5-flash-lite", "reflection/beam-1.0-501b-a23b", "anthropic/claude-haiku-5.5",
+              "openai/gpt-5.6-luna", "z-ai/glm-5.3-flash"]
+# The d1 step's hosted model: Liquid's own API, or any of OpenRouter's decision models
+DECISION_MODELS = ["d1", "d1-ultra", "liquid/d1", "liquid/d1-ultra", "typesafe/jev-1.14", "cloudflare/clef",
+                   "cloudflare/clef-flash", "nace-ai/drex-v2.0", "perplexity/pplx-decider-v1.2", "inception/mercury-decide"]
 
 FIXED = {"input": "Your words", "stt": "Speech to text", "clean": "Clean-up", "unclear": "Didn't get that",
          "action": "Action", "tv": "TV"}
@@ -569,6 +573,7 @@ class Decisions(QWidget):
         self.diagram.step_toggled.connect(self.step_toggled)
         self.diagram.where_changed.connect(self.where_changed)
         self.pipeline: dict = {}
+        self._checked: dict[str, str] = {}             # the model ids last checked with OpenRouter
         tl.addWidget(self.diagram, 1)
         trow = QHBoxLayout()
         self.test = QLineEdit()
@@ -673,6 +678,8 @@ class Decisions(QWidget):
         self.llm_private.setToolTip("Zero data retention providers only: fewer to choose from, often slower")
         self.llm_private.clicked.connect(lambda _c: self.llm_changed())
         lf.addRow("Model", self.llm_model)
+        self.llm_check = dim("")
+        lf.addRow("", self.llm_check)
         lf.addRow("Reasoning", self.llm_reasoning)
         lf.addRow("", self.llm_private)
         ll.addLayout(lf)
@@ -706,12 +713,15 @@ class Decisions(QWidget):
         self.cands.valueChanged.connect(self.mark_dirty)
         self.fallback.currentIndexChanged.connect(self.mark_dirty)
         self.hosted_model = QComboBox()
-        self.hosted_model.addItem("d1", "d1")
-        self.hosted_model.addItem("d1-ultra", "d1-ultra")
-        self.hosted_model.setToolTip("Liquid's hosted model, when the d1 step uses it (needs a Liquid key: Settings)")
-        self.hosted_model.activated.connect(
-            lambda _i: self.set_pipeline({"hosted_d1_model": self.hosted_model.currentData()}))
-        mf.addRow("Liquid's hosted model", self.hosted_model)
+        self.hosted_model.setEditable(True)            # "d1", "d1-ultra" (Liquid's API) or an OpenRouter decision model
+        self.hosted_model.addItems(DECISION_MODELS)
+        self.hosted_model.setToolTip("d1 or d1-ultra through Liquid's API (Liquid key), or any of OpenRouter's "
+                                     "decision models by id (OpenRouter key)")
+        self.hosted_model.activated.connect(lambda _i: self.hosted_changed())
+        self.hosted_model.lineEdit().editingFinished.connect(self.hosted_changed)
+        mf.addRow("Hosted decision model", self.hosted_model)
+        self.hosted_check = dim("")
+        mf.addRow("", self.hosted_check)
         mf.addRow("Question d1 answers", self.question)
         mf.addRow("Act only above confidence", self.min_conf)
         mf.addRow("When no model answers", self.fallback)
@@ -982,10 +992,33 @@ class Decisions(QWidget):
         self.llm_model.setCurrentText(res["llm_model"])
         self.llm_reasoning.setCurrentIndex(max(0, self.llm_reasoning.findData(res["llm_reasoning"])))
         self.llm_private.setChecked(res["llm_private"])
-        self.hosted_model.setCurrentIndex(max(0, self.hosted_model.findData(res["hosted_d1_model"])))
+        self.hosted_model.setCurrentText(res["hosted_d1_model"])
         self.llm_note.setText("OpenRouter key set." if res["keys"]["openrouter"] else
                               f"<span style='color:{AMBER}'>No OpenRouter key yet: Settings › Set OpenRouter key."
                               "</span>")
+        self.check_models(res["llm_model"], res["hosted_d1_model"])
+
+    def check_models(self, llm: str, hosted: str):
+        """Whether OpenRouter has the typed models in a form the agent can use, under each field."""
+        def show(label, ok_text):
+            ok, text = ok_text
+            label.setText(f"<span style='color:{GREEN if ok else AMBER}'>{'✓' if ok else '✗'} {text}</span>")
+        if self._checked.get("llm") != llm:
+            self._checked["llm"] = llm
+            self.llm_check.setText("Checking with OpenRouter…")
+            self.panel.bg.run(lambda: openrouter_check(llm, "llm"), lambda r, e: show(self.llm_check, r or (False, str(e))))
+        if self._checked.get("hosted") != hosted:
+            self._checked["hosted"] = hosted
+            if "/" not in hosted:
+                self.hosted_check.setText("Liquid's own API (the Liquid key, Settings)")
+            else:
+                self.panel.bg.run(lambda: openrouter_check(hosted, "decision"),
+                                  lambda r, e: show(self.hosted_check, r or (False, str(e))))
+
+    def hosted_changed(self):
+        model = self.hosted_model.currentText().strip()
+        if model and model != self.pipeline.get("hosted_d1_model"):
+            self.set_pipeline({"hosted_d1_model": model})
 
     def set_pipeline(self, change: dict, then=None):
         def done(res, err):

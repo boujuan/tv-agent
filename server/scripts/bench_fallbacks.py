@@ -9,8 +9,10 @@ with --sample N, N rows per category of eval/commands.jsonl.
 Paths:
   rules              clean-up, fixed phrases, patterns and two-command splits only
   rules+d1           then the local d1-3B
-  rules+hosted:M     then Liquid's hosted d1 M (d1, d1-ultra)
-  hosted:M, d1       a d1 on its own on the cleaned-up sentence (no rules)
+  rules+hosted:M     then the hosted decision model M: d1 or d1-ultra through Liquid's API, or any OpenRouter
+                     decision model by id (liquid/d1, typesafe/jev-1.14, cloudflare/clef…)
+  hosted:M, d1       a decision model on its own on the cleaned-up sentence (no rules); "top-1" also counts
+                     its first choice when it wasn't sure enough to act
   llm:MODEL          the LLM on its own (MODEL@effort sets its reasoning effort; MODEL@ sends none)
   pipeline:MODEL     the rules, then that LLM (worked out from the two above: the rules' answer when they have one)
 
@@ -94,7 +96,8 @@ async def main():
     p.add_argument("--sets", default="hard,holdout,voice")
     p.add_argument("--sample", type=int, default=0)
     p.add_argument("--models", default="", help="comma-separated OpenRouter ids, each MODEL@reasoning")
-    p.add_argument("--hosted", default="", help="Liquid's hosted d1 models to try: d1,d1-ultra")
+    p.add_argument("--hosted", default="", help="hosted decision models: d1,d1-ultra (Liquid's API) or OpenRouter "
+                                                "ids (typesafe/jev-1.14,cloudflare/clef,…)")
     p.add_argument("--local", action="store_true", help="the local d1-3B too")
     p.add_argument("--out")
     args = p.parse_args()
@@ -107,36 +110,51 @@ async def main():
     options = {k: v["describe"] for k, v in rules.intents.items()}
     results = [{"text": r["text"], "lang": r["lang"], "set": r["set"], "expect": r["expect"]} for r in data]
 
-    def record(i: int, path: str, action: A.Action, via: str, ms: float, cost: float | None = None):
+    def record(i: int, path: str, action: A.Action, via: str, ms: float, cost: float | None = None,
+               top1: A.Action | None = None):
         kind_ok, full_ok = judge(action, data[i]["expect"])
         results[i][path] = {"ok": full_ok, "kind": kind_ok, "ms": round(ms), "via": via, "cost": cost,
                             "got": {k: v for k, v in action.model_dump().items() if v not in (None, False, "", 0)}}
+        if top1 is not None:
+            results[i][path]["top1"] = judge(top1, data[i]["expect"])[1]
+
+    def d1_cost(d1: D1, model: str, text: str) -> float | None:
+        if (d1.last_usage or {}).get("cost") is not None:
+            return d1.last_usage["cost"]                  # OpenRouter reports it
+        return len(json.dumps({"s": text, "o": options})) / 4 * LIQUID_PRICE[model] if model in LIQUID_PRICE else None
 
     async def run_router(path: str, router: Router):
         for i, r in enumerate(data):
             t = time.perf_counter()
+            if isinstance(router.d1, D1):
+                router.d1.last_usage = {}
             d = await router.decide(r["text"])
             cost = None
             if path.startswith("rules+hosted:") and d.via == "d1":
-                model = path.split(":", 1)[1]
-                cost = len(json.dumps({"s": normalize(r["text"], rules), "o": options})) / 4 * LIQUID_PRICE[model]
+                cost = d1_cost(router.d1, path.split(":", 1)[1], normalize(r["text"], rules))
             record(i, path, d.action, d.via, (time.perf_counter() - t) * 1000, cost)
 
     async def run_d1(path: str, d1: D1, model: str):
         for i, r in enumerate(data):
-            t = time.perf_counter()
             text = normalize(r["text"], rules)
-            try:
-                pick = await d1.choice(text, rules.question, options)
-                top = sorted(pick.probabilities.values(), reverse=True)
-                ratio = top[0] / max(top[1], 1e-9) if len(top) > 1 else float("inf")
-                ok = pick.key != "none" and pick.confidence >= rules.min_confidence and ratio >= rules.min_ratio
-                action = (from_intent(pick.key, text, rules) if ok else None) or A.Unclear(heard=r["text"])
-                via = path
-            except (httpx.HTTPError, KeyError, ValueError) as e:
-                action, via = A.Unclear(heard=r["text"]), f"error {type(e).__name__}"
-            cost = len(json.dumps({"s": text, "o": options})) / 4 * LIQUID_PRICE.get(model, 0)
-            record(i, path, action, via, (time.perf_counter() - t) * 1000, cost)
+            top1 = None
+            for attempt in range(3):                     # a rate limit or a hiccup: twice more, a second apart
+                t = time.perf_counter()
+                d1.last_usage = {}
+                try:
+                    pick = await d1.choice(text, rules.question, options)
+                    top = sorted(pick.probabilities.values(), reverse=True)
+                    ratio = top[0] / max(top[1], 1e-9) if len(top) > 1 else float("inf")
+                    ok = pick.key != "none" and pick.confidence >= rules.min_confidence and ratio >= rules.min_ratio
+                    top1 = (from_intent(pick.key, text, rules) if pick.key != "none" else None) or A.Unclear(heard=text)
+                    action = (top1 if ok else None) or A.Unclear(heard=r["text"])
+                    via = path
+                    break
+                except Exception as e:                   # one model's failure doesn't stop the others
+                    action, via = A.Unclear(heard=r["text"]), f"error {type(e).__name__}"
+                    await asyncio.sleep(1)
+            record(i, path, action, via, (time.perf_counter() - t) * 1000, d1_cost(d1, model, text), top1)
+            print(f"\r{path[:40]:40} {i + 1}/{len(data)}", end="", file=sys.stderr, flush=True)
 
     async def run_llm(spec: str):
         model, _, reasoning = spec.partition("@")
@@ -157,11 +175,11 @@ async def main():
     if args.local:
         local = D1(http, cfg.d1_url, where="local")
         jobs += [run_router("rules+d1", Router(local, rules, off={"llm"})), run_d1("d1", local, "")]
-    key = cfg.secret("liquid_api_key")
+    key, or_key = cfg.secret("liquid_api_key"), cfg.secret("openrouter_api_key")
     for m in filter(None, args.hosted.split(",")):
-        hosted = D1(http, cfg.d1_url, key, m, where="hosted")
+        hosted = D1(http, cfg.d1_url, key, m, where="hosted", openrouter_key=or_key)
         jobs += [run_router(f"rules+hosted:{m}", Router(hosted, rules, off={"llm"})),
-                 run_d1(f"hosted:{m}", D1(http, cfg.d1_url, key, m, where="hosted"), m)]
+                 run_d1(f"hosted:{m}", D1(http, cfg.d1_url, key, m, where="hosted", openrouter_key=or_key), m)]
     models = [m for m in args.models.split(",") if m]
     jobs += [run_llm(spec) for spec in models]
     await asyncio.gather(*jobs)
@@ -184,8 +202,12 @@ async def main():
             or [0]
         costs = [x[path]["cost"] for x in subset if x[path].get("cost") is not None]
         per_1000 = f"${1000 * statistics.mean(costs):.3f}/1000 asked" if costs else ""
+        top1 = [x[path]["top1"] for x in subset if "top1" in x[path]]
+        top1 = f"  top-1 {100 * sum(top1) / len(top1):3.0f}%" if top1 else ""
+        errors = sum(str(x[path]["via"]).startswith("error") for x in subset)
+        errors = f"  {errors} errors" if errors else ""
         return (f"{ok:3}/{n} ({100 * ok / n:3.0f}%), kind {kind:3}/{n}, delay p50 {statistics.median(own):5.0f} ms "
-                f"p95 {own[max(0, math.ceil(0.95 * len(own)) - 1)]:5.0f} ms  {per_1000}")
+                f"p95 {own[max(0, math.ceil(0.95 * len(own)) - 1)]:5.0f} ms  {per_1000}{top1}{errors}")
 
     for set_name in [*args.sets.split(","), "sample"]:
         for lang in ("en", "es"):

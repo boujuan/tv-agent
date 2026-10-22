@@ -4,9 +4,11 @@ d1 doesn't write text: given a state and named options it returns probabilities 
 100-300 ms on the Radeon 780M for a short prompt). The agent uses it to pick an intent and to choose between
 candidate titles; it never sees or produces anything that reaches the TV directly.
 
-`where` picks which d1 answers: the local one, Liquid's hosted one (`tv-agent setup liquid`; `hosted_model` "d1" or
-"d1-ultra"), or one of them first and the other when the first doesn't answer (stopped, crashed, busy, offline).
-Liquid's terms let it use what it's sent for training: what you said, and the options.
+`where` picks which answers: the local d1, a hosted decision model, or one of them first and the other when the first
+doesn't answer (stopped, crashed, busy, offline). The hosted one (`hosted_model`) is Liquid's own API for "d1" or
+"d1-ultra" (`tv-agent setup liquid`), or any of OpenRouter's decision models by id ("typesafe/jev-1.14",
+"cloudflare/clef", with the OpenRouter key): they all take the same request (System One). Liquid's terms let it use
+what it's sent for training: what you said, and the options.
 """
 import logging
 from dataclasses import dataclass
@@ -15,6 +17,7 @@ import httpx
 
 log = logging.getLogger(__name__)
 HOSTED = "https://api.liquid.ai/decisions/v1/systemone"
+OPENROUTER = "https://openrouter.ai/api/alpha/decisions"
 WHERE = {"local-first": ("local", "hosted"), "hosted-first": ("hosted", "local"), "local": ("local",),
          "hosted": ("hosted",)}
 
@@ -33,30 +36,42 @@ class Choice:
 
 class D1:
     def __init__(self, http: httpx.AsyncClient, url: str, hosted_key: str | None = None, hosted_model: str = "d1",
-                 where: str = "local-first"):
+                 where: str = "local-first", openrouter_key: str | None = None):
         self.http, self.url = http, url.rstrip("/") + "/v1/systemone"
         self.hosted_key, self.hosted_model, self.where = hosted_key, hosted_model, where
+        self.openrouter_key = openrouter_key
         self.last_source = "local"       # where the last answer came from: "local" or "hosted"
+        self.last_usage: dict = {}       # the hosted answer's tokens and cost (OpenRouter reports the cost)
+
+    def hosted(self) -> tuple[str, str] | None:
+        """(endpoint, key) of the hosted decision model, or None without its key."""
+        if "/" in self.hosted_model:
+            return (OPENROUTER, self.openrouter_key) if self.openrouter_key else None
+        return (HOSTED, self.hosted_key) if self.hosted_key else None
 
     def sources(self) -> tuple[str, ...]:
-        """The d1s to ask, in order (the hosted one only with a key)."""
-        return tuple(s for s in WHERE.get(self.where, WHERE["local-first"]) if s == "local" or self.hosted_key)
+        """The decision models to ask, in order (the hosted one only with its key)."""
+        return tuple(s for s in WHERE.get(self.where, WHERE["local-first"]) if s == "local" or self.hosted())
 
     async def ask(self, state, questions: dict, timeout: float = 3.0) -> dict:
         body = {"state": state, "questions": questions}
         sources = self.sources()
         if not sources:
-            raise httpx.TransportError("no d1 to ask: the hosted one needs a Liquid key (tv-agent setup liquid)")
+            raise httpx.TransportError("no decision model to ask: the hosted one needs its key "
+                                       "(tv-agent setup liquid, or openrouter for an OpenRouter model)")
         for i, source in enumerate(sources):
             try:
                 if source == "local":
                     r = await self.http.post(self.url, json=body, timeout=timeout)
                 else:
-                    r = await self.http.post(HOSTED, json={**body, "model": self.hosted_model}, timeout=timeout,
-                                             headers={"Authorization": f"Bearer {self.hosted_key}"})
+                    endpoint, key = self.hosted()
+                    r = await self.http.post(endpoint, json={**body, "model": self.hosted_model}, timeout=timeout,
+                                             headers={"Authorization": f"Bearer {key}"})
                 r.raise_for_status()
                 self.last_source = source
-                return r.json()["answers"]
+                data = r.json()
+                self.last_usage = data.get("usage") or {}
+                return data["answers"]
             except (httpx.TransportError, httpx.HTTPStatusError) as e:
                 if i == len(sources) - 1:
                     raise

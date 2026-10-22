@@ -33,7 +33,7 @@ decide_steps = ["phrases", "patterns", "llm", "d1"]
 decide_off = []
 # Which d1 answers: "local-first", "hosted-first", "local" or "hosted" (Liquid's, with `tv-agent setup liquid`)
 d1_where = "local-first"
-hosted_d1_model = "d1"     # or "d1-ultra"
+hosted_d1_model = "d1"     # "d1" / "d1-ultra" (Liquid's API), or an OpenRouter decision model ("typesafe/jev-1.14")
 # The LLM step, with `tv-agent setup openrouter`: any OpenRouter model that supports structured outputs
 llm_model = "deepseek/deepseek-v4.1-flash-1017"
 llm_reasoning = "none"     # reasoning effort: "none" (off where the model allows, else its lowest), "minimal", "low"…

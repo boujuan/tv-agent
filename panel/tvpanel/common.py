@@ -176,6 +176,32 @@ def api(path: str, body=None, timeout: float = 6.0, raw: bytes | None = None, ok
         raise ApiError(str(detail)) from None
 
 
+def openrouter_check(model: str, kind: str = "llm") -> tuple[bool, str]:
+    """Whether OpenRouter has this model in a form the agent can use (public catalog, no key): a chat model with a
+    provider that enforces JSON answers (kind "llm"), or one of its decision models (kind "decision")."""
+    base = "https://openrouter.ai/api/v1"
+    try:
+        if kind == "decision":
+            with urllib.request.urlopen(f"{base}/models?output_modalities=decisions", timeout=8) as r:
+                found = {m["id"]: m for m in json.loads(r.read()).get("data", [])}
+            if model not in found:
+                return False, "not one of OpenRouter's decision models"
+            price = float((found[model].get("pricing") or {}).get("prompt") or 0) * 1e6
+            return True, f"an OpenRouter decision model, ${price:.3f} per million tokens in"
+        with urllib.request.urlopen(f"{base}/models/{model}/endpoints", timeout=8) as r:
+            endpoints = (json.loads(r.read()).get("data") or {}).get("endpoints") or []
+    except urllib.error.HTTPError as e:
+        return False, "not on OpenRouter" if e.code == 404 else f"OpenRouter said {e.code}"
+    except (OSError, ValueError) as e:
+        return False, f"couldn't ask OpenRouter ({type(e).__name__})"
+    good = [e for e in endpoints if "structured_outputs" in (e.get("supported_parameters") or [])]
+    if not good:
+        return False, (f"on OpenRouter, but none of its {len(endpoints)} providers enforces JSON answers: it won't "
+                       "work here" if endpoints else "on OpenRouter, but no provider serves it now")
+    price = min(float((e.get("pricing") or {}).get("prompt") or 0) for e in good) * 1e6
+    return True, f"on OpenRouter: {len(good)} provider{'s' * (len(good) > 1)} with JSON answers, from ${price:.2f} per million tokens in"
+
+
 def run_doctor() -> str:
     r = subprocess.run([str(TV_AGENT), "doctor"], capture_output=True, text=True, timeout=60)
     return "\n".join(l for l in (r.stdout + r.stderr).splitlines() if " INFO " not in l)

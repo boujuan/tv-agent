@@ -511,7 +511,8 @@ def local_app(svc: Service) -> FastAPI:
         return {"steps": svc.router.steps, "off": sorted(svc.router.off), "d1_where": d1.where,
                 "hosted_d1_model": d1.hosted_model, "llm_model": c.llm_model, "llm_reasoning": c.llm_reasoning,
                 "llm_private": c.llm_private, "fallback": svc.agent.rules.fallback_intent,
-                "keys": {"liquid": bool(c.secret("liquid_api_key")), "openrouter": bool(c.secret("openrouter_api_key"))},
+                "keys": {"liquid": bool(c.secret("liquid_api_key")), "openrouter": bool(c.secret("openrouter_api_key")),
+                         "hosted_d1": d1.hosted() is not None},
                 "counts": svc.agent.rules.counts, "learned": len(learned.load())}
 
     @app.get("/v1/pipeline")
@@ -540,9 +541,10 @@ def local_app(svc: Service) -> FastAPI:
                 raise HTTPException(422, f"d1_where: {', '.join(WHERE)}")
             new["d1_where"] = body["d1_where"]
         if "hosted_d1_model" in body:
-            if body["hosted_d1_model"] not in ("d1", "d1-ultra"):
-                raise HTTPException(422, "hosted_d1_model: d1 or d1-ultra")
-            new["hosted_d1_model"] = body["hosted_d1_model"]
+            hosted = str(body["hosted_d1_model"]).strip()
+            if hosted not in ("d1", "d1-ultra") and not re.fullmatch(r"[\w.~-]+/[\w.:-]{1,80}", hosted):
+                raise HTTPException(422, "hosted_d1_model: d1, d1-ultra or an OpenRouter decision model id")
+            new["hosted_d1_model"] = hosted
         if "llm_model" in body:
             model = str(body["llm_model"]).strip()
             if not re.fullmatch(r"[\w.~:/-]{3,100}", model):

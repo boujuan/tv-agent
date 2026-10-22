@@ -57,7 +57,7 @@ class Config:
     decide_steps: list[str] = field(default_factory=lambda: list(STEPS))
     decide_off: list[str] = field(default_factory=list)
     d1_where: str = "local-first"
-    hosted_d1_model: str = "d1"             # Liquid's hosted d1: "d1" or "d1-ultra"
+    hosted_d1_model: str = "d1"             # "d1" / "d1-ultra" (Liquid's API) or an OpenRouter decision model id
     llm_model: str = "deepseek/deepseek-v4.1-flash-1017"   # any OpenRouter model (`tv-agent setup openrouter`)
     llm_reasoning: str = "none"             # reasoning effort ("none": off where the model allows); "" sends none
     llm_private: bool = False               # only providers that keep no data

@@ -104,6 +104,10 @@ panel's Decisions tab, then redo your changes.
 - `POST /v1/action` took no raw JSON body; "Finding SevenceE2…" lacked a space.
 - `tv-agent eval` asks d1 where the decision steps do (`d1_where`), not always the local one. An empty clean-up
   regex is refused.
+- The tv-agent service pulled llama-d1 in (`Wants=`), so each start or restart of the agent, and each boot,
+  started the local d1 again after you'd stopped or disabled it; it's only ordered after it now. `tv-agent setup
+  services --enable` enables llama-d1 only when the decision steps use the local d1. Rewrite the units once:
+  `tv-agent setup services`.
 
 ### Added
 - The TV app's audio stream (port 8767): decided ~0.25-0.3 s after your last word for complete commands
@@ -140,8 +144,10 @@ panel's Decisions tab, then redo your changes.
   off (`decide_steps`, `decide_off`; the panel's Decisions tab changes them live, `GET/POST /v1/pipeline`). A step
   that can't be reached passes to the next; the LLM's "not a command" is final; d1 below its confidence passes
   on. When no model answers, the rules' offline intent applies (a title to play, or nothing).
-- d1 can be the local one, Liquid's hosted one (`tv-agent setup liquid`; `hosted_d1_model` "d1" or "d1-ultra"),
-  or either first with the other as backup (`d1_where`).
+- d1 can be the local one, a hosted decision model, or either first with the other as backup (`d1_where`). The
+  hosted one (`hosted_d1_model`) is "d1" or "d1-ultra" through Liquid's API (`tv-agent setup liquid`), or any of
+  OpenRouter's decision models by id (`liquid/d1`, `typesafe/jev-1.14`, `cloudflare/clef`…, with the OpenRouter
+  key; they all take the same request).
 - An LLM step through OpenRouter (`tv-agent setup openrouter`; `llm_model`, by default
   deepseek/deepseek-v4.1-flash-1017 with reasoning off, the most accurate and fastest of 9 models measured; see
   docs/research-2026-10-22.md §2.9). One action in a fixed JSON shape covering every command; it gets up to 10 of
@@ -214,6 +220,8 @@ panel's Decisions tab, then redo your changes.
   model and "when no model answers" in the d1 tab. The tester explains two-command sentences, skipped and
   unreachable steps and where d1 answered from; "How a pattern rule works" is folded away, leaving the table the
   room.
+- Decisions › LLM and › d1 model: a typed model id is looked up in OpenRouter's catalog: whether it's there, and
+  takes the strict JSON answers the LLM step needs (or is one of its decision models).
 - Commands: everything you can say as patterns with ‹placeholders›, by section, in English or Spanish, with a
   filter; "try" fills one in with an example you can edit, then explains it (nothing sent) or does it on the TV.
 - Settings covers every setting now: buttons to set the Liquid and OpenRouter keys (checked, then saved; the

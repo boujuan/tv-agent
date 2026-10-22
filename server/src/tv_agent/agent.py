@@ -120,7 +120,8 @@ class Agent:
         self.account = Account(self.http, key) if key else None
         self.library = Library(self.account)
         self.kodi = Kodi(self.http, self.adb, cfg.kodi_port, cfg.kodi_user, cfg.secret("kodi_password"))
-        self.d1 = D1(self.http, cfg.d1_url, cfg.secret("liquid_api_key"), cfg.hosted_d1_model, cfg.d1_where)
+        self.d1 = D1(self.http, cfg.d1_url, cfg.secret("liquid_api_key"), cfg.hosted_d1_model, cfg.d1_where,
+                     cfg.secret("openrouter_api_key"))
         self.rules, self.rules_error = rules_mod.load_safe()
         if self.rules_error:
             log.error("rules: %s; using the defaults", self.rules_error)

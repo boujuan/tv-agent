@@ -217,7 +217,8 @@ async def _eval(verbose: bool, file: str | None, split: str | None) -> int:
         print(f"warning: {err}; scoring the defaults")
     async with httpx.AsyncClient() as http:
         path = Path(file) if file else evaluate.EVAL_FILE
-        d1 = D1(http, cfg.d1_url, cfg.secret("liquid_api_key"), cfg.hosted_d1_model, cfg.d1_where)   # as configured
+        d1 = D1(http, cfg.d1_url, cfg.secret("liquid_api_key"), cfg.hosted_d1_model, cfg.d1_where,   # as configured
+                cfg.secret("openrouter_api_key"))
         res = await evaluate.run(Router(d1, rules), path, split)
     for r in res["results"]:
         if verbose or not r["ok"]:
@@ -302,9 +303,12 @@ def _doctor() -> int:
         print("ok    local d1-3B: not used by the decision steps")
     else:
         check("local d1-3B", lambda: httpx.get(f"{cfg.d1_url}/v1/models", timeout=3).json()["data"][0]["id"])
-    if "d1" not in cfg.decide_off and cfg.d1_where != "local" and not cfg.secret("liquid_api_key"):
+    via_openrouter = "/" in cfg.hosted_d1_model
+    if "d1" not in cfg.decide_off and cfg.d1_where != "local" and not cfg.secret(
+            "openrouter_api_key" if via_openrouter else "liquid_api_key"):
         ok = False
-        print(f"FAIL  hosted d1: d1_where is {cfg.d1_where} but there's no Liquid key (tv-agent setup liquid)")
+        print(f"FAIL  hosted decision model {cfg.hosted_d1_model}: no key (tv-agent setup "
+              f"{'openrouter' if via_openrouter else 'liquid'})")
     if "llm" not in cfg.decide_off and not cfg.secret("openrouter_api_key"):
         print("ok    LLM step: no OpenRouter key, so it's skipped (optional: tv-agent setup openrouter)")
     def speech():
@@ -384,8 +388,8 @@ def main(argv=None):
         from .install import write_services
         for path in write_services(config.load(), args.enable):
             print(f"wrote {path}")
-        print("enabled and started" if args.enable else
-              "start them with: systemctl --user enable --now llama-d1.service tv-agent.service")
+        print("enabled and started (llama-d1 only when the decision steps use the local d1)" if args.enable else
+              "start them with: systemctl --user enable --now tv-agent.service, and llama-d1.service for the local d1")
         return 0
     if args.cmd == "tv":
         return _tv(args.what, args.args)

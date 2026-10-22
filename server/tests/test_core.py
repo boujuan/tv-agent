@@ -1144,3 +1144,28 @@ def test_subtitles_switch_over_from_what_kodi_shows():
     a = types.SimpleNamespace(_kodi_player=player, kodi=types.SimpleNamespace(tracks=tracks, set_subtitle=set_subtitle))
     out = asyncio.run(Agent._tracks(a, A.Tracks(subtitles="toggle")))
     assert set_to == [None] and out.say == "Subtitles off"
+
+
+def test_a_hosted_decision_model_can_be_any_openrouter_one():
+    import asyncio
+    import httpx
+    from tv_agent.decide.d1 import D1, HOSTED, OPENROUTER
+
+    sent = []
+
+    class Http:
+        async def post(self, url, json=None, timeout=None, headers=None):
+            sent.append((url, json.get("model"), headers["Authorization"]))
+            return httpx.Response(200, request=httpx.Request("POST", url), json={
+                "answers": {"q": {"choice": "pause", "confidence": 0.9, "probabilities": {"pause": 0.95, "none": 0.05}}},
+                "usage": {"input_tokens": 50, "cost": 1e-6}})
+
+    def ask(model, liquid="lk", openrouter="ok"):
+        d1 = D1(Http(), "http://127.0.0.1:8091", liquid, model, "hosted", openrouter)
+        asyncio.run(d1.choice("x", "?", {"pause": "p", "none": "n"}))
+        return d1
+
+    assert ask("d1-ultra") and sent[-1] == (HOSTED, "d1-ultra", "Bearer lk")             # Liquid's own API
+    d1 = ask("typesafe/jev-1.14")
+    assert sent[-1] == (OPENROUTER, "typesafe/jev-1.14", "Bearer ok") and d1.last_usage["cost"] == 1e-6
+    assert D1(Http(), "u", "lk", "cloudflare/clef", "hosted", None).sources() == ()      # no OpenRouter key

@@ -62,7 +62,7 @@ WantedBy=default.target
 """,
         "tv-agent.service": f"""[Unit]
 Description=tv-agent: voice control for the TV (listens on this computer's address on the TV's network)
-Wants=llama-d1.service
+# Not Wants=llama-d1: the local d1 is optional (the Decisions tab can leave it off), so it starts on its own
 After=llama-d1.service network-online.target
 
 [Service]
@@ -84,8 +84,10 @@ WantedBy=default.target
         path.write_text(text)
         written.append(path)
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
-    if enable:
-        subprocess.run(["systemctl", "--user", "enable", "--now", "llama-d1.service", "tv-agent.service"], check=True)
+    if enable:                             # the local d1 only when the decision steps use it
+        local_d1 = "d1" not in cfg.decide_off and cfg.d1_where != "hosted"
+        subprocess.run(["systemctl", "--user", "enable", "--now",
+                        *(["llama-d1.service"] if local_d1 else []), "tv-agent.service"], check=True)
     return written
 
 
