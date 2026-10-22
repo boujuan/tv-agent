@@ -2,6 +2,10 @@ plugins {
     id 'com.android.application'
 }
 
+// The release key, where it's configured: Gradle properties (~/.gradle/gradle.properties on a computer that has the
+// key) or environment variables (the release workflow) of the same names. See RELEASING.md.
+def releaseKey = { String name -> findProperty(name) ?: System.getenv(name) }
+
 android {
     namespace 'com.boujuan.tvagent'
     compileSdk 34
@@ -16,13 +20,25 @@ android {
         versionName '0.3.0'
     }
 
+    signingConfigs {
+        if (releaseKey('TV_AGENT_KEYSTORE')) {
+            release {
+                storeFile file(releaseKey('TV_AGENT_KEYSTORE'))
+                storePassword releaseKey('TV_AGENT_KEYSTORE_PASSWORD')
+                keyAlias releaseKey('TV_AGENT_KEY_ALIAS')
+                // keytool's PKCS12 keystores have one password for the store and the key.
+                keyPassword releaseKey('TV_AGENT_KEY_PASSWORD') ?: releaseKey('TV_AGENT_KEYSTORE_PASSWORD')
+            }
+        }
+    }
+
     buildTypes {
         release {
             // No libraries to shrink: plain Java on the platform API only.
             minifyEnabled false
-            // Signed with this computer's debug key, so a build here installs over the one already on the TV.
-            // Store releases will need a release key (see RELEASING.md).
-            signingConfig signingConfigs.debug
+            // The release key if configured, else the debug key (CI on branches, a computer without the key): that APK
+            // still builds and installs, but can't update an install signed with the release key, nor the other way round.
+            signingConfig releaseKey('TV_AGENT_KEYSTORE') ? signingConfigs.release : signingConfigs.debug
         }
     }
 

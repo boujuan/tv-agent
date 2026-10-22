@@ -14,6 +14,10 @@ android/build/
 android/app/build/
 android/local.properties
 *.apk
+# Signing keys never go in the repo (RELEASING.md)
+*.jks
+*.keystore
+*.p12
 
 # Editors
 .idea/

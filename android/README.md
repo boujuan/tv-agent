@@ -46,6 +46,11 @@ address, with a bearer token.
 
 ## Signing
 
-Builds are signed with the building computer's Android debug key, so a local build installs over the one already
-on the TV. A build from another machine (or CI) has another key: uninstall first. Store releases (Play, F-Droid)
-will need a proper release key: see [RELEASING.md](../RELEASING.md).
+Releases are signed with the project's release key, whose certificate has the SHA-256 digest
+`bd934e07d6784766bbfb3948bf3467ef9b2cb0c9c1146fdf9528dc76c8eb1e08` (check a download with
+`apksigner verify --print-certs tv-agent-android-<version>.apk`), so each release installs over the last.
+
+A local build uses the same key when `~/.gradle/gradle.properties` has it, otherwise the computer's debug key;
+`build-and-install.sh` prints which. An install signed with one key can't be updated by an APK signed with another:
+uninstall first (`tv-agent tv shell pm uninstall com.boujuan.tvagent`), then install, which pairs again. Setting up
+the key: [RELEASING.md](../RELEASING.md#signing-android).

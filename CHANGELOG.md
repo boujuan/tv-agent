@@ -4,6 +4,17 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
+## android — unreleased
+
+Upgrading from 0.3.0, which was signed with a debug key: uninstall it once (`tv-agent tv shell pm uninstall
+com.boujuan.tvagent`), then `tv-agent tv install tv-agent-android-<version>.apk`, which pairs again.
+
+### Changed
+- Releases are signed with the project's release key (certificate SHA-256
+  `bd934e07d6784766bbfb3948bf3467ef9b2cb0c9c1146fdf9528dc76c8eb1e08`), so each release installs over the previous
+  one. Local builds use it when `~/.gradle/gradle.properties` has it and the debug key otherwise;
+  `build-and-install.sh` prints which.
+
 ## server 0.1.0 — 2026-10-22
 
 First release.

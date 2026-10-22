@@ -40,7 +40,7 @@ jobs:
           mkdir -p dist
           tar --exclude='__pycache__' --transform "s,^,tv-agent-panel-$v/," -czf "dist/tv-agent-panel-$v.tar.gz" panel LICENSE
 
-      # ---- android: the APK (signed with the runner's debug key; see RELEASING.md)
+      # ---- android: the APK, signed with the release key from the repo secrets (see RELEASING.md)
       - if: steps.tag.outputs.component == 'android'
         uses: actions/setup-java@v6
         with:
@@ -48,13 +48,26 @@ jobs:
           java-version: "17"
       - if: steps.tag.outputs.component == 'android'
         working-directory: android
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          TV_AGENT_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          TV_AGENT_KEY_ALIAS: tv-agent
+          # The release key's certificate: an APK signed with any other key isn't published.
+          CERT_SHA256: bd934e07d6784766bbfb3948bf3467ef9b2cb0c9c1146fdf9528dc76c8eb1e08
         run: |
           v="${{ steps.tag.outputs.version }}"
           have=$(sed -n "s/.*versionName '\(.*\)'.*/\1/p" app/build.gradle)
           [ "$have" = "$v" ] || { echo "app/build.gradle says $have"; exit 1; }
+          [ -n "$ANDROID_KEYSTORE_BASE64" ] || { echo "the ANDROID_KEYSTORE_BASE64 secret is missing"; exit 1; }
+          export TV_AGENT_KEYSTORE="$RUNNER_TEMP/release.p12"
+          base64 -d <<< "$ANDROID_KEYSTORE_BASE64" > "$TV_AGENT_KEYSTORE"
           ./gradlew assembleRelease --console=plain
+          apk=app/build/outputs/apk/release/app-release.apk
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs "$apk" | grep -qx "Signer #1 certificate SHA-256 digest: $CERT_SHA256" \
+            || { echo "$apk isn't signed with the release key"; exit 1; }
           mkdir -p ../dist
-          cp app/build/outputs/apk/release/app-release.apk "../dist/tv-agent-android-$v.apk"
+          cp "$apk" "../dist/tv-agent-android-$v.apk"
 
       - name: Publish
         env:
