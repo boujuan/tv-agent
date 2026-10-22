@@ -583,3 +583,45 @@ def test_list_and_library_rules(text, expect):
         assert got is None or got.type not in ("pick", "library")
     else:
         assert got is not None and all(getattr(got, k) == v for k, v in expect.items())
+
+
+def test_a_replaced_follower_saves_its_position_and_polls_no_more():
+    import asyncio
+    from tv_agent.stremio import progress as P
+
+    class Account:
+        def __init__(self):
+            self.puts = []
+
+        async def put(self, items):
+            self.puts.append(items[0]["state"]["timeOffset"])
+
+    class Library:
+        async def get(self, _):
+            return None
+
+        def invalidate(self):
+            pass
+
+    async def run():
+        account, polls, stop = Account(), [], asyncio.Event()
+
+        async def poll():
+            polls.append(1)
+            return 60_000 * len(polls), 3_000_000, 1.0
+        task = asyncio.create_task(P.track(poll, account, Library(), NowPlaying("tt1", "movie", "tt1", "X"), {},
+                                           every_s=0.01, stop=stop))
+        while len(polls) < 3:
+            await asyncio.sleep(0.005)
+        stop.set()
+        how, last, _ = await task
+        return how, last, account.puts, len(polls)
+
+    how, last, puts, polls = asyncio.run(run())
+    assert how == "replaced" and puts[-1] == last and polls in (3, 4)    # the last write: the position it had
+
+
+def test_a_write_without_a_length_keeps_the_known_one():
+    np = NowPlaying("tt1", "series", "tt1:1:2", "X")
+    item = {"_id": "tt1", "state": {"video_id": "tt1:1:2", "duration": 3_000_000, "timeOffset": 100_000}}
+    assert updated(item, np, 120_000, 0, 20_000, {})["state"]["duration"] == 3_000_000

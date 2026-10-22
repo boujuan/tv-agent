@@ -66,6 +66,19 @@ panel's Decisions tab, then redo your changes.
 - A title said has to match a library item's whole name (or the name before its subtitle): "dune parte dos" no
   longer plays your "Dune".
 - d1 chooses between 32 intents (~0.88 s instead of ~0.74 s, for the ~4% of commands that reach it).
+- Faster starts. Kodi is brought up at once and gets ready during the stream search; the stream lookup (3-6 s
+  at AIOStreams) starts as soon as the video is known, alongside Cinemeta, and its answer is reused for 30
+  minutes; the link check runs while Kodi gets ready and is done at the best link's answer; Kodi gets the file's
+  final address, so its requests skip AIOStreams' redirect (Kodi's part went from ~4 s to ~2.5 s). Measured on
+  a 1080p remux: 3.5 s from command to picture when the streams are known, ~5.9 s when AIOStreams has to look;
+  a list pick took ~11 s before. Your addons and library are refreshed when the mic opens. `tv-agent stats`
+  shows the stages (`start:streams`, `start:kodi`, `start:link`, `start:open`).
+- "Stop" reads Kodi's exact position before stopping, so the saved progress and a "continue" right after resume
+  there (the player is polled every 10 s).
+
+### Fixed
+- Progress could go unsaved when something new started right after a stop: the previous session's follower was
+  cancelled in the middle of its last write. It's now told to stop and finishes the write.
 
 ### Added
 - The TV app's audio stream (port 8767): decided ~0.25-0.3 s after your last word for complete commands

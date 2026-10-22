@@ -5,7 +5,7 @@ import logging
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from urllib.parse import urlencode
 
@@ -32,6 +32,7 @@ SAY_RECEIVER = "com.boujuan.tvagent/.SayReceiver"
 CHOICES = "com.boujuan.tvagent/.ChoicesActivity"
 LIST_SIZE = 6                # rows that fit the TV app's list
 LIST_TTL = 300              # "number 2" refers to a list shown in the last 5 minutes
+STREAMS_TTL = 1800          # an addon's answer for a video is reused for 30 minutes (links resolve when played)
 NOW_PLAYING_FILE = CONFIG_DIR / "now-playing.json"
 
 
@@ -121,6 +122,7 @@ class Agent:
         self._addons: list[Addon] = []
         self._addons_at = 0.0
         self._progress: asyncio.Task | None = None
+        self._follow_stop: asyncio.Event | None = None     # tells the follower something else is about to play
         self._tracks_task: asyncio.Task | None = None
         self._duration: asyncio.Task | None = None
         self._prefetch: asyncio.Task | None = None
@@ -129,14 +131,19 @@ class Agent:
         self._after_this: str | None = None      # "stop" / "off" when what's playing ends (sleep timer)
         self._sleep: asyncio.Task | None = None   # "turn off in 30 minutes"
         self._shown: Shown | None = None         # the list on the TV, for "number 2"
+        self._streams: dict[tuple[str, str], tuple[float, list[streams.Stream]]] = {}
+        self._stream_jobs: dict[tuple[str, str], asyncio.Task] = {}
         self._user_stopped = False               # a stop that was asked for isn't the end of an episode
         self._duck: asyncio.Task | None = None
         self._ducked: tuple[str, int] | None = None   # ("kodi" or "tv", the volume before listening)
 
     async def close(self):
-        if self._progress:
-            self._progress.cancel()
-            await asyncio.gather(self._progress, return_exceptions=True)
+        if self._progress and not self._progress.done():
+            self._stop_following()                   # its last progress write, then it ends
+            try:
+                await asyncio.wait_for(asyncio.shield(self._progress), 5)
+            except (asyncio.TimeoutError, Exception):
+                self._progress.cancel()
         await self.http.aclose()
         self.adb.close()
 
@@ -172,14 +179,54 @@ class Agent:
 
     # ---- Stremio: addons, titles, streams ----
 
-    async def addons(self) -> list[Addon]:
+    async def addons(self, max_age: float = 3600) -> list[Addon]:
         """Your installed Stremio addons, refreshed hourly. Their URLs (with addon config) stay in memory."""
         if not self.account:
             return []
-        if not self._addons or time.monotonic() - self._addons_at > 3600:
+        if not self._addons or time.monotonic() - self._addons_at > max_age:
             self._addons = await self.account.addons()
             self._addons_at = time.monotonic()
         return self._addons
+
+    async def warm(self):
+        """Refresh what a play needs before it's asked for (your addons, your library: ~0.4 s each when stale).
+        Run when the mic opens and at startup."""
+        try:
+            await self.addons(max_age=3000)
+            if time.monotonic() - self.library._at > 480:
+                await self.library.items(fresh=True)
+        except Exception as e:
+            log.info("warming up: %s", type(e).__name__)
+
+    async def fetch_streams(self, kind: str, video_id: str) -> list[streams.Stream]:
+        """Your addons' streams for a video (3-6 s from AIOStreams), reused for 30 minutes, with one lookup in
+        flight per video: a lookup started early (prefetch) is the one the play then waits for."""
+        key = (kind, video_id)
+        if (hit := self._streams.get(key)) and time.monotonic() - hit[0] < STREAMS_TTL:
+            return [replace(s) for s in hit[1]]       # copies: ranking marks them
+        job = self._stream_jobs.get(key)
+        if job is None or (job.done() and (job.cancelled() or job.exception())):
+            job = self._stream_jobs[key] = asyncio.create_task(
+                streams.fetch(self.http, await self.addons(), kind, video_id))
+        found = await asyncio.shield(job)                  # a replaced command doesn't waste the lookup
+        self._stream_jobs.pop(key, None)
+        if found:
+            if len(self._streams) > 40:
+                self._streams.pop(min(self._streams, key=lambda k: self._streams[k][0]))
+            self._streams[key] = (time.monotonic(), found)
+        return [replace(s) for s in found]
+
+    def prefetch(self, kind: str, video_id: str):
+        """Start the stream lookup for a video about to be played, while the rest (metadata, Kodi) gets ready."""
+        if not (self.account and not self.dry_run):
+            return
+
+        async def run():
+            try:
+                await self.fetch_streams(kind, video_id)
+            except Exception as e:
+                log.info("stream prefetch for %s: %s", video_id, type(e).__name__)
+        asyncio.create_task(run())
 
     def track_plan(self, meta: dict) -> languages.TrackPlan:
         c = self.cfg
@@ -187,7 +234,7 @@ class Agent:
 
     async def streams_for(self, kind: str, video_id: str, meta: dict | None = None) -> list[streams.Stream]:
         meta = meta or {}
-        found = await streams.fetch(self.http, await self.addons(), kind, video_id)
+        found = await self.fetch_streams(kind, video_id)
         plan = self.track_plan(meta)
         return streams.rank(found, self.cfg.max_height, self.cfg.max_mbps, _runtime_min(meta),
                             plan.subtitles is None, plan.audio)
@@ -371,10 +418,11 @@ class Agent:
         its progress."""
         if not self.account:
             return Outcome(False, "Stremio isn't signed in (tv-agent setup stremio)")
-        await self.notify(f"Finding {label}…")
+        t0 = time.perf_counter()
+        asyncio.create_task(self.notify(f"Finding {label}…"))
         kodi_ready = None
-        if self.cfg.player == "kodi" and not self.dry_run and not await self.kodi.up():
-            kodi_ready = asyncio.create_task(self._start_kodi())   # Kodi's cold start overlaps the stream search
+        if self.cfg.player == "kodi" and not self.dry_run:
+            kodi_ready = asyncio.create_task(self._start_kodi())   # Kodi gets ready (or cold-starts) during the search
         if prepared is not None:            # found and checked while the previous episode played
             found = [prepared]
         else:
@@ -382,29 +430,47 @@ class Agent:
         if self.cfg.player == "just":
             found = [s for s in found if not s.headers]     # Just Player can't send an addon's extra headers
         if not found:
+            if kodi_ready is not None:
+                asyncio.create_task(self._home_unless_playing(kodi_ready))
             return Outcome(False, f"No playable stream for {label}")
-        chosen = found[0]
-        if self.cfg.probe_streams and prepared is None:
-            top = found[:3]
-            ok = await asyncio.gather(*(streams.playable(self.http, s) for s in top))
-            chosen = next((s for s, good in zip(top, ok) if good), None)
-            if chosen is None:
-                return Outcome(False, f"The links for {label} didn't answer")
+        t_streams = time.perf_counter()
+        chosen, link, checking = found[0], found[0].url, None
+        if self.cfg.probe_streams:      # runs while Kodi gets ready; also finds where the link leads
+            checking = asyncio.create_task(self._first_playable(found[:3]))
+        # A file in your debrid library, or one checked while the last episode played, is opened even if the
+        # check fails now (it may be a passing hiccup); anything else needs an answer.
+        trusted = prepared is not None or found[0].library
+
+        async def checked() -> bool:
+            nonlocal chosen, link
+            if checking is None:
+                return True
+            got = await checking
+            if got is not None:
+                chosen, link = got
+            return got is not None or trusted
+
         if self.dry_run:   # nothing reaches the player either
+            if not await checked():
+                return Outcome(False, f"The links for {label} didn't answer")
             return Outcome(True, f"(dry run) would play {label} in {self.cfg.player} from {chosen.addon}: "
                                  f"{chosen.filename or chosen.name}" + (f" from {_clock(resume_ms)}" if resume_ms else ""))
         runtime = (_runtime_min(meta) or 0) * 60_000
-        await self._stop_following()      # the previous session's last progress write and cleanup come first
+        if resume_ms > 0 and (old := self.state.now_playing) and old.video_id == video and old.stopped_at:
+            resume_ms = old.stopped_at    # stopped a moment ago: the library may not have the position yet
+        self._stop_following()            # before anything new plays: it would read the new file's position
         self._user_stopped, self._after_this = False, None
         if self._prefetch and not self._prefetch.done():
             self._prefetch.cancel()
         if self.cfg.player == "just":
+            if not await checked():
+                return Outcome(False, f"The links for {label} didn't answer")
             plan = self.track_plan(meta)
             subs = languages.android_locale(plan.subtitles[0]) if plan.subtitles else None
             await self.tv(justplayer.captions, plan.subtitles is not None, subs)
             if (pid := await self._kodi_player()) is not None:
                 await self.kodi.stop(pid)                               # one player at a time
-            await self.tv(justplayer.start, chosen.url, label, resume_ms)
+            await self.tv(justplayer.start, link, label, resume_ms)
             self.state.now_playing = NowPlaying(imdb, kind, video, name, "just", chosen.url, runtime,
                                                 filename=chosen.filename, size=chosen.size,
                                                 video_hash=chosen.video_hash)
@@ -424,8 +490,21 @@ class Agent:
                                        else languages.KODI_NAMES.get(plan.subtitles[0], "original"))
             except KodiError as e:
                 log.warning("Kodi language settings: %s", e)
-            url = chosen.url + ("|" + urlencode(chosen.headers) if chosen.headers else "")
-            await self.kodi.open(url, resume_ms)
+            t_kodi = time.perf_counter()
+            if not await checked():
+                await self._home_unless_playing()
+                return Outcome(False, f"The links for {label} didn't answer")
+            t_check = time.perf_counter()
+            extra = "|" + urlencode(chosen.headers) if chosen.headers else ""
+            url = chosen.url + extra
+            await self.kodi.open(link + extra, resume_ms)
+            t_open = time.perf_counter()
+            for stage, a, b in (("streams", t0, t_streams), ("kodi", t_streams, t_kodi), ("link", t_kodi, t_check),
+                                ("open", t_check, t_open)):
+                self.state.timings.add(f"start:{stage}", (b - a) * 1000)
+            log.info("start %s: streams %.0f ms, then Kodi ready %.0f ms, link check %.0f ms more, open %.0f ms",
+                     video, (t_streams - t0) * 1000, (t_kodi - t_streams) * 1000, (t_check - t_kodi) * 1000,
+                     (t_open - t_check) * 1000)
             self.state.now_playing = NowPlaying(imdb, kind, video, name, "kodi", url, runtime,
                                                 filename=chosen.filename, size=chosen.size,
                                                 video_hash=chosen.video_hash)
@@ -436,6 +515,29 @@ class Agent:
             self._prefetch = asyncio.create_task(self._prepare_next(imdb, name, video, meta))
         quality = f" · {'4K' if chosen.height >= 2160 else f'{chosen.height}p'}" if chosen.height else ""
         return Outcome(True, f"Playing {label}{quality}" + (f" · from {_clock(resume_ms)}" if resume_ms else ""))
+
+    async def _home_unless_playing(self, kodi_ready: asyncio.Task | None = None):
+        """Kodi was brought up for a start that didn't happen: back to Home, unless it's playing something."""
+        if kodi_ready is not None:
+            await asyncio.gather(kodi_ready, return_exceptions=True)
+        try:
+            if await self._kodi_player() is None:
+                await self.tv(apps.home)
+        except Exception as e:
+            log.info("back to Home: %s", type(e).__name__)
+
+    async def _first_playable(self, top: list[streams.Stream]) -> tuple[streams.Stream, str] | None:
+        """The best of these whose link answers, and where its link leads: all are checked at once, and the best
+        one's answer is enough."""
+        checks = [asyncio.create_task(streams.resolve(self.http, s)) for s in top]
+        try:
+            for s, check in zip(top, checks):
+                if link := await check:
+                    return s, link
+            return None
+        finally:
+            for check in checks:
+                check.cancel()
 
     async def _start_kodi(self) -> bool:
         """Kodi.start() that reports failure instead of raising (it runs ahead of time, before it's certain to be
@@ -501,12 +603,13 @@ class Agent:
         self._follow(meta)
         log.info("picked up %s (%s) again after a restart", np.video_id, np.player)
 
-    async def _stop_following(self):
+    def _stop_following(self):
+        """The previous session's follower polls no more (it would read the new file's position); its last
+        progress write, with the position it had, finishes on its own."""
         if self._progress is asyncio.current_task():
             return                              # called from the follower itself (its end started the next one)
-        if self._progress and not self._progress.done():
-            self._progress.cancel()
-            await asyncio.gather(self._progress, return_exceptions=True)
+        if self._follow_stop:
+            self._follow_stop.set()
 
     def _follow(self, meta: dict):
         np = self.state.now_playing
@@ -523,14 +626,18 @@ class Agent:
                 return None
             return st[1], np.runtime_ms, st[2]
 
+        stop = self._follow_stop = asyncio.Event()
+
         async def follow():
             try:
                 videos = await self.stremio_videos(np.imdb_id) if np.kind == "series" else None
                 how, last, duration = await progress.track(just_poll if np.player == "just" else kodi_poll,
                                                            self.account, self.library, np, meta,
-                                                           video_ids=[v["id"] for v in videos or []])
-                # Its own task: starting the next episode ends this follower.
-                self._end_task = asyncio.create_task(self._ended(np, how, last, duration))
+                                                           video_ids=[v["id"] for v in videos or []], stop=stop)
+                log.info("%s %s at %s", np.video_id, how, _clock(last or 0))
+                if how != "replaced":
+                    # Its own task: starting the next episode ends this follower.
+                    self._end_task = asyncio.create_task(self._ended(np, how, last, duration))
             finally:
                 if np.player == "just":   # system captions were turned on for Just Player only: off again
                     try:
@@ -646,6 +753,15 @@ class Agent:
                 return
         await self.tv(apps.home)
 
+    async def _note_position(self, pid: int):
+        """Where Kodi is, read just before stopping it: the progress write and a "continue" right after use it."""
+        np = self.state.now_playing
+        if np and np.player == "kodi":
+            try:
+                np.stopped_at = (await self.kodi.position(pid))[0]
+            except Exception as e:
+                log.info("position before stopping: %s", type(e).__name__)
+
     async def _turn_off(self):
         await self.tv(lambda adb: adb.run(["cmd", "input", "keyevent", "KEYCODE_SLEEP"]))
 
@@ -674,6 +790,7 @@ class Agent:
         await asyncio.sleep(seconds)
         self._user_stopped = True
         if (pid := await self._kodi_player()) is not None:
+            await self._note_position(pid)
             await self.kodi.stop(pid)
         elif await self._just_status() is not None:
             await self.tv(media.dispatch, "stop")
@@ -774,8 +891,15 @@ class Agent:
             if not found:
                 return Outcome(False, f"Couldn't find “{a.title}”")
             imdb, kind, name = found
-        meta = await cinemeta.meta(self.http, kind, imdb)
         state = ((await self.library.get(imdb)) or {}).get("state") or {}
+        # The stream lookup (3-6 s) starts now when the video is already known; the metadata comes meanwhile.
+        if kind == "movie":
+            self.prefetch(kind, imdb)
+        elif a.season is not None and a.episode is not None:
+            self.prefetch(kind, f"{imdb}:{a.season}:{a.episode}")
+        elif a.season is None and a.episode is None and not (a.restart or a.latest) and state.get("video_id"):
+            self.prefetch(kind, playing_video or state["video_id"])
+        meta = await cinemeta.meta(self.http, kind, imdb)
         video, label = imdb, name
         if kind == "series":
             eps = cinemeta.episodes(meta)
@@ -823,6 +947,8 @@ class Agent:
         """Where you stopped in this library item, or the next episode when you'd finished that one."""
         imdb, kind, name = item["_id"], item["type"], item.get("name", "")
         st = item.get("state") or {}
+        if st.get("timeOffset") and st.get("duration") and st["timeOffset"] < progress.WATCHED_AT * st["duration"]:
+            self.prefetch(kind, st.get("video_id") or imdb)     # where you stopped: its streams meanwhile
         meta = await cinemeta.meta(self.http, kind, imdb)
         video, offset, label = st.get("video_id") or imdb, st.get("timeOffset", 0), name
         if kind == "series":
@@ -963,6 +1089,7 @@ class Agent:
         it = shown.items[a.number - 1]
         if it.video is None and (item := await self.library.get(it.imdb)) and library_mod.in_continue_watching(item):
             return await self._continue_item(item)
+        self.prefetch(it.kind, it.video or it.imdb)
         meta = await cinemeta.meta(self.http, it.kind, it.imdb)
         state = ((await self.library.get(it.imdb)) or {}).get("state") or {}
         video = it.video or it.imdb
@@ -1100,6 +1227,7 @@ class Agent:
                 await self.kodi.play(pid, a.op == "resume")
             elif a.op == "stop":
                 self._user_stopped = True
+                await self._note_position(pid)
                 await self.kodi.stop(pid)
                 await self.tv(apps.home)         # not Kodi's own menus
             elif a.op in ("forward", "back"):

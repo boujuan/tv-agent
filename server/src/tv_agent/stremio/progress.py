@@ -28,6 +28,8 @@ def updated(item: dict | None, np: NowPlaying, offset_ms: int, duration_ms: int,
                 "posterShape": "poster", "removed": True, "temp": True, "_ctime": now,
                 "behaviorHints": {}, "state": {}}
     state = dict(item.get("state") or {})
+    if not duration_ms and state.get("video_id") == np.video_id:
+        duration_ms = state.get("duration") or 0     # stopped before the first poll: keep the known length
     done = duration_ms > 0 and offset_ms >= WATCHED_AT * duration_ms
     if state.get("video_id") != np.video_id:
         state["timeWatched"] = 0
@@ -48,19 +50,37 @@ def updated(item: dict | None, np: NowPlaying, offset_ms: int, duration_ms: int,
     return {**item, "state": state, "_mtime": now}
 
 
+async def _pause(stop: asyncio.Event | None, seconds: float) -> bool:
+    """Wait; True when told to stop meanwhile."""
+    if stop is None:
+        await asyncio.sleep(seconds)
+        return False
+    try:
+        await asyncio.wait_for(stop.wait(), seconds)
+        return True
+    except asyncio.TimeoutError:
+        return False
+
+
 async def track(poll, account: Account, library: Library, np: NowPlaying, meta: dict, every_s: float = 10,
-                write_every_s: float = 120, video_ids: list[str] | None = None) -> tuple[str, int | None, int]:
+                write_every_s: float = 120, video_ids: list[str] | None = None,
+                stop: asyncio.Event | None = None) -> tuple[str, int | None, int]:
     """Follow the player until it stops; write on pause, every 2 minutes, and at the end.
     poll() returns (position ms, duration ms, speed) while something plays, None once it has stopped.
-    Returns how it ended ("stopped", or "lost" when the player stopped answering), the last position and the
-    duration; the last 45 s are watched every 2 s, so a stop at the very end can be told from an earlier one."""
+    Returns how it ended ("stopped"; "lost" when the player stopped answering; "replaced" when `stop` was set
+    because something else is about to play: it polls no more, so it can't read the new file's position), the last
+    position and the duration; the last 45 s are watched every 2 s, so a stop at the very end can be told from an
+    earlier one. Stopping it with `stop` rather than cancelling it keeps the last write safe: a cancelled task's
+    HTTP calls can be cancelled again on the way."""
     last_write = time.monotonic()
     last_pos, unwritten, paused, misses = None, 0, False, 0
     duration = 0
     how = "stopped"
 
     async def write():
-        nonlocal unwritten, last_write
+        nonlocal unwritten, last_write, last_pos
+        if np.stopped_at is not None:
+            last_pos = np.stopped_at            # "stop" read the exact position before stopping
         if last_pos is None:
             return
         item = await library.get(np.imdb_id)
@@ -72,7 +92,9 @@ async def track(poll, account: Account, library: Library, np: NowPlaying, meta: 
     try:
         while True:
             near_end = last_pos is not None and duration and duration - last_pos < 45_000
-            await asyncio.sleep(2 if near_end else every_s)
+            if await _pause(stop, 2 if near_end else every_s):
+                how = "replaced"
+                break
             try:
                 now = await poll()
                 if now is None:

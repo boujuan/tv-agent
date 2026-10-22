@@ -19,6 +19,7 @@ class NowPlaying:
     filename: str = ""        # the file's name, size and hash: subtitle addons match on them
     size: int = 0
     video_hash: str = ""
+    stopped_at: int | None = None   # the exact position when "stop" was said (polls are 10 s apart)
 
 
 class Timings:

@@ -184,11 +184,13 @@ async def fetch(http: httpx.AsyncClient, addons: list[Addon], kind: str, video_i
     return out
 
 
-async def playable(http: httpx.AsyncClient, s: Stream) -> bool:
-    """A one-byte range request: the link answers with file bytes, not an error page. Redirects are followed by
-    hand, because AIOStreams redirects a link that can't play (not cached after all, failed, rate-limited) to a
-    short explanatory video that would otherwise look fine. Debrid services label files loosely (Premiumize:
-    application/force-download), so anything but a web page or JSON counts."""
+async def resolve(http: httpx.AsyncClient, s: Stream) -> str | None:
+    """Where the link leads when it plays, else None. A one-byte range request: the link answers with file bytes,
+    not an error page. Redirects are followed by hand, because AIOStreams redirects a link that can't play (not
+    cached after all, failed, rate-limited) to a short explanatory video that would otherwise look fine. Debrid
+    services label files loosely (Premiumize: application/force-download), so anything but a web page or JSON
+    counts. The player is given the final address: each of its range requests (header, index, the resume point)
+    then skips the addon's redirect."""
     url = s.url
     try:
         for _ in range(4):
@@ -199,10 +201,15 @@ async def playable(http: httpx.AsyncClient, s: Stream) -> bool:
                     if PROBLEM_VIDEO.search(httpx.URL(url).path):
                         log.info("%s: the addon says it can't play (%s)", s.filename or s.name,
                                  httpx.URL(url).path.rsplit("/", 1)[-1])
-                        return False
+                        return None
                     continue
                 ctype = r.headers.get("content-type", "").lower()
-                return r.status_code in (200, 206) and not ctype.startswith(("text/", "application/json"))
+                ok = r.status_code in (200, 206) and not ctype.startswith(("text/", "application/json"))
+                return url if ok else None
     except httpx.HTTPError:
-        return False
-    return False
+        return None
+    return None
+
+
+async def playable(http: httpx.AsyncClient, s: Stream) -> bool:
+    return await resolve(http, s) is not None

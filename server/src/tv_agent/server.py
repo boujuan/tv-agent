@@ -228,6 +228,7 @@ async def stream_client(svc: "Service", reader: asyncio.StreamReader, writer: as
             log.info("TV app streaming (from %s)", peer)
             # Pressed on the screensaver, the app opens behind it, hidden and without the microphone: wake the TV.
             asyncio.create_task(svc.agent._wake())
+            asyncio.create_task(svc.agent.warm())    # addons and library fresh before a play is asked for
             svc.agent.start_duck()              # half volume while you speak (the remote's mic hears the TV)
             try:
                 await stream_session(svc, reader, send)
@@ -303,6 +304,7 @@ def lan_app(svc: Service) -> FastAPI:
         svc.check(request, lan=True)
         log.info("TV app listening (from %s)", request.client.host)
         asyncio.create_task(svc.agent._wake())     # the screensaver would hide the pill (see stream_client)
+        asyncio.create_task(svc.agent.warm())
         svc.agent.start_duck()
         return {"ok": True}
 
@@ -461,6 +463,7 @@ async def serve(cfg: Config):
     svc.stt = await asyncio.to_thread(Stt, cfg.stt_model)
     try:
         await svc.agent.restore()
+        asyncio.create_task(svc.agent.warm())
     except Exception as e:
         log.warning("couldn't pick up the last session: %s", type(e).__name__)
     lan_host = lan_address(cfg)
