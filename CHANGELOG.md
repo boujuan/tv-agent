@@ -15,6 +15,28 @@ com.boujuan.tvagent`), then `tv-agent tv install tv-agent-android-<version>.apk`
   one. Local builds use it when `~/.gradle/gradle.properties` has it and the debug key otherwise;
   `build-and-install.sh` prints which.
 
+## server — unreleased
+
+Rules version 2. A `rules.json` you saved before keeps working but doesn't get these: Reset to defaults in the
+panel's Decisions tab, then redo your changes.
+
+### Changed
+- Every action has its own d1 intent (pause, resume, stop, skip forward/back, seek to, restart, previous episode,
+  set volume, louder, quieter, mute, unmute…), each described with examples. d1 only sees the descriptions, and
+  "previous episode", "go back to the start" or "volume twenty" used to have no matching option. On the 107
+  original sentences d1 on its own went from 84 to 97 right.
+- New pattern rules: "play / put on / watch / start + a title" and a title said with a season or episode, so the
+  commonest commands are decided in under 0.1 ms instead of ~0.2 s, and titles made of command words ("Up",
+  "Stop Making Sense", "Pause") are played instead of obeyed.
+- More clean-up ("okay", "and then", "thanks", "un pause"), more fixed phrases, "a bit louder", "the previous one",
+  "rewind to the beginning"; "skip back …" and "skip to …" no longer read as skipping forward; "the tenth episode
+  of season five" and "Next of Kin" are read correctly.
+
+### Added
+- `eval/commands.jsonl`: 654 generated, labelled commands (476 for tuning, 178 held out) from
+  `eval/build_commands.py`; `tv-agent eval --file … --split dev|test` scores them by category. Current rules:
+  654/654, with d1 needed for ~4% of them.
+
 ## server 0.1.0 — 2026-10-22
 
 First release.

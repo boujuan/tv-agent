@@ -11,7 +11,7 @@ PLAY_VERBS = re.compile(
 RESTART = re.compile(r"\b(?:from the (?:start|beginning)|from scratch|from episode one|start over|restart)\b")
 KIND_MOVIE = re.compile(r"^(?:the )?(?:movie|film)\s+|\s+(?:the )?(?:movie|film)$")
 KIND_SERIES = re.compile(r"^(?:the )?(?:series|show|tv show)\s+|\s+(?:the )?(?:series|show|tv show)$")
-EDGE_WORDS = re.compile(r"^(?:of|from|for|the next|next|some|on|in)\s+|\s+(?:on|in|for|please|now|again)$")
+EDGE_WORDS = re.compile(r"^(?:of|from|for|some|on|in)\s+|\s+(?:on|in|for|please|now|again)$")
 # "Go to season 3 episode 4", "carry on with the show": these mean the series that's on, not a title.
 CURRENT = {"", "it", "this", "that", "this one", "the show", "this show", "the series", "this series", "the episode",
            "this episode", "the current show", "the current episode", "my show", "the last episode", "last episode",

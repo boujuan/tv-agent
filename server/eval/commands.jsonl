@@ -1,0 +1,654 @@
+{"text": "I wanna watch dune.", "expect": {"type": "play_title", "title": "dune"}, "cat": "play_movie", "split": "test"}
+{"text": "Can you play dune.", "expect": {"type": "play_title", "title": "dune"}, "cat": "play_movie", "split": "test"}
+{"text": "Can you i want to watch dune.", "expect": {"type": "play_title", "title": "dune"}, "cat": "play_movie", "split": "dev"}
+{"text": "start dune part two", "expect": {"type": "play_title", "title": "dune part two"}, "cat": "play_movie", "split": "dev"}
+{"text": "i wanna watch dune part two", "expect": {"type": "play_title", "title": "dune part two"}, "cat": "play_movie", "split": "dev"}
+{"text": "i want to watch dune part two", "expect": {"type": "play_title", "title": "dune part two"}, "cat": "play_movie", "split": "dev"}
+{"text": "Um start oppenheimer.", "expect": {"type": "play_title", "title": "oppenheimer"}, "cat": "play_movie", "split": "dev"}
+{"text": "play the movie oppenheimer", "expect": {"type": "play_title", "title": "oppenheimer", "kind": "movie"}, "cat": "play_movie", "split": "dev"}
+{"text": "Uh i'd like to watch oppenheimer.", "expect": {"type": "play_title", "title": "oppenheimer"}, "cat": "play_movie", "split": "test"}
+{"text": "put on interstellar", "expect": {"type": "play_title", "title": "interstellar"}, "cat": "play_movie", "split": "dev"}
+{"text": "uh i wanna watch interstellar", "expect": {"type": "play_title", "title": "interstellar"}, "cat": "play_movie", "split": "test"}
+{"text": "start interstellar", "expect": {"type": "play_title", "title": "interstellar"}, "cat": "play_movie", "split": "dev"}
+{"text": "okay let's watch the godfather", "expect": {"type": "play_title", "title": "the godfather"}, "cat": "play_movie", "split": "dev"}
+{"text": "i'd like to watch the godfather please", "expect": {"type": "play_title", "title": "the godfather"}, "cat": "play_movie", "split": "test"}
+{"text": "Play the godfather.", "expect": {"type": "play_title", "title": "the godfather"}, "cat": "play_movie", "split": "dev"}
+{"text": "uh start the matrix", "expect": {"type": "play_title", "title": "the matrix"}, "cat": "play_movie", "split": "dev"}
+{"text": "play the matrix", "expect": {"type": "play_title", "title": "the matrix"}, "cat": "play_movie", "split": "dev"}
+{"text": "put on the matrix", "expect": {"type": "play_title", "title": "the matrix"}, "cat": "play_movie", "split": "test"}
+{"text": "play parasite", "expect": {"type": "play_title", "title": "parasite"}, "cat": "play_movie", "split": "dev"}
+{"text": "Can you play parasite.", "expect": {"type": "play_title", "title": "parasite"}, "cat": "play_movie", "split": "dev"}
+{"text": "I wanna watch parasite.", "expect": {"type": "play_title", "title": "parasite"}, "cat": "play_movie", "split": "test"}
+{"text": "play inception", "expect": {"type": "play_title", "title": "inception"}, "cat": "play_movie", "split": "dev"}
+{"text": "Watch inception.", "expect": {"type": "play_title", "title": "inception"}, "cat": "play_movie", "split": "test"}
+{"text": "hey tv i want to watch inception", "expect": {"type": "play_title", "title": "inception"}, "cat": "play_movie", "split": "test"}
+{"text": "Put on barbie.", "expect": {"type": "play_title", "title": "barbie"}, "cat": "play_movie", "split": "dev"}
+{"text": "can you play barbie", "expect": {"type": "play_title", "title": "barbie"}, "cat": "play_movie", "split": "test"}
+{"text": "I want to watch barbie.", "expect": {"type": "play_title", "title": "barbie"}, "cat": "play_movie", "split": "dev"}
+{"text": "play gladiator", "expect": {"type": "play_title", "title": "gladiator"}, "cat": "play_movie", "split": "dev"}
+{"text": "i'd like to watch gladiator", "expect": {"type": "play_title", "title": "gladiator"}, "cat": "play_movie", "split": "dev"}
+{"text": "can you play gladiator", "expect": {"type": "play_title", "title": "gladiator"}, "cat": "play_movie", "split": "dev"}
+{"text": "put alien romulus on", "expect": {"type": "play_title", "title": "alien romulus"}, "cat": "play_movie", "split": "dev"}
+{"text": "i wanna watch alien romulus", "expect": {"type": "play_title", "title": "alien romulus"}, "cat": "play_movie", "split": "dev"}
+{"text": "i'd like to watch alien romulus", "expect": {"type": "play_title", "title": "alien romulus"}, "cat": "play_movie", "split": "test"}
+{"text": "play the movie the batman please", "expect": {"type": "play_title", "title": "the batman", "kind": "movie"}, "cat": "play_movie", "split": "dev"}
+{"text": "Can you play the batman.", "expect": {"type": "play_title", "title": "the batman"}, "cat": "play_movie", "split": "test"}
+{"text": "I wanna watch the batman.", "expect": {"type": "play_title", "title": "the batman"}, "cat": "play_movie", "split": "dev"}
+{"text": "i wanna watch joker", "expect": {"type": "play_title", "title": "joker"}, "cat": "play_movie", "split": "dev"}
+{"text": "I'd like to watch joker.", "expect": {"type": "play_title", "title": "joker"}, "cat": "play_movie", "split": "dev"}
+{"text": "i want to watch joker", "expect": {"type": "play_title", "title": "joker"}, "cat": "play_movie", "split": "dev"}
+{"text": "Okay i'd like to watch blade runner 2049.", "expect": {"type": "play_title", "title": "blade runner 2049"}, "cat": "play_movie", "split": "dev"}
+{"text": "Let's watch blade runner 2049.", "expect": {"type": "play_title", "title": "blade runner 2049"}, "cat": "play_movie", "split": "dev"}
+{"text": "put blade runner 2049 on", "expect": {"type": "play_title", "title": "blade runner 2049"}, "cat": "play_movie", "split": "test"}
+{"text": "Put on ocean's eleven.", "expect": {"type": "play_title", "title": "ocean's eleven"}, "cat": "play_movie", "split": "dev"}
+{"text": "Watch ocean's eleven.", "expect": {"type": "play_title", "title": "ocean's eleven"}, "cat": "play_movie", "split": "dev"}
+{"text": "Let's watch ocean's eleven.", "expect": {"type": "play_title", "title": "ocean's eleven"}, "cat": "play_movie", "split": "dev"}
+{"text": "i want to watch the dark knight", "expect": {"type": "play_title", "title": "the dark knight"}, "cat": "play_movie", "split": "dev"}
+{"text": "Can you play the dark knight.", "expect": {"type": "play_title", "title": "the dark knight"}, "cat": "play_movie", "split": "dev"}
+{"text": "let's watch the dark knight please", "expect": {"type": "play_title", "title": "the dark knight"}, "cat": "play_movie", "split": "test"}
+{"text": "put on the holdovers", "expect": {"type": "play_title", "title": "the holdovers"}, "cat": "play_movie", "split": "dev"}
+{"text": "i wanna watch the holdovers", "expect": {"type": "play_title", "title": "the holdovers"}, "cat": "play_movie", "split": "dev"}
+{"text": "Start the holdovers.", "expect": {"type": "play_title", "title": "the holdovers"}, "cat": "play_movie", "split": "dev"}
+{"text": "Let's watch past lives.", "expect": {"type": "play_title", "title": "past lives"}, "cat": "play_movie", "split": "dev"}
+{"text": "can you play past lives", "expect": {"type": "play_title", "title": "past lives"}, "cat": "play_movie", "split": "dev"}
+{"text": "I want to watch past lives.", "expect": {"type": "play_title", "title": "past lives"}, "cat": "play_movie", "split": "dev"}
+{"text": "I want to watch the substance.", "expect": {"type": "play_title", "title": "the substance"}, "cat": "play_movie", "split": "dev"}
+{"text": "watch the substance", "expect": {"type": "play_title", "title": "the substance"}, "cat": "play_movie", "split": "dev"}
+{"text": "i'd like to watch the substance", "expect": {"type": "play_title", "title": "the substance"}, "cat": "play_movie", "split": "dev"}
+{"text": "start anora", "expect": {"type": "play_title", "title": "anora"}, "cat": "play_movie", "split": "dev"}
+{"text": "let's watch anora", "expect": {"type": "play_title", "title": "anora"}, "cat": "play_movie", "split": "dev"}
+{"text": "Put anora on.", "expect": {"type": "play_title", "title": "anora"}, "cat": "play_movie", "split": "dev"}
+{"text": "watch conclave", "expect": {"type": "play_title", "title": "conclave"}, "cat": "play_movie", "split": "test"}
+{"text": "put on conclave", "expect": {"type": "play_title", "title": "conclave"}, "cat": "play_movie", "split": "test"}
+{"text": "play the movie conclave", "expect": {"type": "play_title", "title": "conclave", "kind": "movie"}, "cat": "play_movie", "split": "test"}
+{"text": "Put wicked on.", "expect": {"type": "play_title", "title": "wicked"}, "cat": "play_movie", "split": "dev"}
+{"text": "i want to watch wicked now", "expect": {"type": "play_title", "title": "wicked"}, "cat": "play_movie", "split": "dev"}
+{"text": "watch wicked", "expect": {"type": "play_title", "title": "wicked"}, "cat": "play_movie", "split": "test"}
+{"text": "Play toy story.", "expect": {"type": "play_title", "title": "toy story"}, "cat": "play_movie", "split": "dev"}
+{"text": "Hey tv i wanna watch toy story.", "expect": {"type": "play_title", "title": "toy story"}, "cat": "play_movie", "split": "dev"}
+{"text": "uh put toy story on", "expect": {"type": "play_title", "title": "toy story"}, "cat": "play_movie", "split": "test"}
+{"text": "watch top gun maverick", "expect": {"type": "play_title", "title": "top gun maverick"}, "cat": "play_movie", "split": "test"}
+{"text": "Let's watch top gun maverick.", "expect": {"type": "play_title", "title": "top gun maverick"}, "cat": "play_movie", "split": "dev"}
+{"text": "i wanna watch top gun maverick", "expect": {"type": "play_title", "title": "top gun maverick"}, "cat": "play_movie", "split": "test"}
+{"text": "Start mad max fury road.", "expect": {"type": "play_title", "title": "mad max fury road"}, "cat": "play_movie", "split": "dev"}
+{"text": "Play mad max fury road.", "expect": {"type": "play_title", "title": "mad max fury road"}, "cat": "play_movie", "split": "dev"}
+{"text": "i wanna watch mad max fury road", "expect": {"type": "play_title", "title": "mad max fury road"}, "cat": "play_movie", "split": "dev"}
+{"text": "Can you play everything everywhere all at once.", "expect": {"type": "play_title", "title": "everything everywhere all at once"}, "cat": "play_movie", "split": "dev"}
+{"text": "play the movie everything everywhere all at once", "expect": {"type": "play_title", "title": "everything everywhere all at once", "kind": "movie"}, "cat": "play_movie", "split": "dev"}
+{"text": "start everything everywhere all at once", "expect": {"type": "play_title", "title": "everything everywhere all at once"}, "cat": "play_movie", "split": "dev"}
+{"text": "Hey tv i wanna watch el hoyo.", "expect": {"type": "play_title", "title": "el hoyo"}, "cat": "play_movie", "split": "dev"}
+{"text": "I'd like to watch el hoyo.", "expect": {"type": "play_title", "title": "el hoyo"}, "cat": "play_movie", "split": "dev"}
+{"text": "play the movie el hoyo", "expect": {"type": "play_title", "title": "el hoyo", "kind": "movie"}, "cat": "play_movie", "split": "dev"}
+{"text": "Let's watch ocho apellidos vascos.", "expect": {"type": "play_title", "title": "ocho apellidos vascos"}, "cat": "play_movie", "split": "dev"}
+{"text": "i want to watch ocho apellidos vascos", "expect": {"type": "play_title", "title": "ocho apellidos vascos"}, "cat": "play_movie", "split": "dev"}
+{"text": "um play ocho apellidos vascos", "expect": {"type": "play_title", "title": "ocho apellidos vascos"}, "cat": "play_movie", "split": "dev"}
+{"text": "can you play the irishman", "expect": {"type": "play_title", "title": "the irishman"}, "cat": "play_movie", "split": "test"}
+{"text": "i want to watch the irishman", "expect": {"type": "play_title", "title": "the irishman"}, "cat": "play_movie", "split": "dev"}
+{"text": "put on the irishman", "expect": {"type": "play_title", "title": "the irishman"}, "cat": "play_movie", "split": "dev"}
+{"text": "Play no country for old men.", "expect": {"type": "play_title", "title": "no country for old men"}, "cat": "play_movie", "split": "dev"}
+{"text": "can you play no country for old men", "expect": {"type": "play_title", "title": "no country for old men"}, "cat": "play_movie", "split": "dev"}
+{"text": "Put on no country for old men now.", "expect": {"type": "play_title", "title": "no country for old men"}, "cat": "play_movie", "split": "dev"}
+{"text": "Play la la land.", "expect": {"type": "play_title", "title": "la la land"}, "cat": "play_movie", "split": "dev"}
+{"text": "can you play la la land", "expect": {"type": "play_title", "title": "la la land"}, "cat": "play_movie", "split": "dev"}
+{"text": "Play the movie la la land.", "expect": {"type": "play_title", "title": "la la land", "kind": "movie"}, "cat": "play_movie", "split": "test"}
+{"text": "can you i wanna watch spirited away", "expect": {"type": "play_title", "title": "spirited away"}, "cat": "play_movie", "split": "dev"}
+{"text": "Can you play spirited away.", "expect": {"type": "play_title", "title": "spirited away"}, "cat": "play_movie", "split": "dev"}
+{"text": "put on spirited away", "expect": {"type": "play_title", "title": "spirited away"}, "cat": "play_movie", "split": "dev"}
+{"text": "Could you start the grand budapest hotel.", "expect": {"type": "play_title", "title": "the grand budapest hotel"}, "cat": "play_movie", "split": "dev"}
+{"text": "let's watch the grand budapest hotel", "expect": {"type": "play_title", "title": "the grand budapest hotel"}, "cat": "play_movie", "split": "dev"}
+{"text": "Put on the grand budapest hotel.", "expect": {"type": "play_title", "title": "the grand budapest hotel"}, "cat": "play_movie", "split": "test"}
+{"text": "let's watch arrival", "expect": {"type": "play_title", "title": "arrival"}, "cat": "play_movie", "split": "dev"}
+{"text": "hey tv play arrival", "expect": {"type": "play_title", "title": "arrival"}, "cat": "play_movie", "split": "dev"}
+{"text": "Put arrival on.", "expect": {"type": "play_title", "title": "arrival"}, "cat": "play_movie", "split": "dev"}
+{"text": "play the movie the prestige", "expect": {"type": "play_title", "title": "the prestige", "kind": "movie"}, "cat": "play_movie", "split": "dev"}
+{"text": "start the prestige", "expect": {"type": "play_title", "title": "the prestige"}, "cat": "play_movie", "split": "dev"}
+{"text": "i want to watch the prestige", "expect": {"type": "play_title", "title": "the prestige"}, "cat": "play_movie", "split": "dev"}
+{"text": "i want to watch whiplash", "expect": {"type": "play_title", "title": "whiplash"}, "cat": "play_movie", "split": "dev"}
+{"text": "watch whiplash", "expect": {"type": "play_title", "title": "whiplash"}, "cat": "play_movie", "split": "dev"}
+{"text": "Uh let's watch whiplash.", "expect": {"type": "play_title", "title": "whiplash"}, "cat": "play_movie", "split": "test"}
+{"text": "play home alone", "expect": {"type": "play_title", "title": "home alone"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "put on the movie home alone", "expect": {"type": "play_title", "title": "home alone", "kind": "movie"}, "cat": "play_tricky_title", "split": "test"}
+{"text": "watch home alone", "expect": {"type": "play_title", "title": "home alone"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "play up", "expect": {"type": "play_title", "title": "up"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "put on the movie up", "expect": {"type": "play_title", "title": "up", "kind": "movie"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "watch up", "expect": {"type": "play_title", "title": "up"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "play back to the future", "expect": {"type": "play_title", "title": "back to the future"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "put on the movie back to the future", "expect": {"type": "play_title", "title": "back to the future", "kind": "movie"}, "cat": "play_tricky_title", "split": "test"}
+{"text": "watch back to the future", "expect": {"type": "play_title", "title": "back to the future"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "play stop making sense", "expect": {"type": "play_title", "title": "stop making sense"}, "cat": "play_tricky_title", "split": "test"}
+{"text": "put on the movie stop making sense", "expect": {"type": "play_title", "title": "stop making sense", "kind": "movie"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "watch stop making sense", "expect": {"type": "play_title", "title": "stop making sense"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "play inside out", "expect": {"type": "play_title", "title": "inside out"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "put on the movie inside out", "expect": {"type": "play_title", "title": "inside out", "kind": "movie"}, "cat": "play_tricky_title", "split": "test"}
+{"text": "watch inside out", "expect": {"type": "play_title", "title": "inside out"}, "cat": "play_tricky_title", "split": "test"}
+{"text": "play the rewind", "expect": {"type": "play_title", "title": "the rewind"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "put on the movie the rewind", "expect": {"type": "play_title", "title": "the rewind", "kind": "movie"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "watch the rewind", "expect": {"type": "play_title", "title": "the rewind"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "play run lola run", "expect": {"type": "play_title", "title": "run lola run"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "put on the movie run lola run", "expect": {"type": "play_title", "title": "run lola run", "kind": "movie"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "watch run lola run", "expect": {"type": "play_title", "title": "run lola run"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "play fast x", "expect": {"type": "play_title", "title": "fast x"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "put on the movie fast x", "expect": {"type": "play_title", "title": "fast x", "kind": "movie"}, "cat": "play_tricky_title", "split": "test"}
+{"text": "watch fast x", "expect": {"type": "play_title", "title": "fast x"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "play the volume", "expect": {"type": "play_title", "title": "the volume"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "put on the movie the volume", "expect": {"type": "play_title", "title": "the volume", "kind": "movie"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "watch the volume", "expect": {"type": "play_title", "title": "the volume"}, "cat": "play_tricky_title", "split": "test"}
+{"text": "play next of kin", "expect": {"type": "play_title", "title": "next of kin"}, "cat": "play_tricky_title", "split": "test"}
+{"text": "put on the movie next of kin", "expect": {"type": "play_title", "title": "next of kin", "kind": "movie"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "watch next of kin", "expect": {"type": "play_title", "title": "next of kin"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "play pause", "expect": {"type": "play_title", "title": "pause"}, "cat": "play_tricky_title", "split": "test"}
+{"text": "put on the movie pause", "expect": {"type": "play_title", "title": "pause", "kind": "movie"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "watch pause", "expect": {"type": "play_title", "title": "pause"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "play mute", "expect": {"type": "play_title", "title": "mute"}, "cat": "play_tricky_title", "split": "test"}
+{"text": "put on the movie mute", "expect": {"type": "play_title", "title": "mute", "kind": "movie"}, "cat": "play_tricky_title", "split": "dev"}
+{"text": "watch mute", "expect": {"type": "play_title", "title": "mute"}, "cat": "play_tricky_title", "split": "test"}
+{"text": "I want to watch the bear season six episode six.", "expect": {"type": "play_title", "title": "the bear", "season": 6, "episode": 6}, "cat": "play_episode", "split": "test"}
+{"text": "could you i want to watch the bear episode 1 of season 3", "expect": {"type": "play_title", "title": "the bear", "season": 3, "episode": 1}, "cat": "play_episode", "split": "dev"}
+{"text": "start the bear the third episode of season six now", "expect": {"type": "play_title", "title": "the bear", "season": 6, "episode": 3}, "cat": "play_episode", "split": "dev"}
+{"text": "Play the bear season two.", "expect": {"type": "play_title", "title": "the bear", "season": 2}, "cat": "play_season", "split": "dev"}
+{"text": "Watch the bear.", "expect": {"type": "play_title", "title": "the bear"}, "cat": "play_series", "split": "dev"}
+{"text": "put on severance season 3 episode 3", "expect": {"type": "play_title", "title": "severance", "season": 3, "episode": 3}, "cat": "play_episode", "split": "dev"}
+{"text": "start severance s02e06 now", "expect": {"type": "play_title", "title": "severance", "season": 2, "episode": 6}, "cat": "play_episode", "split": "test"}
+{"text": "I want to watch severance season 4, episode 4.", "expect": {"type": "play_title", "title": "severance", "season": 4, "episode": 4}, "cat": "play_episode", "split": "dev"}
+{"text": "put on severance season three", "expect": {"type": "play_title", "title": "severance", "season": 3}, "cat": "play_season", "split": "test"}
+{"text": "put on severance", "expect": {"type": "play_title", "title": "severance"}, "cat": "play_series", "split": "test"}
+{"text": "the last of us season 2 ep 11 please", "expect": {"type": "play_title", "title": "the last of us", "season": 2, "episode": 11}, "cat": "play_episode", "split": "dev"}
+{"text": "go to the last of us first season episode nine", "expect": {"type": "play_title", "title": "the last of us", "season": 1, "episode": 9}, "cat": "play_episode", "split": "dev"}
+{"text": "start the last of us s06e03", "expect": {"type": "play_title", "title": "the last of us", "season": 6, "episode": 3}, "cat": "play_episode", "split": "dev"}
+{"text": "Watch season 3 of the last of us.", "expect": {"type": "play_title", "title": "the last of us", "season": 3}, "cat": "play_season", "split": "dev"}
+{"text": "Watch the last of us.", "expect": {"type": "play_title", "title": "the last of us"}, "cat": "play_series", "split": "dev"}
+{"text": "I want to watch stranger things episode 9 season 5.", "expect": {"type": "play_title", "title": "stranger things", "season": 5, "episode": 9}, "cat": "play_episode", "split": "dev"}
+{"text": "Go to stranger things first season episode twelve.", "expect": {"type": "play_title", "title": "stranger things", "season": 1, "episode": 12}, "cat": "play_episode", "split": "dev"}
+{"text": "I want to watch stranger things s5e10.", "expect": {"type": "play_title", "title": "stranger things", "season": 5, "episode": 10}, "cat": "play_episode", "split": "dev"}
+{"text": "Watch season five of stranger things.", "expect": {"type": "play_title", "title": "stranger things", "season": 5}, "cat": "play_season", "split": "dev"}
+{"text": "put on stranger things", "expect": {"type": "play_title", "title": "stranger things"}, "cat": "play_series", "split": "dev"}
+{"text": "Could you play the office s04e03.", "expect": {"type": "play_title", "title": "the office", "season": 4, "episode": 3}, "cat": "play_episode", "split": "dev"}
+{"text": "I want to watch the office season 6 ep 9.", "expect": {"type": "play_title", "title": "the office", "season": 6, "episode": 9}, "cat": "play_episode", "split": "dev"}
+{"text": "i want to watch the office fourth season episode eight", "expect": {"type": "play_title", "title": "the office", "season": 4, "episode": 8}, "cat": "play_episode", "split": "dev"}
+{"text": "Watch season 4 of the office.", "expect": {"type": "play_title", "title": "the office", "season": 4}, "cat": "play_season", "split": "dev"}
+{"text": "let's watch the office", "expect": {"type": "play_title", "title": "the office"}, "cat": "play_series", "split": "dev"}
+{"text": "Watch breaking bad season 2 episode 12 please.", "expect": {"type": "play_title", "title": "breaking bad", "season": 2, "episode": 12}, "cat": "play_episode", "split": "test"}
+{"text": "Can you play breaking bad fourth season episode four.", "expect": {"type": "play_title", "title": "breaking bad", "season": 4, "episode": 4}, "cat": "play_episode", "split": "dev"}
+{"text": "i want to watch breaking bad episode 9 of season 3", "expect": {"type": "play_title", "title": "breaking bad", "season": 3, "episode": 9}, "cat": "play_episode", "split": "dev"}
+{"text": "Play breaking bad season 4.", "expect": {"type": "play_title", "title": "breaking bad", "season": 4}, "cat": "play_season", "split": "test"}
+{"text": "watch breaking bad", "expect": {"type": "play_title", "title": "breaking bad"}, "cat": "play_series", "split": "test"}
+{"text": "hey tv can you play better call saul s06e03", "expect": {"type": "play_title", "title": "better call saul", "season": 6, "episode": 3}, "cat": "play_episode", "split": "test"}
+{"text": "Watch better call saul season 3, episode 2 please.", "expect": {"type": "play_title", "title": "better call saul", "season": 3, "episode": 2}, "cat": "play_episode", "split": "dev"}
+{"text": "put on better call saul episode 10 of season 4", "expect": {"type": "play_title", "title": "better call saul", "season": 4, "episode": 10}, "cat": "play_episode", "split": "dev"}
+{"text": "uh play better call saul season 1", "expect": {"type": "play_title", "title": "better call saul", "season": 1}, "cat": "play_season", "split": "dev"}
+{"text": "Put on better call saul.", "expect": {"type": "play_title", "title": "better call saul"}, "cat": "play_series", "split": "test"}
+{"text": "shogun s2e3", "expect": {"type": "play_title", "title": "shogun", "season": 2, "episode": 3}, "cat": "play_episode", "split": "test"}
+{"text": "Watch shogun episode 11 of season 5.", "expect": {"type": "play_title", "title": "shogun", "season": 5, "episode": 11}, "cat": "play_episode", "split": "test"}
+{"text": "i want to watch shogun s5e11", "expect": {"type": "play_title", "title": "shogun", "season": 5, "episode": 11}, "cat": "play_episode", "split": "test"}
+{"text": "play shogun season three", "expect": {"type": "play_title", "title": "shogun", "season": 3}, "cat": "play_season", "split": "dev"}
+{"text": "Play shogun.", "expect": {"type": "play_title", "title": "shogun"}, "cat": "play_series", "split": "dev"}
+{"text": "Play fallout episode one of season four.", "expect": {"type": "play_title", "title": "fallout", "season": 4, "episode": 1}, "cat": "play_episode", "split": "dev"}
+{"text": "i want to watch fallout season 4 episode 2", "expect": {"type": "play_title", "title": "fallout", "season": 4, "episode": 2}, "cat": "play_episode", "split": "dev"}
+{"text": "Uh can you play fallout episode 2 season 4.", "expect": {"type": "play_title", "title": "fallout", "season": 4, "episode": 2}, "cat": "play_episode", "split": "dev"}
+{"text": "Watch season four of fallout please.", "expect": {"type": "play_title", "title": "fallout", "season": 4}, "cat": "play_season", "split": "dev"}
+{"text": "play fallout", "expect": {"type": "play_title", "title": "fallout"}, "cat": "play_series", "split": "test"}
+{"text": "i want to watch arcane fourth season episode 12", "expect": {"type": "play_title", "title": "arcane", "season": 4, "episode": 12}, "cat": "play_episode", "split": "test"}
+{"text": "start arcane episode eight of season one", "expect": {"type": "play_title", "title": "arcane", "season": 1, "episode": 8}, "cat": "play_episode", "split": "dev"}
+{"text": "i want to watch arcane season six, episode four", "expect": {"type": "play_title", "title": "arcane", "season": 6, "episode": 4}, "cat": "play_episode", "split": "test"}
+{"text": "play arcane season 2", "expect": {"type": "play_title", "title": "arcane", "season": 2}, "cat": "play_season", "split": "dev"}
+{"text": "okay watch arcane", "expect": {"type": "play_title", "title": "arcane"}, "cat": "play_series", "split": "dev"}
+{"text": "Go to squid game season two, episode two now.", "expect": {"type": "play_title", "title": "squid game", "season": 2, "episode": 2}, "cat": "play_episode", "split": "test"}
+{"text": "start squid game s6e12", "expect": {"type": "play_title", "title": "squid game", "season": 6, "episode": 12}, "cat": "play_episode", "split": "dev"}
+{"text": "play squid game s1e5", "expect": {"type": "play_title", "title": "squid game", "season": 1, "episode": 5}, "cat": "play_episode", "split": "test"}
+{"text": "watch season 2 of squid game", "expect": {"type": "play_title", "title": "squid game", "season": 2}, "cat": "play_season", "split": "test"}
+{"text": "play squid game", "expect": {"type": "play_title", "title": "squid game"}, "cat": "play_series", "split": "dev"}
+{"text": "put on house of the dragon season 6 episode 6", "expect": {"type": "play_title", "title": "house of the dragon", "season": 6, "episode": 6}, "cat": "play_episode", "split": "dev"}
+{"text": "Put on house of the dragon season four episode seven.", "expect": {"type": "play_title", "title": "house of the dragon", "season": 4, "episode": 7}, "cat": "play_episode", "split": "dev"}
+{"text": "Can you play house of the dragon the tenth episode of season 5.", "expect": {"type": "play_title", "title": "house of the dragon", "season": 5, "episode": 10}, "cat": "play_episode", "split": "test"}
+{"text": "Hey tv play house of the dragon season 4.", "expect": {"type": "play_title", "title": "house of the dragon", "season": 4}, "cat": "play_season", "split": "dev"}
+{"text": "Um watch house of the dragon.", "expect": {"type": "play_title", "title": "house of the dragon"}, "cat": "play_series", "split": "dev"}
+{"text": "can you put on game of thrones season two episode seven", "expect": {"type": "play_title", "title": "game of thrones", "season": 2, "episode": 7}, "cat": "play_episode", "split": "dev"}
+{"text": "Game of thrones season 3, episode 8.", "expect": {"type": "play_title", "title": "game of thrones", "season": 3, "episode": 8}, "cat": "play_episode", "split": "dev"}
+{"text": "Start game of thrones the tenth episode of season 5.", "expect": {"type": "play_title", "title": "game of thrones", "season": 5, "episode": 10}, "cat": "play_episode", "split": "dev"}
+{"text": "Play game of thrones season 1.", "expect": {"type": "play_title", "title": "game of thrones", "season": 1}, "cat": "play_season", "split": "test"}
+{"text": "play game of thrones", "expect": {"type": "play_title", "title": "game of thrones"}, "cat": "play_series", "split": "dev"}
+{"text": "uh put on succession the twelfth episode of season six", "expect": {"type": "play_title", "title": "succession", "season": 6, "episode": 12}, "cat": "play_episode", "split": "test"}
+{"text": "go to succession season 1, episode 10", "expect": {"type": "play_title", "title": "succession", "season": 1, "episode": 10}, "cat": "play_episode", "split": "dev"}
+{"text": "could you start succession season six, episode five", "expect": {"type": "play_title", "title": "succession", "season": 6, "episode": 5}, "cat": "play_episode", "split": "test"}
+{"text": "put on succession season four", "expect": {"type": "play_title", "title": "succession", "season": 4}, "cat": "play_season", "split": "dev"}
+{"text": "play succession", "expect": {"type": "play_title", "title": "succession"}, "cat": "play_series", "split": "dev"}
+{"text": "The boys s02e08.", "expect": {"type": "play_title", "title": "the boys", "season": 2, "episode": 8}, "cat": "play_episode", "split": "dev"}
+{"text": "go to the boys sixth season episode 1", "expect": {"type": "play_title", "title": "the boys", "season": 6, "episode": 1}, "cat": "play_episode", "split": "test"}
+{"text": "The boys first season episode six now.", "expect": {"type": "play_title", "title": "the boys", "season": 1, "episode": 6}, "cat": "play_episode", "split": "dev"}
+{"text": "Put on the boys season five.", "expect": {"type": "play_title", "title": "the boys", "season": 5}, "cat": "play_season", "split": "dev"}
+{"text": "watch the boys", "expect": {"type": "play_title", "title": "the boys"}, "cat": "play_series", "split": "test"}
+{"text": "go to the white lotus episode twelve season three", "expect": {"type": "play_title", "title": "the white lotus", "season": 3, "episode": 12}, "cat": "play_episode", "split": "dev"}
+{"text": "go to the white lotus s04e06", "expect": {"type": "play_title", "title": "the white lotus", "season": 4, "episode": 6}, "cat": "play_episode", "split": "test"}
+{"text": "start the white lotus episode eight season five", "expect": {"type": "play_title", "title": "the white lotus", "season": 5, "episode": 8}, "cat": "play_episode", "split": "dev"}
+{"text": "Put on the white lotus season 4.", "expect": {"type": "play_title", "title": "the white lotus", "season": 4}, "cat": "play_season", "split": "test"}
+{"text": "Can you let's watch the white lotus.", "expect": {"type": "play_title", "title": "the white lotus"}, "cat": "play_series", "split": "dev"}
+{"text": "watch andor episode 8 of season 4", "expect": {"type": "play_title", "title": "andor", "season": 4, "episode": 8}, "cat": "play_episode", "split": "test"}
+{"text": "can you go to andor season 4 ep 10", "expect": {"type": "play_title", "title": "andor", "season": 4, "episode": 10}, "cat": "play_episode", "split": "dev"}
+{"text": "Play andor the second episode of season six.", "expect": {"type": "play_title", "title": "andor", "season": 6, "episode": 2}, "cat": "play_episode", "split": "test"}
+{"text": "watch season four of andor", "expect": {"type": "play_title", "title": "andor", "season": 4}, "cat": "play_season", "split": "test"}
+{"text": "watch andor", "expect": {"type": "play_title", "title": "andor"}, "cat": "play_series", "split": "dev"}
+{"text": "could you watch slow horses episode ten of season five", "expect": {"type": "play_title", "title": "slow horses", "season": 5, "episode": 10}, "cat": "play_episode", "split": "test"}
+{"text": "slow horses season 6 ep 11", "expect": {"type": "play_title", "title": "slow horses", "season": 6, "episode": 11}, "cat": "play_episode", "split": "dev"}
+{"text": "i want to watch slow horses season 4, episode 11", "expect": {"type": "play_title", "title": "slow horses", "season": 4, "episode": 11}, "cat": "play_episode", "split": "dev"}
+{"text": "Um put on slow horses season five.", "expect": {"type": "play_title", "title": "slow horses", "season": 5}, "cat": "play_season", "split": "dev"}
+{"text": "watch slow horses", "expect": {"type": "play_title", "title": "slow horses"}, "cat": "play_series", "split": "dev"}
+{"text": "watch the penguin season four, episode four", "expect": {"type": "play_title", "title": "the penguin", "season": 4, "episode": 4}, "cat": "play_episode", "split": "test"}
+{"text": "The penguin season six, episode one.", "expect": {"type": "play_title", "title": "the penguin", "season": 6, "episode": 1}, "cat": "play_episode", "split": "dev"}
+{"text": "the penguin season six, episode eleven", "expect": {"type": "play_title", "title": "the penguin", "season": 6, "episode": 11}, "cat": "play_episode", "split": "test"}
+{"text": "Play the penguin season four.", "expect": {"type": "play_title", "title": "the penguin", "season": 4}, "cat": "play_season", "split": "test"}
+{"text": "Let's watch the penguin.", "expect": {"type": "play_title", "title": "the penguin"}, "cat": "play_series", "split": "test"}
+{"text": "Start pluribus third season episode 9 please.", "expect": {"type": "play_title", "title": "pluribus", "season": 3, "episode": 9}, "cat": "play_episode", "split": "dev"}
+{"text": "Can you play pluribus season 4 episode 1.", "expect": {"type": "play_title", "title": "pluribus", "season": 4, "episode": 1}, "cat": "play_episode", "split": "dev"}
+{"text": "Put on pluribus s06e02.", "expect": {"type": "play_title", "title": "pluribus", "season": 6, "episode": 2}, "cat": "play_episode", "split": "dev"}
+{"text": "Watch season 4 of pluribus.", "expect": {"type": "play_title", "title": "pluribus", "season": 4}, "cat": "play_season", "split": "dev"}
+{"text": "Play pluribus now.", "expect": {"type": "play_title", "title": "pluribus"}, "cat": "play_series", "split": "dev"}
+{"text": "play foundation fifth season episode 11", "expect": {"type": "play_title", "title": "foundation", "season": 5, "episode": 11}, "cat": "play_episode", "split": "dev"}
+{"text": "Put on foundation season 1 ep 11.", "expect": {"type": "play_title", "title": "foundation", "season": 1, "episode": 11}, "cat": "play_episode", "split": "dev"}
+{"text": "Play foundation the eighth episode of season six please.", "expect": {"type": "play_title", "title": "foundation", "season": 6, "episode": 8}, "cat": "play_episode", "split": "dev"}
+{"text": "Watch season 1 of foundation.", "expect": {"type": "play_title", "title": "foundation", "season": 1}, "cat": "play_season", "split": "test"}
+{"text": "Watch foundation.", "expect": {"type": "play_title", "title": "foundation"}, "cat": "play_series", "split": "dev"}
+{"text": "Community the eighth episode of season 2 please.", "expect": {"type": "play_title", "title": "community", "season": 2, "episode": 8}, "cat": "play_episode", "split": "dev"}
+{"text": "watch community the first episode of season three please", "expect": {"type": "play_title", "title": "community", "season": 3, "episode": 1}, "cat": "play_episode", "split": "dev"}
+{"text": "could you put on community the fourth episode of season 3", "expect": {"type": "play_title", "title": "community", "season": 3, "episode": 4}, "cat": "play_episode", "split": "test"}
+{"text": "Put on community season three.", "expect": {"type": "play_title", "title": "community", "season": 3}, "cat": "play_season", "split": "dev"}
+{"text": "let's watch community", "expect": {"type": "play_title", "title": "community"}, "cat": "play_series", "split": "test"}
+{"text": "Play friends episode 7 of season 5.", "expect": {"type": "play_title", "title": "friends", "season": 5, "episode": 7}, "cat": "play_episode", "split": "dev"}
+{"text": "um i want to watch friends season 3, episode 6", "expect": {"type": "play_title", "title": "friends", "season": 3, "episode": 6}, "cat": "play_episode", "split": "dev"}
+{"text": "start friends s4e10", "expect": {"type": "play_title", "title": "friends", "season": 4, "episode": 10}, "cat": "play_episode", "split": "dev"}
+{"text": "Put on friends season four.", "expect": {"type": "play_title", "title": "friends", "season": 4}, "cat": "play_season", "split": "dev"}
+{"text": "watch friends", "expect": {"type": "play_title", "title": "friends"}, "cat": "play_series", "split": "dev"}
+{"text": "start the sopranos s1e6", "expect": {"type": "play_title", "title": "the sopranos", "season": 1, "episode": 6}, "cat": "play_episode", "split": "dev"}
+{"text": "The sopranos the eighth episode of season six.", "expect": {"type": "play_title", "title": "the sopranos", "season": 6, "episode": 8}, "cat": "play_episode", "split": "test"}
+{"text": "Can you go to the sopranos fourth season episode eight.", "expect": {"type": "play_title", "title": "the sopranos", "season": 4, "episode": 8}, "cat": "play_episode", "split": "dev"}
+{"text": "Watch season three of the sopranos.", "expect": {"type": "play_title", "title": "the sopranos", "season": 3}, "cat": "play_season", "split": "dev"}
+{"text": "Could you put on the sopranos.", "expect": {"type": "play_title", "title": "the sopranos"}, "cat": "play_series", "split": "dev"}
+{"text": "put on the wire episode three of season three", "expect": {"type": "play_title", "title": "the wire", "season": 3, "episode": 3}, "cat": "play_episode", "split": "dev"}
+{"text": "play the wire fourth season episode 8", "expect": {"type": "play_title", "title": "the wire", "season": 4, "episode": 8}, "cat": "play_episode", "split": "dev"}
+{"text": "start the wire s02e07", "expect": {"type": "play_title", "title": "the wire", "season": 2, "episode": 7}, "cat": "play_episode", "split": "test"}
+{"text": "uh play the wire season one", "expect": {"type": "play_title", "title": "the wire", "season": 1}, "cat": "play_season", "split": "dev"}
+{"text": "put on the wire", "expect": {"type": "play_title", "title": "the wire"}, "cat": "play_series", "split": "dev"}
+{"text": "i want to watch true detective s05e05", "expect": {"type": "play_title", "title": "true detective", "season": 5, "episode": 5}, "cat": "play_episode", "split": "dev"}
+{"text": "Uh true detective s06e01.", "expect": {"type": "play_title", "title": "true detective", "season": 6, "episode": 1}, "cat": "play_episode", "split": "test"}
+{"text": "Put on true detective s4e11.", "expect": {"type": "play_title", "title": "true detective", "season": 4, "episode": 11}, "cat": "play_episode", "split": "test"}
+{"text": "play true detective season 4 now", "expect": {"type": "play_title", "title": "true detective", "season": 4}, "cat": "play_season", "split": "dev"}
+{"text": "Watch true detective.", "expect": {"type": "play_title", "title": "true detective"}, "cat": "play_series", "split": "dev"}
+{"text": "Ted lasso episode 7 season 2.", "expect": {"type": "play_title", "title": "ted lasso", "season": 2, "episode": 7}, "cat": "play_episode", "split": "dev"}
+{"text": "hey tv start ted lasso season 1 episode 4", "expect": {"type": "play_title", "title": "ted lasso", "season": 1, "episode": 4}, "cat": "play_episode", "split": "test"}
+{"text": "Watch ted lasso s5e12.", "expect": {"type": "play_title", "title": "ted lasso", "season": 5, "episode": 12}, "cat": "play_episode", "split": "dev"}
+{"text": "watch season 2 of ted lasso", "expect": {"type": "play_title", "title": "ted lasso", "season": 2}, "cat": "play_season", "split": "dev"}
+{"text": "play ted lasso", "expect": {"type": "play_title", "title": "ted lasso"}, "cat": "play_series", "split": "dev"}
+{"text": "Peaky blinders s3e9.", "expect": {"type": "play_title", "title": "peaky blinders", "season": 3, "episode": 9}, "cat": "play_episode", "split": "dev"}
+{"text": "start peaky blinders episode 4 season 1", "expect": {"type": "play_title", "title": "peaky blinders", "season": 1, "episode": 4}, "cat": "play_episode", "split": "dev"}
+{"text": "Play peaky blinders the fourth episode of season 5.", "expect": {"type": "play_title", "title": "peaky blinders", "season": 5, "episode": 4}, "cat": "play_episode", "split": "dev"}
+{"text": "play peaky blinders season 5 please", "expect": {"type": "play_title", "title": "peaky blinders", "season": 5}, "cat": "play_season", "split": "dev"}
+{"text": "can you play peaky blinders", "expect": {"type": "play_title", "title": "peaky blinders"}, "cat": "play_series", "split": "dev"}
+{"text": "could you start dark fifth season episode 2", "expect": {"type": "play_title", "title": "dark", "season": 5, "episode": 2}, "cat": "play_episode", "split": "dev"}
+{"text": "start dark s4e5", "expect": {"type": "play_title", "title": "dark", "season": 4, "episode": 5}, "cat": "play_episode", "split": "test"}
+{"text": "Watch dark season 2 ep 4.", "expect": {"type": "play_title", "title": "dark", "season": 2, "episode": 4}, "cat": "play_episode", "split": "dev"}
+{"text": "Put on dark season 2.", "expect": {"type": "play_title", "title": "dark", "season": 2}, "cat": "play_season", "split": "dev"}
+{"text": "let's watch dark", "expect": {"type": "play_title", "title": "dark"}, "cat": "play_series", "split": "test"}
+{"text": "Watch money heist episode seven of season five please.", "expect": {"type": "play_title", "title": "money heist", "season": 5, "episode": 7}, "cat": "play_episode", "split": "test"}
+{"text": "can you play money heist s03e04", "expect": {"type": "play_title", "title": "money heist", "season": 3, "episode": 4}, "cat": "play_episode", "split": "dev"}
+{"text": "put on money heist the tenth episode of season three", "expect": {"type": "play_title", "title": "money heist", "season": 3, "episode": 10}, "cat": "play_episode", "split": "dev"}
+{"text": "watch season 2 of money heist please", "expect": {"type": "play_title", "title": "money heist", "season": 2}, "cat": "play_season", "split": "dev"}
+{"text": "put on money heist", "expect": {"type": "play_title", "title": "money heist"}, "cat": "play_series", "split": "test"}
+{"text": "put on la casa de papel sixth season episode ten now", "expect": {"type": "play_title", "title": "la casa de papel", "season": 6, "episode": 10}, "cat": "play_episode", "split": "dev"}
+{"text": "put on la casa de papel s5e11", "expect": {"type": "play_title", "title": "la casa de papel", "season": 5, "episode": 11}, "cat": "play_episode", "split": "dev"}
+{"text": "La casa de papel season 5, episode 10.", "expect": {"type": "play_title", "title": "la casa de papel", "season": 5, "episode": 10}, "cat": "play_episode", "split": "dev"}
+{"text": "Put on la casa de papel season 3.", "expect": {"type": "play_title", "title": "la casa de papel", "season": 3}, "cat": "play_season", "split": "test"}
+{"text": "Play la casa de papel.", "expect": {"type": "play_title", "title": "la casa de papel"}, "cat": "play_series", "split": "dev"}
+{"text": "i want to watch the crown episode 12 of season 1", "expect": {"type": "play_title", "title": "the crown", "season": 1, "episode": 12}, "cat": "play_episode", "split": "dev"}
+{"text": "the crown sixth season episode 2", "expect": {"type": "play_title", "title": "the crown", "season": 6, "episode": 2}, "cat": "play_episode", "split": "dev"}
+{"text": "Go to the crown third season episode 9.", "expect": {"type": "play_title", "title": "the crown", "season": 3, "episode": 9}, "cat": "play_episode", "split": "dev"}
+{"text": "watch season one of the crown", "expect": {"type": "play_title", "title": "the crown", "season": 1}, "cat": "play_season", "split": "test"}
+{"text": "put on the crown", "expect": {"type": "play_title", "title": "the crown"}, "cat": "play_series", "split": "dev"}
+{"text": "put on black mirror season 4, episode 6", "expect": {"type": "play_title", "title": "black mirror", "season": 4, "episode": 6}, "cat": "play_episode", "split": "dev"}
+{"text": "can you play black mirror season two episode three", "expect": {"type": "play_title", "title": "black mirror", "season": 2, "episode": 3}, "cat": "play_episode", "split": "test"}
+{"text": "play black mirror episode one of season three", "expect": {"type": "play_title", "title": "black mirror", "season": 3, "episode": 1}, "cat": "play_episode", "split": "test"}
+{"text": "Put on black mirror season one.", "expect": {"type": "play_title", "title": "black mirror", "season": 1}, "cat": "play_season", "split": "dev"}
+{"text": "could you let's watch black mirror", "expect": {"type": "play_title", "title": "black mirror"}, "cat": "play_series", "split": "dev"}
+{"text": "Play the expanse s3e9.", "expect": {"type": "play_title", "title": "the expanse", "season": 3, "episode": 9}, "cat": "play_episode", "split": "test"}
+{"text": "I want to watch the expanse first season episode 12.", "expect": {"type": "play_title", "title": "the expanse", "season": 1, "episode": 12}, "cat": "play_episode", "split": "dev"}
+{"text": "start the expanse the tenth episode of season five", "expect": {"type": "play_title", "title": "the expanse", "season": 5, "episode": 10}, "cat": "play_episode", "split": "dev"}
+{"text": "Watch season 2 of the expanse now.", "expect": {"type": "play_title", "title": "the expanse", "season": 2}, "cat": "play_season", "split": "dev"}
+{"text": "watch the expanse", "expect": {"type": "play_title", "title": "the expanse"}, "cat": "play_series", "split": "test"}
+{"text": "watch invincible episode eight of season four", "expect": {"type": "play_title", "title": "invincible", "season": 4, "episode": 8}, "cat": "play_episode", "split": "dev"}
+{"text": "Invincible s6e4 now.", "expect": {"type": "play_title", "title": "invincible", "season": 6, "episode": 4}, "cat": "play_episode", "split": "dev"}
+{"text": "go to invincible episode nine season six", "expect": {"type": "play_title", "title": "invincible", "season": 6, "episode": 9}, "cat": "play_episode", "split": "dev"}
+{"text": "Put on invincible season one.", "expect": {"type": "play_title", "title": "invincible", "season": 1}, "cat": "play_season", "split": "dev"}
+{"text": "let's watch invincible", "expect": {"type": "play_title", "title": "invincible"}, "cat": "play_series", "split": "dev"}
+{"text": "Play bluey s3e11.", "expect": {"type": "play_title", "title": "bluey", "season": 3, "episode": 11}, "cat": "play_episode", "split": "dev"}
+{"text": "Hey tv i want to watch bluey fourth season episode twelve.", "expect": {"type": "play_title", "title": "bluey", "season": 4, "episode": 12}, "cat": "play_episode", "split": "dev"}
+{"text": "go to bluey episode nine season five", "expect": {"type": "play_title", "title": "bluey", "season": 5, "episode": 9}, "cat": "play_episode", "split": "test"}
+{"text": "put on bluey season four", "expect": {"type": "play_title", "title": "bluey", "season": 4}, "cat": "play_season", "split": "dev"}
+{"text": "okay let's watch bluey", "expect": {"type": "play_title", "title": "bluey"}, "cat": "play_series", "split": "test"}
+{"text": "Start rick and morty sixth season episode 1.", "expect": {"type": "play_title", "title": "rick and morty", "season": 6, "episode": 1}, "cat": "play_episode", "split": "test"}
+{"text": "play rick and morty season six episode three now", "expect": {"type": "play_title", "title": "rick and morty", "season": 6, "episode": 3}, "cat": "play_episode", "split": "dev"}
+{"text": "i want to watch rick and morty episode seven season four", "expect": {"type": "play_title", "title": "rick and morty", "season": 4, "episode": 7}, "cat": "play_episode", "split": "dev"}
+{"text": "okay watch season 2 of rick and morty", "expect": {"type": "play_title", "title": "rick and morty", "season": 2}, "cat": "play_season", "split": "test"}
+{"text": "put on rick and morty", "expect": {"type": "play_title", "title": "rick and morty"}, "cat": "play_series", "split": "dev"}
+{"text": "the simpsons the ninth episode of season five now", "expect": {"type": "play_title", "title": "the simpsons", "season": 5, "episode": 9}, "cat": "play_episode", "split": "dev"}
+{"text": "Go to the simpsons s06e03.", "expect": {"type": "play_title", "title": "the simpsons", "season": 6, "episode": 3}, "cat": "play_episode", "split": "dev"}
+{"text": "I want to watch the simpsons s05e02.", "expect": {"type": "play_title", "title": "the simpsons", "season": 5, "episode": 2}, "cat": "play_episode", "split": "dev"}
+{"text": "Play the simpsons season 3.", "expect": {"type": "play_title", "title": "the simpsons", "season": 3}, "cat": "play_season", "split": "test"}
+{"text": "play the simpsons", "expect": {"type": "play_title", "title": "the simpsons"}, "cat": "play_series", "split": "dev"}
+{"text": "One piece episode three of season four.", "expect": {"type": "play_title", "title": "one piece", "season": 4, "episode": 3}, "cat": "play_episode", "split": "dev"}
+{"text": "one piece fourth season episode 2", "expect": {"type": "play_title", "title": "one piece", "season": 4, "episode": 2}, "cat": "play_episode", "split": "dev"}
+{"text": "hey tv one piece second season episode nine", "expect": {"type": "play_title", "title": "one piece", "season": 2, "episode": 9}, "cat": "play_episode", "split": "dev"}
+{"text": "put on one piece season three", "expect": {"type": "play_title", "title": "one piece", "season": 3}, "cat": "play_season", "split": "dev"}
+{"text": "watch one piece", "expect": {"type": "play_title", "title": "one piece"}, "cat": "play_series", "split": "dev"}
+{"text": "Can you attack on titan s01e09.", "expect": {"type": "play_title", "title": "attack on titan", "season": 1, "episode": 9}, "cat": "play_episode", "split": "dev"}
+{"text": "attack on titan episode 5 season 3", "expect": {"type": "play_title", "title": "attack on titan", "season": 3, "episode": 5}, "cat": "play_episode", "split": "test"}
+{"text": "Can you play attack on titan fourth season episode three.", "expect": {"type": "play_title", "title": "attack on titan", "season": 4, "episode": 3}, "cat": "play_episode", "split": "dev"}
+{"text": "Watch season four of attack on titan.", "expect": {"type": "play_title", "title": "attack on titan", "season": 4}, "cat": "play_season", "split": "test"}
+{"text": "Um watch attack on titan.", "expect": {"type": "play_title", "title": "attack on titan"}, "cat": "play_series", "split": "dev"}
+{"text": "watch rick and morty from the beginning", "expect": {"type": "play_title", "title": "rick and morty", "restart": true}, "cat": "play_restart", "split": "dev"}
+{"text": "play andor from the beginning", "expect": {"type": "play_title", "title": "andor", "restart": true}, "cat": "play_restart", "split": "test"}
+{"text": "watch shogun from the beginning", "expect": {"type": "play_title", "title": "shogun", "restart": true}, "cat": "play_restart", "split": "test"}
+{"text": "play black mirror from the beginning", "expect": {"type": "play_title", "title": "black mirror", "restart": true}, "cat": "play_restart", "split": "dev"}
+{"text": "watch true detective from the beginning", "expect": {"type": "play_title", "title": "true detective", "restart": true}, "cat": "play_restart", "split": "dev"}
+{"text": "play invincible from the beginning", "expect": {"type": "play_title", "title": "invincible", "restart": true}, "cat": "play_restart", "split": "test"}
+{"text": "play peaky blinders from the start", "expect": {"type": "play_title", "title": "peaky blinders", "restart": true}, "cat": "play_restart", "split": "dev"}
+{"text": "watch la casa de papel from the beginning", "expect": {"type": "play_title", "title": "la casa de papel", "restart": true}, "cat": "play_restart", "split": "dev"}
+{"text": "watch game of thrones from the beginning", "expect": {"type": "play_title", "title": "game of thrones", "restart": true}, "cat": "play_restart", "split": "dev"}
+{"text": "play one piece from the start", "expect": {"type": "play_title", "title": "one piece", "restart": true}, "cat": "play_restart", "split": "dev"}
+{"text": "put on the series the expanse", "expect": {"type": "play_title", "title": "the expanse", "kind": "series"}, "cat": "play_kind", "split": "dev"}
+{"text": "put on the series squid game", "expect": {"type": "play_title", "title": "squid game", "kind": "series"}, "cat": "play_kind", "split": "dev"}
+{"text": "watch the series shogun", "expect": {"type": "play_title", "title": "shogun", "kind": "series"}, "cat": "play_kind", "split": "dev"}
+{"text": "play the show the last of us", "expect": {"type": "play_title", "title": "the last of us", "kind": "series"}, "cat": "play_kind", "split": "dev"}
+{"text": "play the show the crown", "expect": {"type": "play_title", "title": "the crown", "kind": "series"}, "cat": "play_kind", "split": "dev"}
+{"text": "put on the series ted lasso", "expect": {"type": "play_title", "title": "ted lasso", "kind": "series"}, "cat": "play_kind", "split": "test"}
+{"text": "play the first episode of bluey", "expect": {"type": "play_title", "title": "bluey", "episode": 1}, "cat": "play_episode", "split": "dev"}
+{"text": "play the first episode of money heist", "expect": {"type": "play_title", "title": "money heist", "episode": 1}, "cat": "play_episode", "split": "test"}
+{"text": "play the first episode of the crown", "expect": {"type": "play_title", "title": "the crown", "episode": 1}, "cat": "play_episode", "split": "dev"}
+{"text": "play the first episode of invincible", "expect": {"type": "play_title", "title": "invincible", "episode": 1}, "cat": "play_episode", "split": "dev"}
+{"text": "play the first episode of the last of us", "expect": {"type": "play_title", "title": "the last of us", "episode": 1}, "cat": "play_episode", "split": "test"}
+{"text": "play the first episode of true detective", "expect": {"type": "play_title", "title": "true detective", "episode": 1}, "cat": "play_episode", "split": "test"}
+{"text": "season four episode eleven", "expect": {"type": "play_title", "title": null, "season": 4, "episode": 11}, "cat": "episode_here", "split": "dev"}
+{"text": "go to season 3 episode 1", "expect": {"type": "play_title", "title": null, "season": 3, "episode": 1}, "cat": "episode_here", "split": "dev"}
+{"text": "season five episode eight", "expect": {"type": "play_title", "title": null, "season": 5, "episode": 8}, "cat": "episode_here", "split": "test"}
+{"text": "play season 2 episode 6 of this show now", "expect": {"type": "play_title", "title": null, "season": 2, "episode": 6}, "cat": "episode_here", "split": "dev"}
+{"text": "Um jump to episode 6 of season 1.", "expect": {"type": "play_title", "title": null, "season": 1, "episode": 6}, "cat": "episode_here", "split": "dev"}
+{"text": "season 6 episode 6", "expect": {"type": "play_title", "title": null, "season": 6, "episode": 6}, "cat": "episode_here", "split": "dev"}
+{"text": "Play season 1 episode 4 of this show.", "expect": {"type": "play_title", "title": null, "season": 1, "episode": 4}, "cat": "episode_here", "split": "dev"}
+{"text": "Jump to episode two of season six.", "expect": {"type": "play_title", "title": null, "season": 6, "episode": 2}, "cat": "episode_here", "split": "dev"}
+{"text": "uh jump to episode eight of season six", "expect": {"type": "play_title", "title": null, "season": 6, "episode": 8}, "cat": "episode_here", "split": "dev"}
+{"text": "play season 5 episode 10 of this show", "expect": {"type": "play_title", "title": null, "season": 5, "episode": 10}, "cat": "episode_here", "split": "dev"}
+{"text": "go to season one episode four", "expect": {"type": "play_title", "title": null, "season": 1, "episode": 4}, "cat": "episode_here", "split": "test"}
+{"text": "Uh season three episode nine.", "expect": {"type": "play_title", "title": null, "season": 3, "episode": 9}, "cat": "episode_here", "split": "dev"}
+{"text": "play season 2 episode 7 of this show", "expect": {"type": "play_title", "title": null, "season": 2, "episode": 7}, "cat": "episode_here", "split": "dev"}
+{"text": "Go to season six episode twelve.", "expect": {"type": "play_title", "title": null, "season": 6, "episode": 12}, "cat": "episode_here", "split": "dev"}
+{"text": "Could you play season 3 episode 6 of this show.", "expect": {"type": "play_title", "title": null, "season": 3, "episode": 6}, "cat": "episode_here", "split": "dev"}
+{"text": "Jump to episode one of season six.", "expect": {"type": "play_title", "title": null, "season": 6, "episode": 1}, "cat": "episode_here", "split": "dev"}
+{"text": "play episode three", "expect": {"type": "play_title", "title": null, "episode": 3}, "cat": "episode_here", "split": "dev"}
+{"text": "go to episode eleven", "expect": {"type": "play_title", "title": null, "episode": 11}, "cat": "episode_here", "split": "dev"}
+{"text": "play episode 2", "expect": {"type": "play_title", "title": null, "episode": 2}, "cat": "episode_here", "split": "test"}
+{"text": "Go to episode ten.", "expect": {"type": "play_title", "title": null, "episode": 10}, "cat": "episode_here", "split": "test"}
+{"text": "Episode six.", "expect": {"type": "play_title", "title": null, "episode": 6}, "cat": "episode_here", "split": "dev"}
+{"text": "jump to episode 5", "expect": {"type": "play_title", "title": null, "episode": 5}, "cat": "episode_here", "split": "dev"}
+{"text": "jump to episode five", "expect": {"type": "play_title", "title": null, "episode": 5}, "cat": "episode_here", "split": "dev"}
+{"text": "episode 3", "expect": {"type": "play_title", "title": null, "episode": 3}, "cat": "episode_here", "split": "dev"}
+{"text": "season two", "expect": {"type": "play_title", "title": null, "season": 2}, "cat": "episode_here", "split": "test"}
+{"text": "season three", "expect": {"type": "play_title", "title": null, "season": 3}, "cat": "episode_here", "split": "dev"}
+{"text": "season four", "expect": {"type": "play_title", "title": null, "season": 4}, "cat": "episode_here", "split": "dev"}
+{"text": "Carry on with blade runner 2049 please.", "expect": {"type": "continue_watching", "title": "blade runner 2049"}, "cat": "continue_title", "split": "dev"}
+{"text": "continue the holdovers now", "expect": {"type": "continue_watching", "title": "the holdovers"}, "cat": "continue_title", "split": "dev"}
+{"text": "okay continue the matrix", "expect": {"type": "continue_watching", "title": "the matrix"}, "cat": "continue_title", "split": "dev"}
+{"text": "keep watching oppenheimer", "expect": {"type": "continue_watching", "title": "oppenheimer"}, "cat": "continue_title", "split": "dev"}
+{"text": "Continue watching inception.", "expect": {"type": "continue_watching", "title": "inception"}, "cat": "continue_title", "split": "dev"}
+{"text": "continue the boys", "expect": {"type": "continue_watching", "title": "the boys"}, "cat": "continue_title", "split": "test"}
+{"text": "continue watching interstellar", "expect": {"type": "continue_watching", "title": "interstellar"}, "cat": "continue_title", "split": "dev"}
+{"text": "finish everything everywhere all at once", "expect": {"type": "continue_watching", "title": "everything everywhere all at once"}, "cat": "continue_title", "split": "dev"}
+{"text": "Carry on with whiplash.", "expect": {"type": "continue_watching", "title": "whiplash"}, "cat": "continue_title", "split": "test"}
+{"text": "Continue the bear.", "expect": {"type": "continue_watching", "title": "the bear"}, "cat": "continue_title", "split": "dev"}
+{"text": "continue ocho apellidos vascos", "expect": {"type": "continue_watching", "title": "ocho apellidos vascos"}, "cat": "continue_title", "split": "dev"}
+{"text": "Keep watching the godfather.", "expect": {"type": "continue_watching", "title": "the godfather"}, "cat": "continue_title", "split": "dev"}
+{"text": "resume ted lasso", "expect": {"type": "continue_watching", "title": "ted lasso"}, "cat": "continue_title", "split": "test"}
+{"text": "finish spirited away", "expect": {"type": "continue_watching", "title": "spirited away"}, "cat": "continue_title", "split": "dev"}
+{"text": "Continue slow horses.", "expect": {"type": "continue_watching", "title": "slow horses"}, "cat": "continue_title", "split": "dev"}
+{"text": "Keep watching house of the dragon.", "expect": {"type": "continue_watching", "title": "house of the dragon"}, "cat": "continue_title", "split": "dev"}
+{"text": "carry on with severance", "expect": {"type": "continue_watching", "title": "severance"}, "cat": "continue_title", "split": "dev"}
+{"text": "um resume rick and morty", "expect": {"type": "continue_watching", "title": "rick and morty"}, "cat": "continue_title", "split": "dev"}
+{"text": "Continue where i left off.", "expect": {"type": "continue_watching", "title": null}, "cat": "continue_last", "split": "dev"}
+{"text": "keep watching what i was watching", "expect": {"type": "continue_watching", "title": null}, "cat": "continue_last", "split": "dev"}
+{"text": "continue watching", "expect": {"type": "continue_watching", "title": null}, "cat": "continue_last", "split": "test"}
+{"text": "Resume what i was watching.", "expect": {"type": "continue_watching", "title": null}, "cat": "continue_last", "split": "dev"}
+{"text": "Continue the show.", "expect": {"type": "continue_watching", "title": null}, "cat": "continue_last", "split": "dev"}
+{"text": "carry on with the show", "expect": {"type": "continue_watching", "title": null}, "cat": "continue_last", "split": "test"}
+{"text": "Resume where we left off.", "expect": {"type": "continue_watching", "title": null}, "cat": "continue_last", "split": "dev"}
+{"text": "Keep watching.", "expect": {"type": "continue_watching", "title": null}, "cat": "continue_last", "split": "dev"}
+{"text": "Continue playing the last episode.", "expect": {"type": "continue_watching", "title": null}, "cat": "continue_last", "split": "dev"}
+{"text": "next episode", "expect": {"type": "next_episode", "offset": 1}, "cat": "next_episode", "split": "dev"}
+{"text": "Play the next episode.", "expect": {"type": "next_episode", "offset": 1}, "cat": "next_episode", "split": "dev"}
+{"text": "Skip this episode.", "expect": {"type": "next_episode", "offset": 1}, "cat": "next_episode", "split": "dev"}
+{"text": "go to the next episode", "expect": {"type": "next_episode", "offset": 1}, "cat": "next_episode", "split": "dev"}
+{"text": "skip to the next episode", "expect": {"type": "next_episode", "offset": 1}, "cat": "next_episode", "split": "dev"}
+{"text": "uh next episode please", "expect": {"type": "next_episode", "offset": 1}, "cat": "next_episode", "split": "dev"}
+{"text": "Play next episode.", "expect": {"type": "next_episode", "offset": 1}, "cat": "next_episode", "split": "test"}
+{"text": "The next episode.", "expect": {"type": "next_episode", "offset": 1}, "cat": "next_episode", "split": "test"}
+{"text": "next", "expect": {"type": "next_episode", "offset": 1}, "cat": "next_episode", "split": "dev"}
+{"text": "next one", "expect": {"type": "next_episode", "offset": 1}, "cat": "next_episode", "split": "dev"}
+{"text": "Play the next one.", "expect": {"type": "next_episode", "offset": 1}, "cat": "next_episode", "split": "dev"}
+{"text": "Skip episode.", "expect": {"type": "next_episode", "offset": 1}, "cat": "next_episode", "split": "test"}
+{"text": "Previous episode.", "expect": {"type": "next_episode", "offset": -1}, "cat": "previous_episode", "split": "dev"}
+{"text": "go back one episode", "expect": {"type": "next_episode", "offset": -1}, "cat": "previous_episode", "split": "dev"}
+{"text": "can you play the previous episode", "expect": {"type": "next_episode", "offset": -1}, "cat": "previous_episode", "split": "dev"}
+{"text": "go back an episode", "expect": {"type": "next_episode", "offset": -1}, "cat": "previous_episode", "split": "dev"}
+{"text": "the previous episode", "expect": {"type": "next_episode", "offset": -1}, "cat": "previous_episode", "split": "dev"}
+{"text": "Play the previous one.", "expect": {"type": "next_episode", "offset": -1}, "cat": "previous_episode", "split": "dev"}
+{"text": "hey tv previous", "expect": {"type": "next_episode", "offset": -1}, "cat": "previous_episode", "split": "test"}
+{"text": "Um go to the previous episode.", "expect": {"type": "next_episode", "offset": -1}, "cat": "previous_episode", "split": "dev"}
+{"text": "Last episode please.", "expect": {"type": "next_episode", "offset": -1}, "cat": "previous_episode", "split": "dev"}
+{"text": "hey tv back one episode", "expect": {"type": "next_episode", "offset": -1}, "cat": "previous_episode", "split": "dev"}
+{"text": "pause", "expect": {"type": "transport", "op": "pause"}, "cat": "pause", "split": "test"}
+{"text": "pause it", "expect": {"type": "transport", "op": "pause"}, "cat": "pause", "split": "dev"}
+{"text": "Pause the movie.", "expect": {"type": "transport", "op": "pause"}, "cat": "pause", "split": "dev"}
+{"text": "pause the show", "expect": {"type": "transport", "op": "pause"}, "cat": "pause", "split": "dev"}
+{"text": "hold on", "expect": {"type": "transport", "op": "pause"}, "cat": "pause", "split": "dev"}
+{"text": "wait", "expect": {"type": "transport", "op": "pause"}, "cat": "pause", "split": "dev"}
+{"text": "Hey tv pause please.", "expect": {"type": "transport", "op": "pause"}, "cat": "pause", "split": "test"}
+{"text": "can you pause please", "expect": {"type": "transport", "op": "pause"}, "cat": "pause", "split": "dev"}
+{"text": "pause this", "expect": {"type": "transport", "op": "pause"}, "cat": "pause", "split": "dev"}
+{"text": "wait a second", "expect": {"type": "transport", "op": "pause"}, "cat": "pause", "split": "dev"}
+{"text": "hold on a second", "expect": {"type": "transport", "op": "pause"}, "cat": "pause", "split": "dev"}
+{"text": "Pause for a moment.", "expect": {"type": "transport", "op": "pause"}, "cat": "pause", "split": "dev"}
+{"text": "Please please.", "expect": {"type": "transport", "op": "pause"}, "cat": "pause", "split": "test"}
+{"text": "pause the episode", "expect": {"type": "transport", "op": "pause"}, "cat": "pause", "split": "dev"}
+{"text": "play", "expect": {"type": "transport", "op": "resume"}, "cat": "resume", "split": "dev"}
+{"text": "resume", "expect": {"type": "transport", "op": "resume"}, "cat": "resume", "split": "dev"}
+{"text": "unpause", "expect": {"type": "transport", "op": "resume"}, "cat": "resume", "split": "dev"}
+{"text": "Keep playing.", "expect": {"type": "transport", "op": "resume"}, "cat": "resume", "split": "test"}
+{"text": "continue", "expect": {"type": "transport", "op": "resume"}, "cat": "resume", "split": "dev"}
+{"text": "Um resume playback.", "expect": {"type": "transport", "op": "resume"}, "cat": "resume", "split": "dev"}
+{"text": "play it", "expect": {"type": "transport", "op": "resume"}, "cat": "resume", "split": "test"}
+{"text": "Un pause.", "expect": {"type": "transport", "op": "resume"}, "cat": "resume", "split": "dev"}
+{"text": "Start playing again.", "expect": {"type": "transport", "op": "resume"}, "cat": "resume", "split": "dev"}
+{"text": "go on", "expect": {"type": "transport", "op": "resume"}, "cat": "resume", "split": "dev"}
+{"text": "carry on", "expect": {"type": "transport", "op": "resume"}, "cat": "resume", "split": "test"}
+{"text": "resume the movie", "expect": {"type": "transport", "op": "resume"}, "cat": "resume", "split": "dev"}
+{"text": "play again", "expect": {"type": "transport", "op": "resume"}, "cat": "resume", "split": "test"}
+{"text": "stop", "expect": {"type": "transport", "op": "stop"}, "cat": "stop", "split": "dev"}
+{"text": "Stop it.", "expect": {"type": "transport", "op": "stop"}, "cat": "stop", "split": "dev"}
+{"text": "stop playing now", "expect": {"type": "transport", "op": "stop"}, "cat": "stop", "split": "dev"}
+{"text": "Stop the movie.", "expect": {"type": "transport", "op": "stop"}, "cat": "stop", "split": "test"}
+{"text": "okay stop playback", "expect": {"type": "transport", "op": "stop"}, "cat": "stop", "split": "dev"}
+{"text": "Stop the episode.", "expect": {"type": "transport", "op": "stop"}, "cat": "stop", "split": "test"}
+{"text": "stop the show", "expect": {"type": "transport", "op": "stop"}, "cat": "stop", "split": "dev"}
+{"text": "skip thirty seconds", "expect": {"type": "transport", "op": "forward", "seconds": 30}, "cat": "forward", "split": "test"}
+{"text": "go forward two minutes", "expect": {"type": "transport", "op": "forward", "seconds": 120}, "cat": "forward", "split": "dev"}
+{"text": "go forward five minutes", "expect": {"type": "transport", "op": "forward", "seconds": 300}, "cat": "forward", "split": "dev"}
+{"text": "jump forward ten seconds", "expect": {"type": "transport", "op": "forward", "seconds": 10}, "cat": "forward", "split": "test"}
+{"text": "hey tv forward 90 seconds", "expect": {"type": "transport", "op": "forward", "seconds": 90}, "cat": "forward", "split": "test"}
+{"text": "jump forward a minute please", "expect": {"type": "transport", "op": "forward", "seconds": 60}, "cat": "forward", "split": "test"}
+{"text": "skip forward fifteen seconds", "expect": {"type": "transport", "op": "forward", "seconds": 15}, "cat": "forward", "split": "dev"}
+{"text": "um jump ahead 20 minutes", "expect": {"type": "transport", "op": "forward", "seconds": 1200}, "cat": "forward", "split": "test"}
+{"text": "fast forward 45 seconds", "expect": {"type": "transport", "op": "forward", "seconds": 45}, "cat": "forward", "split": "dev"}
+{"text": "fast forward", "expect": {"type": "transport", "op": "forward"}, "cat": "forward", "split": "dev"}
+{"text": "skip ahead", "expect": {"type": "transport", "op": "forward"}, "cat": "forward", "split": "dev"}
+{"text": "skip forward", "expect": {"type": "transport", "op": "forward"}, "cat": "forward", "split": "dev"}
+{"text": "Go back ten seconds.", "expect": {"type": "transport", "op": "back", "seconds": 10}, "cat": "back", "split": "dev"}
+{"text": "back 30 seconds", "expect": {"type": "transport", "op": "back", "seconds": 30}, "cat": "back", "split": "dev"}
+{"text": "go back one minute", "expect": {"type": "transport", "op": "back", "seconds": 60}, "cat": "back", "split": "dev"}
+{"text": "Skip back two minutes.", "expect": {"type": "transport", "op": "back", "seconds": 120}, "cat": "back", "split": "dev"}
+{"text": "Go back fifteen seconds.", "expect": {"type": "transport", "op": "back", "seconds": 15}, "cat": "back", "split": "test"}
+{"text": "jump back five seconds", "expect": {"type": "transport", "op": "back", "seconds": 5}, "cat": "back", "split": "test"}
+{"text": "Skip back 5 minutes.", "expect": {"type": "transport", "op": "back", "seconds": 300}, "cat": "back", "split": "test"}
+{"text": "rewind", "expect": {"type": "transport", "op": "back"}, "cat": "back", "split": "dev"}
+{"text": "go back a bit", "expect": {"type": "transport", "op": "back"}, "cat": "back", "split": "dev"}
+{"text": "rewind a little", "expect": {"type": "transport", "op": "back"}, "cat": "back", "split": "test"}
+{"text": "seek to twelve minutes", "expect": {"type": "transport", "op": "seek_to", "seconds": 720}, "cat": "seek_to", "split": "dev"}
+{"text": "skip to one hour five minutes", "expect": {"type": "transport", "op": "seek_to", "seconds": 3900}, "cat": "seek_to", "split": "test"}
+{"text": "seek to minute 45", "expect": {"type": "transport", "op": "seek_to", "seconds": 2700}, "cat": "seek_to", "split": "dev"}
+{"text": "Jump to 30 minutes.", "expect": {"type": "transport", "op": "seek_to", "seconds": 1800}, "cat": "seek_to", "split": "test"}
+{"text": "okay jump to one hour", "expect": {"type": "transport", "op": "seek_to", "seconds": 3600}, "cat": "seek_to", "split": "dev"}
+{"text": "skip to an hour and a half", "expect": {"type": "transport", "op": "seek_to", "seconds": 5400}, "cat": "seek_to", "split": "dev"}
+{"text": "Okay jump to 10 minutes.", "expect": {"type": "transport", "op": "seek_to", "seconds": 600}, "cat": "seek_to", "split": "test"}
+{"text": "go to 1 hour 15 minutes", "expect": {"type": "transport", "op": "seek_to", "seconds": 4500}, "cat": "seek_to", "split": "test"}
+{"text": "jump to two minutes thirty seconds", "expect": {"type": "transport", "op": "seek_to", "seconds": 150}, "cat": "seek_to", "split": "dev"}
+{"text": "go to the middle", "expect": {"type": "transport", "op": "seek_to", "percent": 50}, "cat": "seek_middle", "split": "dev"}
+{"text": "jump to the middle", "expect": {"type": "transport", "op": "seek_to", "percent": 50}, "cat": "seek_middle", "split": "dev"}
+{"text": "skip to halfway", "expect": {"type": "transport", "op": "seek_to", "percent": 50}, "cat": "seek_middle", "split": "test"}
+{"text": "could you go to the middle of this episode", "expect": {"type": "transport", "op": "seek_to", "percent": 50}, "cat": "seek_middle", "split": "dev"}
+{"text": "go to the halfway point", "expect": {"type": "transport", "op": "seek_to", "percent": 50}, "cat": "seek_middle", "split": "dev"}
+{"text": "Start over.", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}, "cat": "restart", "split": "dev"}
+{"text": "From the beginning.", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}, "cat": "restart", "split": "test"}
+{"text": "restart", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}, "cat": "restart", "split": "test"}
+{"text": "Go back to the start.", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}, "cat": "restart", "split": "dev"}
+{"text": "Start it again.", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}, "cat": "restart", "split": "dev"}
+{"text": "Hey tv play it from the start.", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}, "cat": "restart", "split": "dev"}
+{"text": "go to the beginning", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}, "cat": "restart", "split": "test"}
+{"text": "Back to the beginning.", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}, "cat": "restart", "split": "dev"}
+{"text": "Start from the beginning.", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}, "cat": "restart", "split": "dev"}
+{"text": "rewind to the beginning", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}, "cat": "restart", "split": "dev"}
+{"text": "um start this over", "expect": {"type": "transport", "op": "seek_to", "seconds": 0}, "cat": "restart", "split": "dev"}
+{"text": "Um volume up.", "expect": {"type": "volume", "op": "up"}, "cat": "volume_up", "split": "dev"}
+{"text": "louder", "expect": {"type": "volume", "op": "up"}, "cat": "volume_up", "split": "dev"}
+{"text": "Turn it up.", "expect": {"type": "volume", "op": "up"}, "cat": "volume_up", "split": "dev"}
+{"text": "Turn up the volume.", "expect": {"type": "volume", "op": "up"}, "cat": "volume_up", "split": "test"}
+{"text": "Raise the volume.", "expect": {"type": "volume", "op": "up"}, "cat": "volume_up", "split": "test"}
+{"text": "Increase the volume.", "expect": {"type": "volume", "op": "up"}, "cat": "volume_up", "split": "dev"}
+{"text": "make it louder", "expect": {"type": "volume", "op": "up"}, "cat": "volume_up", "split": "dev"}
+{"text": "i can't hear", "expect": {"type": "volume", "op": "up"}, "cat": "volume_up", "split": "dev"}
+{"text": "it's too quiet", "expect": {"type": "volume", "op": "up"}, "cat": "volume_up", "split": "dev"}
+{"text": "Turn the volume up.", "expect": {"type": "volume", "op": "up"}, "cat": "volume_up", "split": "dev"}
+{"text": "more volume", "expect": {"type": "volume", "op": "up"}, "cat": "volume_up", "split": "test"}
+{"text": "volume down", "expect": {"type": "volume", "op": "down"}, "cat": "volume_down", "split": "test"}
+{"text": "quieter", "expect": {"type": "volume", "op": "down"}, "cat": "volume_down", "split": "dev"}
+{"text": "turn it down", "expect": {"type": "volume", "op": "down"}, "cat": "volume_down", "split": "dev"}
+{"text": "lower the volume", "expect": {"type": "volume", "op": "down"}, "cat": "volume_down", "split": "dev"}
+{"text": "decrease the volume", "expect": {"type": "volume", "op": "down"}, "cat": "volume_down", "split": "dev"}
+{"text": "too loud", "expect": {"type": "volume", "op": "down"}, "cat": "volume_down", "split": "test"}
+{"text": "Make it quieter.", "expect": {"type": "volume", "op": "down"}, "cat": "volume_down", "split": "test"}
+{"text": "it's too loud", "expect": {"type": "volume", "op": "down"}, "cat": "volume_down", "split": "test"}
+{"text": "turn the volume down", "expect": {"type": "volume", "op": "down"}, "cat": "volume_down", "split": "dev"}
+{"text": "less volume", "expect": {"type": "volume", "op": "down"}, "cat": "volume_down", "split": "test"}
+{"text": "a bit louder", "expect": {"type": "volume", "op": "up", "amount": 3}, "cat": "volume_amount", "split": "test"}
+{"text": "turn it up a lot", "expect": {"type": "volume", "op": "up", "amount": 15}, "cat": "volume_amount", "split": "dev"}
+{"text": "turn it down a bit", "expect": {"type": "volume", "op": "down", "amount": 3}, "cat": "volume_amount", "split": "dev"}
+{"text": "volume up by five", "expect": {"type": "volume", "op": "up", "amount": 5}, "cat": "volume_amount", "split": "dev"}
+{"text": "turn the volume down ten", "expect": {"type": "volume", "op": "down", "amount": 10}, "cat": "volume_amount", "split": "dev"}
+{"text": "volume down 5", "expect": {"type": "volume", "op": "down", "amount": 5}, "cat": "volume_amount", "split": "dev"}
+{"text": "Volume at 20.", "expect": {"type": "volume", "op": "set", "amount": 20}, "cat": "volume_set", "split": "test"}
+{"text": "set volume thirty five", "expect": {"type": "volume", "op": "set", "amount": 35}, "cat": "volume_set", "split": "test"}
+{"text": "change the volume to 10", "expect": {"type": "volume", "op": "set", "amount": 10}, "cat": "volume_set", "split": "test"}
+{"text": "Turn the volume to twenty five.", "expect": {"type": "volume", "op": "set", "amount": 25}, "cat": "volume_set", "split": "dev"}
+{"text": "Turn the volume to forty.", "expect": {"type": "volume", "op": "set", "amount": 40}, "cat": "volume_set", "split": "dev"}
+{"text": "Volume 15.", "expect": {"type": "volume", "op": "set", "amount": 15}, "cat": "volume_set", "split": "dev"}
+{"text": "put the volume at fifty", "expect": {"type": "volume", "op": "set", "amount": 50}, "cat": "volume_set", "split": "dev"}
+{"text": "set volume sixty", "expect": {"type": "volume", "op": "set", "amount": 60}, "cat": "volume_set", "split": "dev"}
+{"text": "set volume 5", "expect": {"type": "volume", "op": "set", "amount": 5}, "cat": "volume_set", "split": "dev"}
+{"text": "Volume to thirty.", "expect": {"type": "volume", "op": "set", "amount": 30}, "cat": "volume_set", "split": "dev"}
+{"text": "mute", "expect": {"type": "volume", "op": "mute"}, "cat": "mute", "split": "dev"}
+{"text": "mute it", "expect": {"type": "volume", "op": "mute"}, "cat": "mute", "split": "test"}
+{"text": "mute the tv", "expect": {"type": "volume", "op": "mute"}, "cat": "mute", "split": "dev"}
+{"text": "silence", "expect": {"type": "volume", "op": "mute"}, "cat": "mute", "split": "test"}
+{"text": "mute the sound", "expect": {"type": "volume", "op": "mute"}, "cat": "mute", "split": "dev"}
+{"text": "unmute", "expect": {"type": "volume", "op": "unmute"}, "cat": "unmute", "split": "test"}
+{"text": "sound on", "expect": {"type": "volume", "op": "unmute"}, "cat": "unmute", "split": "test"}
+{"text": "turn the sound back on", "expect": {"type": "volume", "op": "unmute"}, "cat": "unmute", "split": "dev"}
+{"text": "unmute the tv", "expect": {"type": "volume", "op": "unmute"}, "cat": "unmute", "split": "dev"}
+{"text": "start youtube", "expect": {"type": "open_app", "app": "tizentube"}, "cat": "open_app", "split": "dev"}
+{"text": "Open the you tube app.", "expect": {"type": "open_app", "app": "tizentube"}, "cat": "open_app", "split": "dev"}
+{"text": "Switch to tizentube.", "expect": {"type": "open_app", "app": "tizentube"}, "cat": "open_app", "split": "test"}
+{"text": "Launch stremio.", "expect": {"type": "open_app", "app": "stremio"}, "cat": "open_app", "split": "dev"}
+{"text": "Open the stream io app.", "expect": {"type": "open_app", "app": "stremio"}, "cat": "open_app", "split": "dev"}
+{"text": "open kodi", "expect": {"type": "open_app", "app": "kodi"}, "cat": "open_app", "split": "dev"}
+{"text": "Switch to codey.", "expect": {"type": "open_app", "app": "kodi"}, "cat": "open_app", "split": "dev"}
+{"text": "Open the twitch app.", "expect": {"type": "open_app", "app": "twitch"}, "cat": "open_app", "split": "test"}
+{"text": "open the movistar app", "expect": {"type": "open_app", "app": "movistar"}, "cat": "open_app", "split": "dev"}
+{"text": "start movistar plus", "expect": {"type": "open_app", "app": "movistar"}, "cat": "open_app", "split": "dev"}
+{"text": "take me to movistar tv", "expect": {"type": "open_app", "app": "movistar"}, "cat": "open_app", "split": "dev"}
+{"text": "switch to prime video", "expect": {"type": "open_app", "app": "prime"}, "cat": "open_app", "split": "dev"}
+{"text": "open amazon prime", "expect": {"type": "open_app", "app": "prime"}, "cat": "open_app", "split": "test"}
+{"text": "Open prime.", "expect": {"type": "open_app", "app": "prime"}, "cat": "open_app", "split": "test"}
+{"text": "kodi", "expect": {"type": "open_app", "app": "kodi"}, "cat": "open_app", "split": "dev"}
+{"text": "stremio", "expect": {"type": "open_app", "app": "stremio"}, "cat": "open_app", "split": "dev"}
+{"text": "prime video", "expect": {"type": "open_app", "app": "prime"}, "cat": "open_app", "split": "test"}
+{"text": "twitch", "expect": {"type": "open_app", "app": "twitch"}, "cat": "open_app", "split": "dev"}
+{"text": "Open Stream U", "expect": {"type": "open_app", "app": "stremio"}, "cat": "open_app", "split": "dev"}
+{"text": "Open Mobistar Plus", "expect": {"type": "open_app", "app": "movistar"}, "cat": "open_app", "split": "dev"}
+{"text": "go back to youtube", "expect": {"type": "open_app", "app": "tizentube"}, "cat": "open_app", "split": "test"}
+{"text": "find lofi hip hop on youtube", "expect": {"type": "youtube", "query": "lofi hip hop"}, "cat": "youtube", "split": "test"}
+{"text": "cat videos on youtube", "expect": {"type": "youtube", "query": "cat videos"}, "cat": "youtube", "split": "dev"}
+{"text": "Hey tv search youtube for how to make paella.", "expect": {"type": "youtube", "query": "how to make paella"}, "cat": "youtube", "split": "dev"}
+{"text": "Real madrid highlights on youtube.", "expect": {"type": "youtube", "query": "real madrid highlights"}, "cat": "youtube", "split": "dev"}
+{"text": "Put on mrbeast on youtube.", "expect": {"type": "youtube", "query": "mrbeast"}, "cat": "youtube", "split": "test"}
+{"text": "Relaxing piano music on youtube now.", "expect": {"type": "youtube", "query": "relaxing piano music"}, "cat": "youtube", "split": "test"}
+{"text": "Youtube nba highlights please.", "expect": {"type": "youtube", "query": "nba highlights"}, "cat": "youtube", "split": "dev"}
+{"text": "play kurzgesagt on youtube", "expect": {"type": "youtube", "query": "kurzgesagt"}, "cat": "youtube", "split": "dev"}
+{"text": "Find linus tech tips on youtube.", "expect": {"type": "youtube", "query": "linus tech tips"}, "cat": "youtube", "split": "dev"}
+{"text": "the daily show on youtube", "expect": {"type": "youtube", "query": "the daily show"}, "cat": "youtube", "split": "dev"}
+{"text": "Find f1 race highlights on youtube.", "expect": {"type": "youtube", "query": "f1 race highlights"}, "cat": "youtube", "split": "test"}
+{"text": "could you jazz for studying on youtube", "expect": {"type": "youtube", "query": "jazz for studying"}, "cat": "youtube", "split": "test"}
+{"text": "put ibai on twitch please", "expect": {"type": "twitch", "channel": "ibai"}, "cat": "twitch", "split": "dev"}
+{"text": "put auronplay on twitch", "expect": {"type": "twitch", "channel": "auronplay"}, "cat": "twitch", "split": "dev"}
+{"text": "twitch shroud", "expect": {"type": "twitch", "channel": "shroud"}, "cat": "twitch", "split": "dev"}
+{"text": "watch xqc on twitch", "expect": {"type": "twitch", "channel": "xqc"}, "cat": "twitch", "split": "dev"}
+{"text": "Twitch kai cenat.", "expect": {"type": "twitch", "channel": "kai cenat"}, "cat": "twitch", "split": "dev"}
+{"text": "Open ninja on twitch.", "expect": {"type": "twitch", "channel": "ninja"}, "cat": "twitch", "split": "test"}
+{"text": "watch illojuan on twitch", "expect": {"type": "twitch", "channel": "illojuan"}, "cat": "twitch", "split": "dev"}
+{"text": "open rubius on twitch", "expect": {"type": "twitch", "channel": "rubius"}, "cat": "twitch", "split": "dev"}
+{"text": "could you open thegrefg on twitch", "expect": {"type": "twitch", "channel": "thegrefg"}, "cat": "twitch", "split": "test"}
+{"text": "Go home now.", "expect": {"type": "home"}, "cat": "home", "split": "dev"}
+{"text": "home", "expect": {"type": "home"}, "cat": "home", "split": "dev"}
+{"text": "home screen", "expect": {"type": "home"}, "cat": "home", "split": "dev"}
+{"text": "go to the home screen", "expect": {"type": "home"}, "cat": "home", "split": "test"}
+{"text": "take me home", "expect": {"type": "home"}, "cat": "home", "split": "dev"}
+{"text": "Go to home.", "expect": {"type": "home"}, "cat": "home", "split": "test"}
+{"text": "Back to the home screen.", "expect": {"type": "home"}, "cat": "home", "split": "test"}
+{"text": "slow horses in stremio", "expect": {"type": "open_in_stremio", "title": "slow horses"}, "cat": "stremio_page", "split": "dev"}
+{"text": "parasite in stremio", "expect": {"type": "open_in_stremio", "title": "parasite"}, "cat": "stremio_page", "split": "test"}
+{"text": "find conclave on stremio", "expect": {"type": "open_in_stremio", "title": "conclave"}, "cat": "stremio_page", "split": "dev"}
+{"text": "show me arcane in stremio", "expect": {"type": "open_in_stremio", "title": "arcane"}, "cat": "stremio_page", "split": "dev"}
+{"text": "Show me squid game in stremio.", "expect": {"type": "open_in_stremio", "title": "squid game"}, "cat": "stremio_page", "split": "dev"}
+{"text": "show me pluribus in stremio please", "expect": {"type": "open_in_stremio", "title": "pluribus"}, "cat": "stremio_page", "split": "dev"}
+{"text": "find el hoyo on stremio", "expect": {"type": "open_in_stremio", "title": "el hoyo"}, "cat": "stremio_page", "split": "test"}
+{"text": "open spirited away in stremio", "expect": {"type": "open_in_stremio", "title": "spirited away"}, "cat": "stremio_page", "split": "dev"}
+{"text": "find the simpsons on stremio", "expect": {"type": "open_in_stremio", "title": "the simpsons"}, "cat": "stremio_page", "split": "dev"}
+{"text": "find house of the dragon on stremio", "expect": {"type": "open_in_stremio", "title": "house of the dragon"}, "cat": "stremio_page", "split": "dev"}
+{"text": "what's the weather like", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "what time is it", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "thank you", "expect": {"type": "none"}, "cat": "not_a_command", "split": "test"}
+{"text": "tell me a joke", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "order a pizza", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "who's that actor", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "i love this show", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "turn on the lights", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "call mom", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "set an alarm for seven", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "how old is pedro pascal", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "the", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "uh", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "and then", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "hmm", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "yes", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "no", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "okay", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "i told you we should have left earlier", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "where are my keys", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "what's for dinner", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "play a game", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "good night", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "is it raining", "expect": {"type": "none"}, "cat": "not_a_command", "split": "dev"}
+{"text": "send a message to juan", "expect": {"type": "none"}, "cat": "not_a_command", "split": "test"}

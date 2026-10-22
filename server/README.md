@@ -49,21 +49,28 @@ Also measured and set aside: Stremio's own player accepts an agent-chosen stream
 All of this is data in `~/.config/tv-agent/rules.json` (or `src/tv_agent/decide/default_rules.json` until you
 save your own), editable in the panel's **Decisions** tab and used at once, without a restart:
 
-1. **Clean-up:** fillers at the start ("hey tv", "um", "can you"), words removed anywhere ("please"), and fixes for
-   common mishearings ("got to" → "go to").
+1. **Clean-up:** fillers at the start ("hey tv", "um", "okay", "can you"), words removed anywhere ("please"),
+   politeness at the end ("thanks"), and fixes for common mishearings ("got to" → "go to", "un pause" → "unpause").
 2. **Fixed phrases** (instant): an exact sentence → its action ("pause", "next episode").
 3. **Pattern rules** (instant), tried in order: a regular expression with named parts → an action template whose
-   fields are filled by converters (`seconds`, `time`, `number`, `amount`, `title`, `episode_here`, `app`…). A
-   converter marked `!` makes the rule not match when its part can't be converted, so the next rule gets a try.
+   fields are filled by converters (`seconds`, `time`, `number`, `amount`, `title`, `play`, `episode_here`, `app`…).
+   A converter marked `!` makes the rule not match when its part can't be converted, so the next rule gets a try.
+   The last two catch "play / put on / watch / start + a title" and a title said with a season or episode, so the
+   commonest commands never wait for the model, and titles made of command words ("Up", "Stop Making Sense") play.
 4. **d1-3B** (Liquid AI's decision model, ~0.2 s) chooses among the intents by their descriptions; below the
-   confidence threshold (0.30) the answer is "Didn't get that". Built-in intents pull titles and numbers out with
-   code; your own intents do a fixed action or fill one from the whole sentence. d1 also picks between candidate
-   titles when a name is ambiguous.
+   confidence threshold (0.30) the answer is "Didn't get that". d1 sees only the descriptions, never the intent
+   names, so each one says what it does with examples; there is one intent per action (pause, resume, seek to,
+   previous episode, set volume…), so nothing has to be squeezed into a near miss. Built-in intents pull titles and
+   numbers out with code; your own intents do a fixed action or fill one from the whole sentence. d1 also picks
+   between candidate titles when a name is ambiguous.
 5. **Apps and hooks:** the only apps the agent may start, the names you can call them, and which app gets YouTube,
    Twitch and Stremio-page links (and the link format).
 
 Saving checks everything first (regexes compile, actions and fields exist, hooks point at real apps) and keeps the
 current rules if anything's wrong; a hand-edited `rules.json` is picked up on the next command the same way.
+A `rules.json` saved before rules version 2 keeps working (its broad `transport` and `volume` intents are still
+understood) but doesn't get the new phrases, patterns and intents: in the panel, **Reset to defaults**, then redo
+your own changes.
 Every decision records the path it took, which the panel draws.
 
 Stream choice (`stremio/streams.py`): your addons' order (AIOStreams already sorts to your taste), but only direct
@@ -78,7 +85,7 @@ URL-encoded into the hook templates.
 | Stage | Result |
 |---|---|
 | Speech-to-text | 103 ms p50, 193 ms p95 in real use (5 s test clip: 211 ms) |
-| Decision | fixed phrase / pattern 0 ms; d1 ~200-260 ms (134-token prompt). Test set: 107/107 intents and full actions (`tv-agent eval`; written while building, so it's a regression check) |
+| Decision | fixed phrase / pattern under 0.1 ms; d1 ~200-260 ms. Rules decide ~95% of commands. Test sets: 107/107 (`eval/utterances.jsonl`) and 654/654 full actions (`eval/commands.jsonl`: 476 for tuning, 178 held out) |
 | Transport, volume, apps | ~0.1-0.8 s after you stop talking |
 | Film or episode | ~6 s from your words to moving picture in either player (addon lookup + link check + opening the 4K link dominate) |
 | Cost on this computer | tv-agent ~1.1 GB RAM (mostly the speech model), 0% CPU idle; d1-3B 1.7 GB of GPU memory |
@@ -111,7 +118,7 @@ the daemon refuses to start otherwise). For services across logouts: `loginctl e
 | Try a sentence without the remote | `tv-agent say "play the bear season 3 episode 2"` (`--dry-run` only prints what it would do) |
 | Run one action | `tv-agent do '{"type":"volume","op":"set","amount":15}'` |
 | See the streams it would choose from | `tv-agent streams "the bear" --season 3 --episode 2` (names only, never links) |
-| Check after changing the rules | `tv-agent eval` and `uv run pytest` |
+| Check after changing the rules | `tv-agent eval`, `tv-agent eval --file eval/commands.jsonl --split test`, `uv run pytest` |
 | Run a command on the TV | `tv-agent tv shell dumpsys media_session` |
 | Re-pair the TV app (new token or address) | `tv-agent tv pair` |
 | Let Claude Code drive the TV | `claude mcp add --scope user tv-agent -- $PWD/.venv/bin/tv-agent-mcp` (12 tools, no shell) |
@@ -183,4 +190,5 @@ rm -rf ~/.config/tv-agent ~/.local/share/tv-agent ~/.local/opt/llama.cpp ~/.loca
 | `src/tv_agent/mcp_server.py` | MCP tools for Claude Code (`tv-agent-mcp`) |
 | `systemd/` | User services for a packaged install (`tv-agent setup services` writes them for a checkout) |
 | `scripts/` | `fetch-models.sh`, Phase 0 benchmarks |
-| `eval/utterances.jsonl`, `tests/` | 107 labelled sentences for `tv-agent eval`; offline unit tests |
+| `eval/` | `utterances.jsonl` (107 labelled sentences, the panel's tests), `commands.jsonl` (654, made by `build_commands.py`: every action, titles made of command words, numbers in every form, fillers, mishearings, non-commands) |
+| `tests/` | Offline unit tests |

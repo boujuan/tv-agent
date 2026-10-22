@@ -59,29 +59,38 @@ def seconds_in(text: str) -> int | None:
     return int(total) if found else None
 
 
-SEASON_EP = [
-    re.compile(rf"\bs(?:eason)?\s*({NUMBER})\s*,?\s*(?:e|ep|episode)\s*({NUMBER})\b"),
-    re.compile(rf"\b(?:episode|ep)\s+({NUMBER})\s+(?:of|from)\s+(?:season|series)\s+({NUMBER})\b"),
-    re.compile(r"\bs(\d{1,2})\s*e(\d{1,3})\b"),
+ORD = "|".join(ORDINALS)
+SEASON_EP = [   # (regex, True when the episode comes first)
+    (re.compile(rf"\bs(?:eason)?\s*({NUMBER})\s*,?\s*(?:e|ep|episode)\s*({NUMBER})\b"), False),
+    (re.compile(rf"\b(?:episode|ep)\s+({NUMBER})\s*,?\s+(?:of\s+|from\s+|in\s+)?(?:the\s+)?"
+                rf"(?:season|series)\s+({NUMBER}|{ORD})\b"), True),
+    (re.compile(rf"\b(?:the\s+)?({ORD})\s+episode\s+(?:of|from|in)\s+(?:the\s+)?"
+                rf"(?:season|series)\s+({NUMBER}|{ORD})\b"), True),
+    (re.compile(r"\bs(\d{1,2})\s*e(\d{1,3})\b"), False),
 ]
-SEASON = re.compile(rf"\b(?:season|series)\s+({NUMBER}|{'|'.join(ORDINALS)})\b|\b({'|'.join(ORDINALS)})\s+season\b")
-EPISODE = re.compile(rf"\b(?:episode|ep)\s+({NUMBER})\b|\b({'|'.join(ORDINALS)})\s+episode\b")
+SEASON = re.compile(rf"\b(?:season|series)\s+({NUMBER}|{ORD})\b|\b(?:the\s+)?({ORD})\s+season\b")
+EPISODE = re.compile(rf"\b(?:episode|ep)\s+({NUMBER})\b|\b(?:the\s+)?({ORD})\s+episode\b")
+
+
+def _cut(t: str, m: re.Match) -> str:
+    return re.sub(r"\s+", " ", t[:m.start()] + " " + t[m.end():]).strip()
 
 
 def season_episode(text: str) -> tuple[int | None, int | None, str]:
-    """(season, episode, text with them removed) from 'season three episode two', 's3e2', 'episode 2 of season 3'."""
+    """(season, episode, text with them removed) from 'season three episode two', 's3e2', 'episode 2 of season 3',
+    'the tenth episode of season five'."""
     t = text.lower()
-    for i, rx in enumerate(SEASON_EP):
+    for rx, episode_first in SEASON_EP:
         m = rx.search(t)
         if m:
             a, b = to_int(m.group(1)), to_int(m.group(2))
-            season, episode = (b, a) if i == 1 else (a, b)
-            return season, episode, (t[:m.start()] + t[m.end():]).strip()
+            season, episode = (b, a) if episode_first else (a, b)
+            return season, episode, _cut(t, m)
     season = episode = None
     if m := SEASON.search(t):
         season = to_int(m.group(1) or m.group(2))
-        t = (t[:m.start()] + t[m.end():]).strip()
+        t = _cut(t, m)
     if m := EPISODE.search(t):
         episode = to_int(m.group(1) or m.group(2))
-        t = (t[:m.start()] + t[m.end():]).strip()
+        t = _cut(t, m)
     return season, episode, t

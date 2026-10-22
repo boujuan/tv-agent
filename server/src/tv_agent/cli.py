@@ -13,6 +13,7 @@ import argparse
 import asyncio
 import json
 import sys
+from pathlib import Path
 
 import httpx
 
@@ -109,8 +110,8 @@ async def _logout() -> int:
     return 0
 
 
-async def _eval(verbose: bool) -> int:
-    """Run every labelled sentence through the router (nothing is sent to the TV); report accuracy and latency."""
+async def _eval(verbose: bool, file: str | None, split: str | None) -> int:
+    """Run labelled sentences through the router (nothing is sent to the TV); report accuracy and latency."""
     from .decide import evaluate
     from .decide import rules as R
     from .decide.router import Router
@@ -119,11 +120,20 @@ async def _eval(verbose: bool) -> int:
     if err:
         print(f"warning: {err}; scoring the defaults")
     async with httpx.AsyncClient() as http:
-        res = await evaluate.run(Router(D1(http, cfg.d1_url), rules))
+        path = Path(file) if file else evaluate.EVAL_FILE
+        res = await evaluate.run(Router(D1(http, cfg.d1_url), rules), path, split)
     for r in res["results"]:
         if verbose or not r["ok"]:
             print(f"{'ok ' if r['ok'] else 'BAD'} {r['text']!r:52} -> {r['via']:7} {r['rule'][:18]:18} "
                   f"{r['confidence']:.2f} {json.dumps(r['got'])}")
+    cats = {}
+    for r in res["results"]:
+        if r["cat"]:
+            c = cats.setdefault(r["cat"], [0, 0])
+            c[0] += r["ok"]
+            c[1] += 1
+    if cats:
+        print("  ".join(f"{c} {a}/{b}" for c, (a, b) in sorted(cats.items(), key=lambda kv: kv[1][0] / kv[1][1])))
     n = res["n"]
     print(f"\nintent {res['intent_ok']}/{n} ({100 * res['intent_ok'] / n:.0f}%), "
           f"full action {res['full_ok']}/{n} ({100 * res['full_ok'] / n:.0f}%)")
@@ -204,8 +214,11 @@ def main(argv=None):
     d.add_argument("--dry-run", action="store_true", help="print the TV commands instead of sending them")
     sub.add_parser("doctor", help="check the TV connection, models and secrets")
     sub.add_parser("serve", help="run the daemon the TV app talks to")
-    e = sub.add_parser("eval", help="score the router on eval/utterances.jsonl (sends nothing to the TV)")
+    e = sub.add_parser("eval", help="score the router on labelled sentences (sends nothing to the TV)")
     e.add_argument("-v", "--verbose", action="store_true")
+    e.add_argument("--file", help="a .jsonl of labelled sentences (default eval/utterances.jsonl; "
+                                  "the big set is eval/commands.jsonl)")
+    e.add_argument("--split", choices=("dev", "test"), help="only that part of a file that has one")
     sy = sub.add_parser("say", help="decide and run one sentence, as if spoken")
     sy.add_argument("text")
     sy.add_argument("--dry-run", action="store_true")
@@ -237,7 +250,7 @@ def main(argv=None):
         asyncio.run(serve(cfg))
         return 0
     if args.cmd == "eval":
-        return asyncio.run(_eval(args.verbose))
+        return asyncio.run(_eval(args.verbose, args.file, args.split))
     if args.cmd == "say":
         return asyncio.run(_say(args.text, args.dry_run))
     if args.cmd == "setup" and args.what == "token":

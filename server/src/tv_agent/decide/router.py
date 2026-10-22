@@ -3,7 +3,7 @@
 1. Clean-up: fillers at the start, words removed anywhere, fixes for common mishearings.
 2. Fixed phrases: an exact sentence -> its action ("pause").
 3. Pattern rules, in order: the first whose regex matches and whose parts convert wins ("skip forward …").
-4. d1-3B picks one of the intents; rules pull out the title, season and episode. Below the confidence
+4. d1-3B picks one of the intents; rules pull out the title, season, episode and numbers. Below the confidence
    threshold, or "none", nothing happens: a misheard sentence does nothing instead of something random.
 Every decision carries a trace of the steps it went through, for the panel's diagram.
 """
@@ -17,8 +17,8 @@ from pydantic import ValidationError
 from .. import actions as A
 from . import text as T
 from .d1 import D1
-from .numbers import seconds_in
-from .rules import NoMatch, Rules
+from .numbers import NUMBER, seconds_in, to_int
+from .rules import BUILTIN_INTENTS, NoMatch, Rules
 
 
 @dataclass
@@ -78,12 +78,36 @@ def match_rules(t: str, rules: Rules, trace: list) -> tuple[A.Action, str, str] 
 def from_intent(intent: str, t: str, rules: Rules) -> A.Action | None:
     """Slots for a d1 intent: built-in extraction, or a custom intent's template over the whole sentence."""
     it = rules.intents.get(intent, {})
-    if intent not in ("play_title", "continue_watching", "next_episode", "open_in_stremio", "youtube", "twitch",
-                      "open_app", "home", "transport", "volume"):
+    if intent not in BUILTIN_INTENTS or intent == "none":
         try:
             return A.parse(rules.fill(it.get("do", {}), {"text": t})) if it.get("do") else None
         except (NoMatch, ValidationError):
             return None
+    if intent in ("pause", "resume", "stop"):
+        return A.Transport(op=intent)
+    if intent in ("skip_forward", "skip_back"):
+        return A.Transport(op="forward" if intent == "skip_forward" else "back", seconds=seconds_in(t))
+    if intent == "restart":
+        return A.Transport(op="seek_to", seconds=0)
+    if intent == "seek_to":
+        if re.search(r"\b(?:middle|half ?way)\b", t):
+            return A.Transport(op="seek_to", percent=50)
+        at = re.sub(r"^.*?\b(?:to|at)\s+(?:minute\s+)?", "", t)
+        secs = seconds_in(at)
+        if secs is None and (n := to_int(at)) is not None:
+            secs = n * 60
+        return A.Transport(op="seek_to", seconds=secs) if secs is not None else None
+    if intent == "previous_episode":
+        return A.NextEpisode(offset=-1)
+    if intent == "volume_set":
+        m = re.search(rf"({NUMBER})\s*(?:percent|%)?$", t)
+        n = to_int(m.group(1)) if m else None
+        return A.Volume(op="set", amount=n) if n is not None and n <= 100 else None
+    if intent in ("volume_up", "volume_down"):
+        m = re.search(r"\b(?:by\s+)?(a lot|a (?:little )?bit|a little|slightly|much|\d+|" + NUMBER + r")\b", t)
+        return A.Volume(op=intent.removeprefix("volume_"), amount=T.amount(m.group(1)) if m else None)
+    if intent in ("mute", "unmute"):
+        return A.Volume(op=intent)
     if intent in ("play_title", "open_in_stremio"):
         s = T.title_slots(t)
         if (s["title"] or "") in T.CURRENT:

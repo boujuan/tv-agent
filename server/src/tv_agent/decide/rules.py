@@ -29,8 +29,10 @@ from .numbers import seconds_in, to_int
 
 DEFAULTS_FILE = Path(__file__).with_name("default_rules.json")
 USER_FILE = CONFIG_DIR / "rules.json"
-BUILTIN_INTENTS = ("play_title", "continue_watching", "next_episode", "open_in_stremio", "youtube", "twitch",
-                   "open_app", "home", "transport", "volume", "none")
+BUILTIN_INTENTS = ("play_title", "continue_watching", "next_episode", "previous_episode", "open_in_stremio", "youtube",
+                   "twitch", "open_app", "home", "pause", "resume", "stop", "skip_forward", "skip_back", "seek_to",
+                   "restart", "volume_set", "volume_up", "volume_down", "mute", "unmute",
+                   "transport", "volume", "none")    # transport/volume: the broader intents of rules files before v2
 PLACEHOLDER = re.compile(r"^\{(\w+)(?:\|(\w+)(!)?)?\}$")
 PACKAGE = re.compile(r"^[a-zA-Z][\w]*(?:\.[\w]+)+$")
 ACTIVITY = re.compile(r"^[.\w$]+$")
@@ -153,14 +155,31 @@ def _title(v, _):
     return s if s["title"] else None
 
 
+NOT_A_TITLE = re.compile(r"^(?:it|this|that|something|anything|again|the movie|the film|the video|"
+                         r"(?:the )?(?:next|previous|last|prior) (?:episode|one|part)|"
+                         r"(?:a |some |any )?(?:game|games|music|song|songs|videos?|movies?|films?|shows?|series))$")
+
+
+def _play(v, rules):
+    """Like title, but not when what follows "play" is an app, the show that's on, or "the next one"."""
+    s = T.title_slots(v)
+    t = s["title"]
+    if not t or t in T.CURRENT or NOT_A_TITLE.match(t) or _alias(t, rules):
+        return None
+    return s
+
+
 CONVERTERS = {
     "text": lambda v, _: v.strip() or None,
     "seconds": lambda v, _: seconds_in(v),
     "time": _time,
     "number": lambda v, _: to_int(v),
     "amount": lambda v, _: T.amount(v),
+    "direction": lambda v, _: {"louder": "up", "higher": "up", "up": "up", "quieter": "down", "softer": "down",
+                               "lower": "down", "down": "down"}.get(v.strip()),
     "query": lambda v, _: T.query(v) or None,
     "title": _title,
+    "play": _play,
     "episode_here": lambda v, _: T.episode_here(v),
     "continue": lambda v, _: T.continue_title(v),
     "app": _app,
@@ -172,8 +191,10 @@ CONVERTER_HELP = {
     "time": "a position: a duration, or a bare number as minutes",
     "number": "a whole number ('twenty', '15')",
     "amount": "'a bit' = 3, 'a lot' = 15, or a number",
+    "direction": "louder/higher -> up, quieter/softer/lower -> down",
     "query": "a search, without a leading 'some' / 'videos of'",
     "title": "title, season, episode, kind, from-the-start (use with \"*\")",
+    "play": "like title, but no match for an app name, 'it' or 'the next one' (use with \"*\")",
     "episode_here": "season/episode of the show that's on, when no title is said (use with \"*\")",
     "continue": "a title, or nothing for 'the show' / 'where I left off'",
     "app": "an app from the app list, by name",

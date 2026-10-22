@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "normalize": {
     "fillers": [
       "hey tv",
@@ -22,7 +22,19 @@
       "hmm",
       "so",
       "okay so",
-      "right"
+      "right",
+      "okay",
+      "ok",
+      "alright",
+      "all right",
+      "well",
+      "hey",
+      "now",
+      "oh",
+      "yeah",
+      "and then",
+      "and",
+      "then"
     ],
     "remove_words": [
       "please"
@@ -32,6 +44,21 @@
         "from": "^got to\\b",
         "to": "go to",
         "note": "a common mishearing of “go to”"
+      },
+      {
+        "from": "\\bun ?pause\\b",
+        "to": "unpause",
+        "note": "speech-to-text splits “unpause”"
+      },
+      {
+        "from": "\\bun ?mute\\b",
+        "to": "unmute",
+        "note": "and “unmute”"
+      },
+      {
+        "from": "[,\\s]+(?:now|thanks|thank you|right now|for me)$",
+        "to": "",
+        "note": "politeness at the end (“pause now”, “next episode thanks”)"
       }
     ]
   },
@@ -43,7 +70,21 @@
         "pause it",
         "hold on",
         "please",
-        "please please"
+        "please please",
+        "pause this",
+        "pause the movie",
+        "pause the show",
+        "pause the episode",
+        "pause the video",
+        "wait",
+        "wait a second",
+        "wait a moment",
+        "hold on a second",
+        "hold on a moment",
+        "hold it",
+        "pause for a moment",
+        "pause for a second",
+        "can you pause"
       ],
       "do": {
         "type": "transport",
@@ -58,7 +99,24 @@
         "unpause",
         "play",
         "continue",
-        "keep playing"
+        "keep playing",
+        "resume playback",
+        "resume the movie",
+        "resume the show",
+        "resume the episode",
+        "resume the video",
+        "resume it",
+        "play it",
+        "play again",
+        "go on",
+        "carry on",
+        "keep going",
+        "start playing again",
+        "continue playing",
+        "unpause it",
+        "play the movie",
+        "play the show",
+        "play the video"
       ],
       "do": {
         "type": "transport",
@@ -70,7 +128,13 @@
       "say": [
         "stop",
         "stop it",
-        "stop playing"
+        "stop playing",
+        "stop the movie",
+        "stop playback",
+        "stop the episode",
+        "stop the show",
+        "stop the video",
+        "stop watching"
       ],
       "do": {
         "type": "transport",
@@ -81,7 +145,20 @@
       "id": "start_over",
       "say": [
         "start over",
-        "from the beginning"
+        "from the beginning",
+        "restart",
+        "start it again",
+        "start this over",
+        "start it over",
+        "start again",
+        "from the start",
+        "start from the beginning",
+        "go to the beginning",
+        "back to the beginning",
+        "rewind to the beginning",
+        "rewind to the start",
+        "play it from the beginning",
+        "play from the start"
       ],
       "do": {
         "type": "transport",
@@ -93,7 +170,12 @@
       "id": "mute",
       "say": [
         "mute",
-        "silence"
+        "silence",
+        "mute it",
+        "mute the tv",
+        "mute the sound",
+        "mute the volume",
+        "silence it"
       ],
       "do": {
         "type": "volume",
@@ -105,7 +187,11 @@
       "say": [
         "unmute",
         "sound on",
-        "sound back"
+        "sound back",
+        "unmute it",
+        "unmute the tv",
+        "turn the sound back on",
+        "sound back on"
       ],
       "do": {
         "type": "volume",
@@ -118,7 +204,14 @@
         "home",
         "go home",
         "home screen",
-        "go to the home screen"
+        "go to the home screen",
+        "take me home",
+        "go to home",
+        "back to the home screen",
+        "go back home",
+        "go back to the home screen",
+        "main menu",
+        "home page"
       ],
       "do": {
         "type": "home"
@@ -132,18 +225,43 @@
         "next",
         "skip episode",
         "skip this episode",
-        "play next episode"
+        "play next episode",
+        "next one",
+        "play the next one",
+        "the next episode",
+        "go to the next episode",
+        "skip to the next episode",
+        "start the next episode",
+        "watch the next episode",
+        "put on the next episode",
+        "play next"
       ],
       "do": {
         "type": "next_episode"
       }
+    },
+    {
+      "id": "volume_up",
+      "say": [
+        "i can't hear",
+        "i can't hear anything",
+        "i can't hear it",
+        "it's too quiet",
+        "too quiet",
+        "i can barely hear it"
+      ],
+      "do": {
+        "type": "volume",
+        "op": "up"
+      },
+      "note": "complaints that mean louder"
     }
   ],
   "patterns": [
     {
       "id": "previous_episode",
       "stage": "grammar",
-      "match": "^(?:play |go to |go back to )?(?:the )?(?:previous|last|prior) episode(?: again)?$|^(?:go )?back (?:an|one) episode$|^previous$",
+      "match": "^(?:play |go to |go back to |watch |put on )?(?:the )?(?:previous|last|prior) (?:episode|one)(?: again)?$|^(?:go )?back (?:an|one) episode$|^previous$|^(?:play |go to )?the episode before(?: this(?: one)?)?$",
       "do": {
         "type": "next_episode",
         "offset": -1
@@ -152,7 +270,7 @@
     {
       "id": "to_start",
       "stage": "grammar",
-      "match": "^(?:(?:go|jump|skip|back|go back|take me back) to (?:the )?(?:beginning|start)|from the top|restart|start (?:it |this )?(?:over|again)|play (?:it|this) from the (?:start|beginning))(?: of (?:it|this(?: \\w+)?|the \\w+))?$",
+      "match": "^(?:(?:go|jump|skip|back|go back|take me back|rewind|rewind it|get back) to (?:the )?(?:beginning|start)|start (?:it |this )?from (?:the )?(?:beginning|start|top)|from the top|restart|start (?:it |this )?(?:over|again)|play (?:it|this) from the (?:start|beginning))(?: of (?:it|this(?: \\w+)?|the \\w+))?$",
       "do": {
         "type": "transport",
         "op": "seek_to",
@@ -190,12 +308,23 @@
     {
       "id": "seek_forward",
       "stage": "grammar",
-      "match": "^(?:skip forward|skip ahead|fast forward|go forward|jump forward|forward|skip|ahead)\\b(?:\\s+(?:by\\s+)?(?P<amount>.+))?$",
+      "match": "^(?:skip forward|skip ahead|fast forward|go forward|jump forward|jump ahead|forward|ahead|skip(?! (?:back|to)\\b))\\b(?:\\s+(?:by\\s+)?(?P<amount>.+))?$",
       "do": {
         "type": "transport",
         "op": "forward",
         "seconds": "{amount|seconds}"
-      }
+      },
+      "note": "not “skip back …” or “skip to …”, which come next"
+    },
+    {
+      "id": "back_a_bit",
+      "stage": "grammar",
+      "match": "^(?:go back|rewind|back up|skip back|jump back)(?: (?:a (?:little )?bit|a little|a few seconds|some))$",
+      "do": {
+        "type": "transport",
+        "op": "back"
+      },
+      "note": "back by the default amount"
     },
     {
       "id": "seek_back",
@@ -238,6 +367,17 @@
         "amount": "{level|number!}"
       },
       "note": "“increase the volume to fifty”"
+    },
+    {
+      "id": "volume_by_feel",
+      "stage": "grammar",
+      "match": "^(?P<how>a lot|a (?:little )?bit|a little|slightly|much|way) (?P<dir>louder|higher|quieter|softer|lower)$",
+      "do": {
+        "type": "volume",
+        "op": "{dir|direction!}",
+        "amount": "{how|amount}"
+      },
+      "note": "“a bit louder”, “much quieter”"
     },
     {
       "id": "volume_up",
@@ -331,47 +471,100 @@
         "type": "continue_watching",
         "title": "{rest|continue}"
       }
+    },
+    {
+      "id": "play_title",
+      "stage": "cue",
+      "match": "^(?:i(?:'d| would) like to (?:watch|see)|i (?:want|wanna) (?:to )?(?:watch|see)|i wanna (?:watch|see)|let'?s (?:watch|see|put on)|can we (?:watch|see)|play|put on|put|watch|start|stream)\\s+(?P<what>.+)$",
+      "do": {
+        "type": "play_title",
+        "*": "{what|play!}"
+      },
+      "note": "“play / put on / watch / start” + a title: played, even when the title is “Up” or “Stop Making Sense”"
+    },
+    {
+      "id": "title_with_episode",
+      "stage": "cue",
+      "match": "^(?P<all>.+\\b(?:season|episode|ep|s\\d+\\s*e\\d+)\\b.*)$",
+      "do": {
+        "type": "play_title",
+        "*": "{all|play!}"
+      },
+      "note": "a title said with a season or episode, without “play” (“community season two episode two”)"
     }
   ],
   "model": {
-    "question": "TV voice command: what should the TV do?",
+    "question": "A spoken command to a TV, transcribed by speech recognition (it may contain recognition errors). Which action does the user want?",
     "min_confidence": 0.3,
     "offline_fallback": "play_title",
     "title_question": "Which title does the user most likely mean?",
     "title_candidates": 4,
     "intents": {
       "play_title": {
-        "describe": "play a specific movie, or an episode or season of a series"
+        "describe": "play a named movie or series, maybe a given season or episode (e.g. 'play the bear season 3 episode 2', 'put on dune', 'watch severance from the start')"
       },
       "continue_watching": {
-        "describe": "continue or resume a series or movie already started"
+        "describe": "continue a named title, or whatever was watched last, from where it was left (e.g. 'continue severance', 'resume the last of us', 'keep watching')"
       },
       "next_episode": {
-        "describe": "play the next episode"
+        "describe": "go to the next episode of what is playing (e.g. 'next episode', 'skip this episode')"
+      },
+      "previous_episode": {
+        "describe": "go back to the previous episode of what is playing (e.g. 'previous episode', 'go back one episode')"
       },
       "open_in_stremio": {
-        "describe": "show a title's page in Stremio without playing it"
+        "describe": "show a title's page in Stremio without playing it (e.g. 'open the office in stremio', 'show me the bear in stremio')"
       },
       "youtube": {
-        "describe": "play or search something on YouTube"
+        "describe": "play or search something on YouTube (e.g. 'lofi on youtube', 'search cats on youtube')"
       },
       "twitch": {
-        "describe": "watch a Twitch streamer"
+        "describe": "watch a streamer's channel on Twitch (e.g. 'put ibai on twitch')"
       },
       "open_app": {
-        "describe": "open an app by name"
+        "describe": "open an app such as YouTube, Stremio, Twitch, Movistar+, Prime Video, Kodi or Settings (e.g. 'open stremio', 'launch prime video')"
       },
       "home": {
-        "describe": "go to the home screen"
+        "describe": "go to the TV's home screen (e.g. 'go home', 'home screen')"
       },
-      "transport": {
-        "describe": "pause, resume, stop, skip or seek"
+      "pause": {
+        "describe": "pause what is playing (e.g. 'pause', 'hold on', 'wait')"
       },
-      "volume": {
-        "describe": "change volume or mute"
+      "resume": {
+        "describe": "resume or unpause what is paused (e.g. 'play', 'resume', 'continue', 'unpause')"
+      },
+      "stop": {
+        "describe": "stop playback (e.g. 'stop', 'stop playing')"
+      },
+      "skip_forward": {
+        "describe": "skip forward by an amount of time (e.g. 'skip 30 seconds', 'forward 20 minutes', 'fast forward')"
+      },
+      "skip_back": {
+        "describe": "go back by an amount of time (e.g. 'go back 10 seconds', 'rewind a minute')"
+      },
+      "seek_to": {
+        "describe": "jump to a specific time or point of the current video (e.g. 'go to twelve minutes', 'jump to one hour five', 'go to the middle')"
+      },
+      "restart": {
+        "describe": "start the current video again from the beginning (e.g. 'start over', 'go back to the start', 'from the beginning')"
+      },
+      "volume_set": {
+        "describe": "set the volume to a number (e.g. 'volume twenty', 'set the volume to 15')"
+      },
+      "volume_up": {
+        "describe": "make it louder (e.g. 'volume up', 'louder', 'I can't hear')"
+      },
+      "volume_down": {
+        "describe": "make it quieter (e.g. 'volume down', 'quieter', 'too loud')"
+      },
+      "mute": {
+        "describe": "mute the sound (e.g. 'mute', 'silence')"
+      },
+      "unmute": {
+        "describe": "unmute the sound (e.g. 'unmute', 'sound on')"
       },
       "none": {
-        "describe": "not a TV command"
+        "describe": "not a TV command, or not understandable (e.g. 'what time is it', 'thank you', 'uh')"
       }
     }
   },

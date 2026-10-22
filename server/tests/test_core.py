@@ -151,7 +151,29 @@ def test_current_show_navigation(text, expect):
 
 
 def test_a_named_show_is_not_the_current_one():
-    assert rule_action("go to stranger things season 2") is None   # left for d1 + title rules
+    assert rule_action("go to stranger things season 2") == A.PlayTitle(title="stranger things", season=2,
+                                                                          kind="series")
+
+
+@pytest.mark.parametrize("text,expect", [
+    ("watch stop making sense", A.PlayTitle(title="stop making sense")),     # titles made of command words
+    ("put on the movie pause", A.PlayTitle(title="pause", kind="movie")),
+    ("play up", A.PlayTitle(title="up")),
+    ("watch next of kin", A.PlayTitle(title="next of kin")),
+    ("put arrival on", A.PlayTitle(title="arrival")),
+    ("start the expanse the tenth episode of season five",
+     A.PlayTitle(title="the expanse", season=5, episode=10, kind="series")),
+    ("community season two episode two", A.PlayTitle(title="community", season=2, episode=2, kind="series")),
+    ("okay let's watch the godfather", A.PlayTitle(title="the godfather")),
+    ("play youtube", None),                                                  # an app: left for d1
+    ("play a game", None),
+    ("skip back two minutes", A.Transport(op="back", seconds=120)),
+    ("skip to an hour and a half", A.Transport(op="seek_to", seconds=5400)),
+    ("a bit louder", A.Volume(op="up", amount=3)),
+    ("un pause", A.Transport(op="resume")),
+])
+def test_play_rules_and_edge_cases(text, expect):
+    assert rule_action(text) == expect
 
 
 def test_rules_reject_mistakes_with_a_reason():
