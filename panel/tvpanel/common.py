@@ -207,6 +207,21 @@ def openrouter_check(model: str, kind: str = "llm") -> tuple[bool, str]:
     return True, f"on OpenRouter: {len(good)} provider{'s' * (len(good) > 1)} with JSON answers, from ${price:.2f} per million tokens in"
 
 
+# Where a model runs: the same four choices for speech to text and the decision model
+WHERE = [("local", "On this laptop"), ("hosted", "Hosted"), ("local-first", "This laptop, hosted if it fails"),
+         ("hosted-first", "Hosted, this laptop if it fails")]
+
+
+class Say:
+    """A label's setText() that shows the message in the window's status bar (the tabs' messages, in one place)."""
+
+    def __init__(self, panel):
+        self.panel = panel
+
+    def setText(self, text: str):
+        self.panel.say(text)
+
+
 class KeyLine(QLabel):
     """Whether an API key is set, with a link to where Settings changes it."""
 

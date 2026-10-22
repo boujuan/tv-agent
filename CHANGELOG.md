@@ -238,9 +238,13 @@ they keep following the defaults as these improve.
   volume while Kodi plays, otherwise the TV's. Nothing is paused; "louder" said meanwhile starts from the level
   before.
 
-## panel — unreleased
+## panel 0.2.0 — 2026-10-22
+
+Needs server 0.2.0 (its new endpoints: speech-to-text, recordings, the TV, About).
 
 ### Fixed
+- Settings reloaded every time the tab was shown, throwing away edits not saved yet (switch tabs and they were
+  gone); unsaved edits now stay until Save or Revert.
 - Saving the rules in the Decisions tab trimmed the spaces of clean-up replacements ("pon " → "play " became
   "play"), so "pon the bear" read "playthe bear"; they're kept exactly as typed now. A rules.json saved that way
   needs Reset to defaults (or its replacements' trailing spaces put back).
@@ -250,13 +254,22 @@ they keep following the defaults as these improve.
   control counts as on without it.
 
 ### Added
-- Decisions: the diagram shows the steps as they run now (fixed phrases, pattern rules, the LLM, d1 between
-  "Clean-up" and "Action"); drag a step (or ▲▼) into another order and tick it on or off, live at once; d1's box
-  picks local, hosted, or either first. Choosing a local d1 while its server (llama-d1) is stopped offers to start
-  it; hosted only, or d1 off, offers to stop it. An LLM tab (model, reasoning, private providers); the hosted d1
-  model and "when no model answers" in the d1 tab. The tester explains two-command sentences, skipped and
-  unreachable steps and where d1 answered from; "How a pattern rule works" is folded away, leaving the table the
-  room.
+- Beside the tabs, on every tab: Save and Revert for whatever Settings and Decisions have unsaved (a ● on their
+  tab says which), Run checks (tv-agent doctor and the rules as edited on the labelled sentences, in one report),
+  Files (export / import everything, open the settings file, the rules or their folder, reset the rules) and ⓘ
+  About. Every tab's messages show in the status bar at the bottom. Speech, model and step choices still apply at
+  once and say so there.
+- About (ⓘ, or the tray menu): each part's version in this copy, running or on the TV, and the latest release on
+  GitHub; whether this copy's folders are identical to their release tags (git tree ids) and whether the TV app's
+  APK is a release's (its SHA-256 against the release's digest) or a local build; the pinned downloads with
+  their SHA-256; the models in use; author, GitHub link and licence.
+- Decisions: the diagram shows the steps as they run now (fixed phrases, pattern rules, the LLM, the decision
+  model between "Clean-up" and "Action"); drag a step (or ▲▼) into another order and tick it on or off, live at
+  once. Choosing a local decision model while its server (llama-d1) is stopped offers to start it; hosted only, or
+  the step off, offers to stop it. The editors follow a command's path: Speech to text, Clean-up, Fixed phrases,
+  Pattern rules, LLM, Decision model, Apps & hooks. The tester explains two-command sentences, skipped and
+  unreachable steps and where the decision model answered from; "How a pattern rule works…" opens beside the
+  table's buttons. Drag the divider up to give the editors room (the diagram scrolls; the panel remembers it).
 - Decisions › LLM and › d1 model: a typed model id is looked up in OpenRouter's catalog: whether it's there, and
   takes the strict JSON answers the LLM step needs (or is one of its decision models).
 - Commands: everything you can say as patterns with ‹placeholders›, by section, in English or Spanish, with a
@@ -265,15 +278,18 @@ they keep following the defaults as these improve.
   OpenRouter keys: checked, then saved; the panel keeps nothing), "No limit" for the bitrate, binge mode and auto
   skip under Playback, and an Advanced section (addresses, ports, the Kodi user and password, pairing the TV app
   again). The tab reloads when shown, so a binge mode changed by voice isn't overwritten.
-- Settings: Export all / Import all: settings, your rules, taught sentences and the panel's preferences in one
-  JSON file (no keys or passwords); importing checks it, then restarts the voice agent.
-- Decisions › Speech to text (click its box in the diagram): this laptop, hosted, or hosted with this laptop as
-  backup; the local model (download, or another model's folder) and the hosted one by name; choosing hosted offers
-  to unload the local model, choosing this laptop loads it; "Keep recordings".
-- Decisions › Decision model (was "d1 model"): a local model (any GGUF file) and a hosted one ("d1" recommended);
+- Settings: under the player, whether Kodi or Just Player is installed on the TV (and its version, or disabled).
+- Export all / Import all (Files): settings, your rules, taught sentences and the panel's preferences in one JSON
+  file (no keys or passwords); importing checks it, then restarts the voice agent. Open the rules file on the
+  built-in rules: read-only, or as your own rules.json.
+- Decisions › Speech to text (click its box in the diagram): on this laptop, hosted, or either one with the other
+  as backup; the local model (download, or another model's folder) and the hosted one by name; choosing hosted
+  offers to unload the local model, choosing this laptop loads it; "Keep recordings" for debugging.
+- Decisions › Decision model (was "d1 model"): where it runs (the same four choices, moved here from the diagram), a
+  local model (any GGUF file) and a hosted one ("d1" recommended);
   the key each needs is shown with ✔ or ⚠ and a link to it in Settings (also in the LLM and Speech to text tabs);
   what "when no model answers" and "candidates for a title choice" do; the whole tab scrolls, with every intent
-  shown.
+  shown. Apps & hooks scrolls the same way, with every app shown.
 - Overview › TV: model, Android and uptime, screen off; Wi-Fi or Ethernet with signal and link speed, the laptop's
   link and ping, a speed test; TV CPU and memory with history, the busiest processes and the app in front; the TV
   app's version against this copy's, with Install / Update / Uninstall / Pair again; Diagnose (each ADB step with

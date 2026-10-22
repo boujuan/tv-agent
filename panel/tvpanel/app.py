@@ -1,17 +1,25 @@
-"""The TV Agent panel window, its system-tray icon, and start-up (one instance; --tray starts hidden)."""
+"""The TV Agent panel window, its system-tray icon, and start-up (one instance; --tray starts hidden). Beside the
+tabs, on every one: Save and Revert for what Settings and Decisions have unsaved, Run checks, Files (export, import,
+open, reset) and About; messages from every tab show in the status bar at the bottom."""
+import json
+import subprocess
 import sys
 import time
+from pathlib import Path
 
 import psutil
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QIcon
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
-from PySide6.QtWidgets import QApplication, QMainWindow, QMenu, QSystemTrayIcon, QTabWidget
+from PySide6.QtWidgets import (QApplication, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QMainWindow, QMenu,
+                               QMessageBox, QPlainTextEdit, QPushButton, QSystemTrayIcon, QTabWidget, QToolButton,
+                               QVBoxLayout, QWidget)
 
+from .about import About
 from .activity_tab import Activity
 from .commands_tab import Commands
-from .common import (APP_ID, ICON, SERVICES, STYLE, Async, Prefs, api, clock, episode_of, gpu_of, gpu_totals, human,
-                     pill, unit_info, GREEN, AMBER)
+from .common import (APP_ID, ICON, SERVICES, STYLE, Async, Prefs, agent_config, api, clock, episode_of, gpu_of,
+                     gpu_totals, human, pill, run_doctor, unit_info, GREEN, AMBER, RED)
 from .decisions import Decisions
 from .mic import Mic
 from .overview import Overview
@@ -43,6 +51,7 @@ class Tray(QSystemTrayIcon):
         self.start_act = menu.addAction("Start voice control", lambda: panel.all_services("start"))
         self.stop_act = menu.addAction("Stop voice control · free resources", lambda: panel.all_services("stop"))
         menu.addSeparator()
+        menu.addAction("About TV Agent", panel.show_about)
         menu.addAction("Quit TV Agent panel", panel.quit_app)
         menu.aboutToShow.connect(self.update_menu)
         self.menu = menu
@@ -98,8 +107,16 @@ class Panel(QMainWindow):
         self._state_busy = False
         self._told_tray = False
 
+        self.message = QLabel("")                 # the status bar: what the tabs have to say
+        self.message.setTextFormat(Qt.TextFormat.RichText)
+        self.statusBar().addWidget(self.message, 1)
+        self._message_timer = QTimer(self)
+        self._message_timer.setSingleShot(True)
+        self._message_timer.timeout.connect(lambda: self.message.setText(""))
+
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
+        self.tabs.setCornerWidget(self.make_toolbar(), Qt.Corner.TopRightCorner)
         self.overview = Overview(self)
         self.activity = Activity(self)
         self.commands = Commands(self)
@@ -110,6 +127,7 @@ class Panel(QMainWindow):
             self.tabs.addTab(w, name)
         self.tabs.currentChanged.connect(self.tab_changed)
         self.setCentralWidget(self.tabs)
+        self.dirty_changed()
 
         self.tray = Tray(self) if QSystemTrayIcon.isSystemTrayAvailable() else None
         if self.tray:
@@ -125,6 +143,152 @@ class Panel(QMainWindow):
             t.start(interval)
         self.refresh_units()
         QTimer.singleShot(500, self.refresh_state)
+
+    # ---- beside the tabs: save, revert, checks, files, about ----
+
+    def make_toolbar(self) -> QWidget:
+        bar = QWidget()
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(0, 2, 8, 2)
+        lay.setSpacing(6)
+        self.unsaved = QLabel("")
+        self.unsaved.setTextFormat(Qt.TextFormat.RichText)
+        self.revert_btn = QPushButton("Revert")
+        self.revert_btn.setToolTip("Throw away the unsaved changes in Settings and Decisions")
+        self.revert_btn.clicked.connect(self.revert_all)
+        self.save_btn = QPushButton("Save")
+        self.save_btn.clicked.connect(self.save_all)
+        checks = QPushButton("Run checks")
+        checks.setToolTip("The voice agent, the TV and its app, the models (tv-agent doctor), and the rules as "
+                          "edited on the labelled sentences")
+        checks.clicked.connect(self.run_checks)
+        files = QPushButton("Files")
+        menu = QMenu(files)
+        menu.addAction("Export all settings…", lambda: self.settings.export_all())
+        menu.addAction("Import all settings…", lambda: self.settings.import_all())
+        menu.addSeparator()
+        menu.addAction("Open the settings file (config.toml)",
+                       lambda: subprocess.Popen(["xdg-open", str(agent_config.CONFIG_FILE)]))
+        menu.addAction("Open the rules file", self.open_rules)
+        menu.addAction("Open the settings folder", lambda: subprocess.Popen(["xdg-open",
+                                                                            str(agent_config.CONFIG_DIR)]))
+        menu.addSeparator()
+        menu.addAction("Reset the rules to the built-in ones…", lambda: self.decisions.reset())
+        files.setMenu(menu)
+        about = QToolButton()
+        about.setText("ⓘ")
+        about.setToolTip("About TV Agent: versions, checksums, GitHub")
+        about.clicked.connect(self.show_about)
+        for w in (self.unsaved, self.revert_btn, self.save_btn, checks, files, about):
+            lay.addWidget(w)
+        return bar
+
+    def say(self, text: str, ms: int = 10000):
+        """A message in the status bar, for a while."""
+        self.message.setText(text)
+        if text:
+            self._message_timer.start(ms)
+
+    def dirty_changed(self):
+        """Settings or Decisions got (or lost) unsaved changes: the Save button, and a dot on their tabs."""
+        if not hasattr(self, "settings"):
+            return
+        parts = [name for name, w in (("Settings", self.settings), ("Decisions", self.decisions)) if w.dirty]
+        self.unsaved.setText(f"<span style='color:{AMBER}'>● unsaved: {', '.join(parts)}</span>" if parts else "")
+        self.save_btn.setEnabled(bool(parts))
+        self.revert_btn.setEnabled(bool(parts))
+        self.save_btn.setToolTip("Rules save live; settings restart the voice agent (what's playing carries on)"
+                                 if parts else "Nothing to save: the speech, model and step choices save at once")
+        for w, name in ((self.settings, "Settings"), (self.decisions, "Decisions")):
+            self.tabs.setTabText(self.tabs.indexOf(w), f"{name} ●" if w.dirty else name)
+
+    def save_all(self):
+        if self.decisions.dirty:
+            self.decisions.save()
+        if self.settings.dirty:
+            self.settings.save()
+
+    def revert_all(self):
+        if self.settings.dirty:
+            self.settings.load()
+        if self.decisions.dirty:
+            self.decisions.load()
+        self.say("Unsaved changes thrown away")
+
+    def run_checks(self):
+        """tv-agent doctor and the rules (as edited) on the labelled sentences, in one report."""
+        try:
+            tests = self.decisions.tests_job()
+        except ValueError as e:
+            QMessageBox.warning(self, "TV Agent", str(e))
+            return
+        self.say("Running the checks…", 120000)
+        got: dict = {}
+
+        def report():
+            if len(got) < 2:
+                return
+            res, err = got["tests"]
+            if err or not res:
+                tests_text = f"Couldn't run them: {err}"
+                summary = f"<span style='color:{RED}'>rules not tested</span>"
+            else:
+                fails = [r for r in res["results"] if not r["ok"]]
+                tests_text = f"{res['full_ok']} of {res['n']} right" + ("" if not self.decisions.dirty else
+                                                                          " (the unsaved rules)")
+                tests_text += "".join(f"\n✗ “{r['text']}”\n    expected {json.dumps(r['expect'])}\n    got      "
+                                      f"{json.dumps(r['got'])} ({r['via']} {r['rule']})" for r in fails)
+                summary = (f"<span style='color:{GREEN if not fails else AMBER}'>rules {res['full_ok']}/{res['n']}"
+                           "</span>")
+            self.say(f"Checks done · {summary}")
+            dlg = QDialog(self)
+            dlg.setWindowTitle("TV Agent checks")
+            v = QVBoxLayout(dlg)
+            box = QPlainTextEdit(f"{got['doctor']}\n\nThe rules on the labelled sentences: {tests_text}")
+            box.setReadOnly(True)
+            box.setMinimumSize(760, 420)
+            v.addWidget(box)
+            bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+            bb.rejected.connect(dlg.reject)
+            v.addWidget(bb)
+            dlg.exec()
+
+        self.bg.run(run_doctor, lambda out, err: (got.__setitem__("doctor", out or str(err)), report()))
+        self.bg.run(tests, lambda res, err: (got.__setitem__("tests", (res, err)), report()))
+
+    def open_rules(self):
+        """Your rules.json; on the built-in rules, a read-only look at them or your own copy to edit."""
+        path = agent_config.CONFIG_DIR / "rules.json"
+        if path.exists():
+            subprocess.Popen(["xdg-open", str(path)])
+            return
+        defaults = (self.decisions.server or {}).get("defaults")
+        if not defaults:
+            self.say("The voice agent isn't running: start it to see the rules")
+            return
+        box = QMessageBox(QMessageBox.Icon.Question, "TV Agent", "You're on the built-in rules, which improve with "
+                          "each update. Edit them in the Decisions tab, or open them here as a file:", parent=self)
+        look = box.addButton("Open them read-only", QMessageBox.ButtonRole.AcceptRole)
+        copy = box.addButton("Make my own rules.json", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setInformativeText("Your own rules.json stops following the built-in ones until you reset it.")
+        box.exec()
+        text = json.dumps(defaults, indent=2, ensure_ascii=False) + "\n"
+        if box.clickedButton() is look:
+            view = Path.home() / ".cache/tv-agent/rules (built-in, read-only).json"
+            view.parent.mkdir(parents=True, exist_ok=True)
+            view.unlink(missing_ok=True)
+            view.write_text(text)
+            view.chmod(0o444)
+            subprocess.Popen(["xdg-open", str(view)])
+        elif box.clickedButton() is copy:
+            path.write_text(text)                 # the agent picks it up by itself (it watches the file)
+            subprocess.Popen(["xdg-open", str(path)])
+            QTimer.singleShot(1500, self.decisions.load)
+
+    def show_about(self):
+        self.bring_up()
+        About(self).exec()
 
     # ---- window and tray ----
 

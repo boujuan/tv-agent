@@ -1,15 +1,14 @@
-"""Decisions › Speech to text: on this laptop (a Parakeet model, while you speak) or hosted (an OpenRouter
-transcription model, sent the recording when you pause), or hosted with this laptop as backup; the local model
-(downloaded here), the hosted one, and keeping recordings for the Activity tab. Live at once (/v1/pipeline)."""
+"""Decisions › Speech to text: on this laptop (a Parakeet model) or hosted (an OpenRouter transcription model), or
+either one with the other as backup; the local model (downloaded here), the hosted one, and keeping recordings for
+debugging in the Activity tab. Live at once (/v1/pipeline)."""
 import subprocess
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QHBoxLayout, QMessageBox, QPushButton,
                                QVBoxLayout, QWidget)
 
-from .common import AMBER, GREEN, TV_AGENT, KeyLine, agent_stt, dim, offer_to_delete_recordings, openrouter_check
-
-WHERE = [("local", "On this laptop"), ("hosted", "Hosted (OpenRouter)"), ("hosted-first", "Hosted, this laptop if it fails")]
+from .common import (AMBER, GREEN, TV_AGENT, WHERE, KeyLine, agent_stt, dim, offer_to_delete_recordings,
+                     openrouter_check)
 
 
 class SpeechToText(QWidget):
@@ -54,8 +53,9 @@ class SpeechToText(QWidget):
         form.addRow("", self.hosted_check)
         self.key = KeyLine(panel)
         form.addRow("", self.key)
-        self.keep = QCheckBox("Keep recordings of commands (the last 300, with the history on), to play and "
-                              "transcribe again in Activity")
+        self.keep = QCheckBox("Keep recordings of commands, for debugging (the last 300, with the history on)")
+        self.keep.setToolTip("In Activity, right-click a 🔊 command to hear what the microphone heard, or to try "
+                             "another speech model on it and compare (nothing is transcribed twice by itself)")
         self.keep.clicked.connect(self.keep_changed)
         form.addRow("", self.keep)
         lay.addLayout(form)
@@ -116,6 +116,8 @@ class SpeechToText(QWidget):
 
     def where_changed(self):
         where = self.where.currentData()
+        if where == self.state.get("stt_where"):
+            return
         change = {"stt_where": where}
         keys = self.state.get("keys", {})
         if where != "local" and not keys.get("openrouter"):

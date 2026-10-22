@@ -1,5 +1,6 @@
-"""Settings tab: the agent's settings (config.toml, applied by restarting the agent) and this panel's own
-behaviour (tray, notifications, start at login; applied at once)."""
+"""Settings tab: the agent's settings (config.toml; the window's Save writes them and restarts the agent) and this
+panel's own behaviour (tray, notifications, start at login; applied at once). Also export/import of everything, the
+checks, and whether the chosen player is on the TV."""
 import json
 import os
 import subprocess
@@ -8,11 +9,11 @@ import tomllib
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
+                               QMessageBox, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
-from .common import AMBER, GREEN, TV_AGENT, agent_config, api, card, dim, load_cfg, run_doctor, set_autostart
+from .common import AMBER, GREEN, RED, TV_AGENT, Say, agent_config, api, card, dim, load_cfg, set_autostart
 
 AUDIO = [("English", "eng"), ("Spanish", "spa"), ("French", "fre"), ("Italian", "ita"), ("German", "ger"),
          ("Portuguese", "por"), ("Japanese", "jpn"), ("Korean", "kor"), ("Chinese", "chi")]
@@ -86,6 +87,9 @@ class Settings(QScrollArea):
     def __init__(self, panel):
         super().__init__()
         self.panel = panel
+        self.dirty = False
+        self._loading = False
+        self.note = Say(panel)                      # messages go to the window's status bar
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.Shape.NoFrame)
         inner = QWidget()
@@ -125,6 +129,10 @@ class Settings(QScrollArea):
         self.auto_skip.setToolTip("From TheIntroDB and IntroDB; “skip the intro” works either way. "
                                   "Also by voice: “auto skip on / off”.")
         f1.addRow("Player", self.player)
+        self.player_state = dim("", wrap=False)     # is it installed on the TV
+        f1.addRow("", self.player_state)
+        self.player.currentIndexChanged.connect(lambda _i: self.show_players())
+        self.packages: dict = {}
         f1.addRow("Highest resolution", self.height_)
         f1.addRow("Highest bitrate", mbps_row)
         f1.addRow("", self.probe)
@@ -228,26 +236,6 @@ class Settings(QScrollArea):
         self.advanced.setVisible(False)
         self.show_advanced.toggled.connect(self.advanced.setVisible)
         outer.addWidget(self.advanced)
-        row = QHBoxLayout()
-        self.note = dim("")
-        doctor = QPushButton("Run checks")
-        doctor.clicked.connect(self.doctor)
-        open_file = QPushButton("Open config file")
-        open_file.clicked.connect(lambda: subprocess.Popen(["xdg-open", str(agent_config.CONFIG_FILE)]))
-        save = QPushButton("Save and apply")
-        save.setDefault(True)
-        save.clicked.connect(self.save)
-        export = QPushButton("Export all…")
-        export.setToolTip("Settings, the Decisions tab (rules, steps, models), taught sentences and this panel's "
-                          "preferences in one file (no API keys or passwords)")
-        export.clicked.connect(self.export_all)
-        import_ = QPushButton("Import all…")
-        import_.setToolTip("Replace them all from an exported file")
-        import_.clicked.connect(self.import_all)
-        row.addWidget(self.note, 1)
-        for b in (export, import_, doctor, open_file, save):
-            row.addWidget(b)
-        outer.addLayout(row)
 
         me = card()
         f4 = QVBoxLayout(me)
@@ -266,11 +254,53 @@ class Settings(QScrollArea):
             f4.addWidget(box)
         outer.addWidget(me)
         outer.addStretch()
+        for w in (self.player, self.height_, self.audio, self.native):
+            w.currentIndexChanged.connect(self.mark_dirty)
+        for w in (self.no_limit, self.probe, self.binge, self.auto_skip, self.log):
+            w.toggled.connect(self.mark_dirty)
+        self.mbps.valueChanged.connect(self.mark_dirty)
+        for w in (self.twitch, self.hosts):
+            w.textEdited.connect(self.mark_dirty)
+        self.subs.list.itemChanged.connect(self.mark_dirty)
+        self.subs.list.model().rowsInserted.connect(self.mark_dirty)
+        for w in self.adv.values():
+            (w.valueChanged if isinstance(w, QSpinBox) else w.textEdited).connect(self.mark_dirty)
         self.load()
 
     def showEvent(self, event):
         super().showEvent(event)
-        self.load()               # binge mode and auto skip can change by voice meanwhile
+        if not self.dirty:
+            self.load()           # binge mode and auto skip can change by voice meanwhile
+        self.check_players()
+
+    def mark_dirty(self, *_):
+        if not self._loading and not self.dirty:
+            self.dirty = True
+            self.panel.dirty_changed()
+
+    def check_players(self):
+        """Kodi and Just Player on the TV: installed, version, not disabled."""
+        def done(res, err):
+            self.packages = res if res and not err and "error" not in res else {}
+            self.show_players(err or (res or {}).get("error"))
+        self.panel.bg.run(lambda: api("/v1/tv/packages", timeout=25), done)
+
+    def show_players(self, err=None):
+        key = self.player.currentData()
+        p = self.packages.get(key)
+        name = {"kodi": "Kodi", "just": "Just Player"}.get(key, key)
+        if not p:
+            self.player_state.setText(f"<span style='color:gray'>{name} on the TV: "
+                                      + ("can't check (the voice agent or the TV isn't answering)" if err else
+                                         "checking…") + "</span>")
+        elif not p["installed"]:
+            self.player_state.setText(f"<span style='color:{RED}'>✗ {name} isn't installed on the TV</span>")
+        elif not p["enabled"]:
+            self.player_state.setText(f"<span style='color:{AMBER}'>⚠ {name} {p['version']} is disabled on the TV"
+                                      "</span>")
+        else:
+            self.player_state.setText(f"<span style='color:{GREEN}'>✔ {name} {p['version']} installed on the TV"
+                                      "</span>")
 
     def highlight_keys(self):
         self.ensureWidgetVisible(self.keys_card, 0, 40)
@@ -324,6 +354,16 @@ class Settings(QScrollArea):
         except SystemExit as e:
             self.note.setText(str(e))
             return
+        self._loading = True
+        try:
+            self._fill(cfg)
+        finally:
+            self._loading = False
+        if self.dirty:
+            self.dirty = False
+            self.panel.dirty_changed()
+
+    def _fill(self, cfg):
         self._select(self.player, cfg.player)
         self._select(self.height_, cfg.max_height)
         self.no_limit.setChecked(not cfg.max_mbps)
@@ -400,11 +440,18 @@ class Settings(QScrollArea):
             return False
         agent = self.panel.overview.cards["tv-agent"]
         if agent.active:
-            self.note.setText("Saved. Restarting the voice agent to apply (what's playing carries on)…")
+            self.note.setText(f"<span style='color:{GREEN}'>✓ Settings saved</span> · restarting the voice agent "
+                              "to apply them (what's playing carries on)…")
             agent.act("restart")
         else:
-            self.note.setText("Saved. It applies the next time the voice agent starts.")
-        self.load()
+            self.note.setText(f"<span style='color:{GREEN}'>✓ Settings saved</span> · they apply the next time the "
+                              "voice agent starts")
+        if self.dirty and set(values) != set(self.values()):      # the tray's player only: other edits stay
+            self._loading = True
+            self._select(self.player, values.get("player", self.player.currentData()))
+            self._loading = False
+        else:
+            self.load()
         return True
 
     def set_kodi_password(self):
@@ -507,22 +554,3 @@ class Settings(QScrollArea):
             self.panel.bg.run(lambda: api("/v1/rules", data["rules"], timeout=10), rules_done)
         else:
             self.panel.bg.run(lambda: api("/v1/rules/reset", {}, timeout=10), rules_done)
-
-    def doctor(self):
-        self.note.setText("Running checks…")
-
-        def done(out, err):
-            self.note.setText("")
-            dlg = QDialog(self)
-            dlg.setWindowTitle("TV Agent checks")
-            v = QVBoxLayout(dlg)
-            text = QPlainTextEdit(out if out else str(err))
-            text.setReadOnly(True)
-            text.setMinimumSize(560, 220)
-            v.addWidget(text)
-            bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-            bb.rejected.connect(dlg.reject)
-            v.addWidget(bb)
-            dlg.exec()
-
-        self.panel.bg.run(run_doctor, done)

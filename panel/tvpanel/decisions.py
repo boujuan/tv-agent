@@ -9,13 +9,13 @@ from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFileDialog,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
-                               QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QSplitter, QTableWidget,
+                               QPushButton, QScrollArea, QSpinBox, QSplitter, QTableWidget,
                                QTableWidgetItem, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
-from .common import (AMBER, BLUE, GREEN, GREY, RED, TV_AGENT, ApiError, KeyLine, agent_config, api, card, dim,
-                     openrouter_check, systemctl)
+from .common import (AMBER, BLUE, GREEN, GREY, RED, TV_AGENT, WHERE, ApiError, KeyLine, Say, agent_config, agent_stt,
+                     api, card, dim, openrouter_check, systemctl)
 from .speech_tab import SpeechToText
 
 # ---------------------------------------------------------------- the diagram
@@ -31,10 +31,8 @@ FIXED = {"input": "Your words", "stt": "Speech to text", "clean": "Clean-up", "u
          "action": "Action", "tv": "TV"}
 STEP_TITLE = {"phrases": "Fixed phrases", "patterns": "Pattern rules", "llm": "LLM", "d1": "Decision model"}
 STEP_EDGE = {"phrases": "exact match", "patterns": "a rule fits", "llm": "answered", "d1": "confident"}
-WHERE = [("local-first", "Local, then hosted"), ("hosted-first", "Hosted, then local"), ("local", "Local only"),
-         ("hosted", "Hosted only")]
 NUMS = "①②③④"
-TAB_FOR = {"clean": 0, "phrases": 1, "patterns": 2, "input": 3, "stt": 3, "llm": 4, "d1": 5, "unclear": 5,
+TAB_FOR = {"input": 0, "stt": 0, "clean": 1, "phrases": 2, "patterns": 3, "llm": 4, "d1": 5, "unclear": 5,
            "action": 6, "tv": 6}
 
 
@@ -45,7 +43,6 @@ class StepCard(QFrame):
     dragged = Signal(str, float)         # step, the card's centre (y) while it's dragged
     dropped = Signal(str)
     clicked = Signal(str)
-    where_changed = Signal(str)
 
     def __init__(self, step: str, parent: QWidget):
         super().__init__(parent)
@@ -69,15 +66,6 @@ class StepCard(QFrame):
         lay.addWidget(self.handle)
         lay.addWidget(self.num)
         lay.addLayout(texts, 1)
-        self.where = None
-        if step == "d1":
-            self.where = QComboBox()
-            for key, label in WHERE:
-                self.where.addItem(label, key)
-            self.where.setToolTip("The d1 on this laptop (llama-d1), Liquid's hosted one, or one of them first and "
-                                  "the other when it doesn't answer")
-            self.where.activated.connect(lambda i: self.where_changed.emit(self.where.itemData(i)))
-            lay.addWidget(self.where)
         self.on = QCheckBox("On")
         self.on.clicked.connect(lambda checked: (self.set_state(self.state), self.toggled.emit(step, checked)))
         lay.addWidget(self.on)
@@ -133,7 +121,6 @@ class FlowDiagram(QWidget):
     clicked = Signal(str)                 # a node or step: open its editor
     order_changed = Signal(list)
     step_toggled = Signal(str, bool)
-    where_changed = Signal(str)
 
     def __init__(self):
         super().__init__()
@@ -147,7 +134,6 @@ class FlowDiagram(QWidget):
             c.dragged.connect(self._drag)
             c.dropped.connect(lambda _s: self._drop())
             c.clicked.connect(self.clicked)
-            c.where_changed.connect(self.where_changed)
             self.cards[step] = c
         self.sub = {k: "" for k in FIXED}
         self.steps_sub: dict[str, str] = {}
@@ -159,12 +145,10 @@ class FlowDiagram(QWidget):
 
     # ---- state ----
 
-    def set_pipeline(self, order: list[str], off: set[str], where: str, subs: dict[str, str]):
+    def set_pipeline(self, order: list[str], off: set[str], subs: dict[str, str]):
         self.order = list(order)
         for step, c in self.cards.items():
             c.on.setChecked(step not in off)
-            if c.where is not None:
-                c.where.setCurrentIndex(max(0, c.where.findData(where)))
         self.steps_sub = subs
         self._number()
         self._place()
@@ -575,6 +559,7 @@ class Decisions(QWidget):
         outer.setSpacing(10)
         split = QSplitter(Qt.Orientation.Vertical)
         outer.addWidget(split, 1)
+        self.split = split
 
         # top: diagram + tester
         top = card()
@@ -589,7 +574,6 @@ class Decisions(QWidget):
         self.diagram.clicked.connect(self.node_clicked)
         self.diagram.order_changed.connect(lambda order: self.set_pipeline({"steps": order}))
         self.diagram.step_toggled.connect(self.step_toggled)
-        self.diagram.where_changed.connect(self.where_changed)
         self.pipeline: dict = {}
         self._checked: dict[str, str] = {}             # the model ids last checked with OpenRouter
         tl.addWidget(self.diagram, 1)
@@ -611,7 +595,11 @@ class Decisions(QWidget):
         self.explanation.setTextFormat(Qt.TextFormat.RichText)
         self.explanation.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         tl.addWidget(self.explanation)
-        split.addWidget(top)
+        top_scroll = QScrollArea()                 # drag the divider up for the editors: the diagram scrolls
+        top_scroll.setWidgetResizable(True)
+        top_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        top_scroll.setWidget(top)
+        split.addWidget(top_scroll)
 
         # bottom: editors
         bottom = card()
@@ -619,7 +607,13 @@ class Decisions(QWidget):
         bl.setContentsMargins(14, 10, 14, 10)
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
+        self.source = dim("", wrap=False)          # which rules: the built-in ones or your rules.json
+        self.tabs.setCornerWidget(self.source, Qt.Corner.TopRightCorner)
         bl.addWidget(self.tabs, 1)
+
+        # speech to text (applies at once), the first step a command goes through
+        self.speech = SpeechToText(self.panel, self)
+        self.tabs.addTab(self.speech, "Speech to text")
 
         # clean-up
         cw = QWidget()
@@ -657,26 +651,11 @@ class Decisions(QWidget):
         aw = QWidget()
         al = QVBoxLayout(aw)
         al.addWidget(self.patterns, 1)
-        self.help_toggle = QToolButton()
-        self.help_toggle.setText("How a pattern rule works")
-        self.help_toggle.setCheckable(True)
-        self.help_toggle.setAutoRaise(True)
-        self.help_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.help_toggle.setArrowType(Qt.ArrowType.RightArrow)
-        al.addWidget(self.help_toggle)
-        self.pattern_help = QLabel(PATTERN_HELP)
-        self.pattern_help.setWordWrap(True)
-        self.pattern_help.setTextFormat(Qt.TextFormat.RichText)
-        self.pattern_help.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.pattern_help.setVisible(False)
-        self.help_toggle.toggled.connect(lambda on: (self.pattern_help.setVisible(on), self.help_toggle.setArrowType(
-            Qt.ArrowType.DownArrow if on else Qt.ArrowType.RightArrow)))
-        al.addWidget(self.pattern_help)
+        self.pattern_help_text = PATTERN_HELP
+        how = QPushButton("How a pattern rule works…")
+        how.clicked.connect(self.show_pattern_help)
+        self.patterns.extra.addWidget(how)              # beside Add rule / Remove / Earlier / Later
         self.tabs.addTab(aw, "Pattern rules")
-
-        # speech to text (applies at once)
-        self.speech = SpeechToText(self.panel, self)
-        self.tabs.addTab(self.speech, "Speech to text")
 
         # the LLM (applies at once, like the steps above)
         lw = QWidget()
@@ -718,6 +697,13 @@ class Decisions(QWidget):
         mw.setWidget(inner)
         ml = QVBoxLayout(inner)
         mf = QFormLayout()
+        self.d1_where = QComboBox()
+        for key, label in WHERE:
+            self.d1_where.addItem(label, key)
+        self.d1_where.setToolTip("The decision model on this laptop (llama-d1), the hosted one, or one of them first "
+                                 "and the other when it doesn't answer")
+        self.d1_where.activated.connect(lambda _i: self.where_changed(self.d1_where.currentData()))
+        mf.addRow("Where", self.d1_where)
         self.local_d1 = QComboBox()
         self.local_d1.setToolTip("The model file llama-d1 serves on this laptop (a GGUF)")
         self.local_d1.activated.connect(lambda _i: self.local_d1_changed(self.local_d1.currentData()))
@@ -783,14 +769,18 @@ class Decisions(QWidget):
         self.tabs.addTab(mw, "Decision model")
 
         # apps & hooks
-        hw = QWidget()
-        hl = QVBoxLayout(hw)
+        hw = QScrollArea()
+        hw.setWidgetResizable(True)
+        hw.setFrameShape(QFrame.Shape.NoFrame)
+        hinner = QWidget()
+        hw.setWidget(hinner)
+        hl = QVBoxLayout(hinner)
         hl.addWidget(dim("Apps the agent may open (“open prime video”), with the names you might say. The agent only "
                          "ever starts apps on this list."))
         self.apps = TableEditor([("Key", "key", "text", False), ("Name", "label", "text", False),
                                  ("Package", "package", "text", True), ("Activity", "activity", "text", True),
                                  ("Spoken names", "aliases", "list", True)], movable=False, add_label="Add app")
-        hl.addWidget(self.apps, 1)
+        hl.addWidget(self.apps)
         hf = QFormLayout()
         self.hook_fields = {}
         for hook, title, links in (("youtube", "YouTube", ("link",)), ("twitch", "Twitch", ("link",)),
@@ -818,26 +808,11 @@ class Decisions(QWidget):
         for w in (self.fillers, self.remove_words):
             w.textEdited.connect(self.mark_dirty)
         split.addWidget(bottom)
-        split.setSizes([360, 480])
+        sizes = self.panel.prefs.s.value("decisions_split")
+        split.setSizes([int(x) for x in sizes] if isinstance(sizes, list) and len(sizes) == 2 else [470, 380])
+        split.splitterMoved.connect(lambda *_: self.panel.prefs.s.setValue("decisions_split", split.sizes()))
 
-        bar = QHBoxLayout()
-        self.status = dim("")
-        tests = QPushButton("Run tests")
-        tests.setToolTip("Try these rules (saved or not) on the labelled sentences in eval/utterances.jsonl")
-        tests.clicked.connect(self.run_tests)
-        revert = QPushButton("Revert")
-        revert.clicked.connect(self.load)
-        reset = QPushButton("Reset to defaults…")
-        reset.clicked.connect(self.reset)
-        open_file = QPushButton("Open file")
-        open_file.clicked.connect(self.open_file)
-        self.save_btn = QPushButton("Save · live now")
-        self.save_btn.setDefault(True)
-        self.save_btn.clicked.connect(self.save)
-        bar.addWidget(self.status, 1)
-        for b in (tests, open_file, revert, reset, self.save_btn):
-            bar.addWidget(b)
-        outer.addLayout(bar)
+        self.status = Say(self.panel)           # messages go to the window's status bar
         self.loaded = False
 
     # ---- loading and saving ----
@@ -845,7 +820,11 @@ class Decisions(QWidget):
     def mark_dirty(self, *_):
         if not self.dirty:
             self.dirty = True
-            self.status.setText("<span style='color:#e0a030'>● Unsaved changes</span>")
+            self.panel.dirty_changed()
+
+    def set_clean(self):
+        self.dirty = False
+        self.panel.dirty_changed()
 
     def load(self):
         def done(res, err):
@@ -856,16 +835,26 @@ class Decisions(QWidget):
             self.server = res
             self.raw = copy.deepcopy(res["rules"])
             self.fill_editors(self.raw)
-            self.dirty = False
+            self.apps.fit_rows()
+            self.set_clean()
             self.loaded = True
-            src = "your rules.json" if res["source"].endswith("rules.json") else res["source"]
-            err_text = f" · <span style='color:{RED}'>{res['error']}</span>" if res.get("error") else ""
-            self.status.setText(f"Using {src}: " + ", ".join(f"{v} {k}" for k, v in res["counts"].items()) + err_text)
+            mine = res["source"].endswith("rules.json")
+            counts = res["counts"]
+            self.source.setText(("Your rules.json" if mine else "Built-in rules") + "  ")
+            self.source.setToolTip(("Your own rules (~/.config/tv-agent/rules.json): they don't follow updates to the "
+                                    "built-in ones until you reset them (Files › Reset)" if mine else
+                                    "The built-in rules, improved with each update; saving a change makes them your "
+                                    "own rules.json") + f" · {counts.get('phrases', 0)} phrases, "
+                                   f"{counts.get('patterns', 0)} patterns, {counts.get('intents', 0)} intents, "
+                                   f"{counts.get('apps', 0)} apps")
+            if res.get("error"):
+                self.status.setText(f"<span style='color:{RED}'>{res['error']}</span>")
             self.diagram.set_counts(res["counts"])
             self.load_pipeline()
-            self.pattern_help.setText(PATTERN_HELP + "<br><b>Converters:</b> " + " · ".join(
-                f"<code>{k}</code> {v}" for k, v in res["converters"].items()) + "<br><b>Actions and their fields:</b> "
-                + " · ".join(f"<code>{k}</code>({', '.join(v)})" for k, v in res["fields"].items()))
+            self.pattern_help_text = (
+                PATTERN_HELP + "<br><br><b>Converters:</b> " + " · ".join(
+                    f"<code>{k}</code> {v}" for k, v in res["converters"].items()) + "<br><br><b>Actions and their "
+                "fields:</b> " + " · ".join(f"<code>{k}</code>({', '.join(v)})" for k, v in res["fields"].items()))
 
         self.panel.bg.run(lambda: api("/v1/rules", timeout=5), done)
 
@@ -960,8 +949,8 @@ class Decisions(QWidget):
             if err:
                 QMessageBox.warning(self, "TV Agent", f"Not saved: {err}")
                 return
-            self.status.setText(f"<span style='color:{GREEN}'>Saved · live now</span>")
-            self.dirty = False
+            self.status.setText(f"<span style='color:{GREEN}'>✓ Rules saved · live now</span>")
+            self.set_clean()
             self.load()
 
         self.panel.bg.run(lambda: api("/v1/rules", raw, timeout=10), done)
@@ -982,39 +971,11 @@ class Decisions(QWidget):
             return
         subprocess.Popen(["xdg-open", str(path)])
 
-    def run_tests(self):
-        try:
-            raw = self.draft()
-        except ValueError as e:
-            QMessageBox.warning(self, "TV Agent", str(e))
-            return
-        self.status.setText("Running the labelled sentences…")
-
-        def done(res, err):
-            if err:
-                self.status.setText("")
-                QMessageBox.warning(self, "TV Agent", f"Couldn't run the tests: {err}")
-                return
-            fails = [r for r in res["results"] if not r["ok"]]
-            color = GREEN if not fails else AMBER
-            self.status.setText(f"<span style='color:{color}'>Tests: {res['full_ok']}/{res['n']} right</span>"
-                                + (" · unsaved rules" if self.dirty else ""))
-            if fails:
-                text = "\n".join(f"✗ “{r['text']}”\n    expected {json.dumps(r['expect'])}\n    got      "
-                                 f"{json.dumps(r['got'])} ({r['via']} {r['rule']})" for r in fails)
-                dlg = QDialog(self)
-                dlg.setWindowTitle(f"{len(fails)} sentences decided differently")
-                v = QVBoxLayout(dlg)
-                box = QPlainTextEdit(text)
-                box.setReadOnly(True)
-                box.setMinimumSize(720, 360)
-                v.addWidget(box)
-                bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-                bb.rejected.connect(dlg.reject)
-                v.addWidget(bb)
-                dlg.exec()
-
-        self.panel.bg.run(lambda: api("/v1/eval", {"rules": raw}, timeout=180), done)
+    def tests_job(self):
+        """The rules as edited (saved or not) on the labelled sentences, as a job for the background (the window's
+        Run checks); raises ValueError with what's wrong in the edits."""
+        raw = self.draft() if self.loaded else None
+        return lambda: api("/v1/eval", {"rules": raw} if raw else {}, timeout=180)
 
     # ---- the steps: order, on/off, which d1, the LLM (live at once) ----
 
@@ -1030,9 +991,20 @@ class Decisions(QWidget):
         subs = {"phrases": f"{c.get('phrases', 0)} sentences{taught}",
                 "patterns": f"{c.get('patterns', 0)} rules, in order",
                 "llm": res["llm_model"].split("/")[-1] if res["keys"]["openrouter"] else "no OpenRouter key (Settings)",
-                "d1": f"{c.get('intents', 0)} intents" + (
-                    f" · hosted: {res['hosted_d1_model']}" if res["d1_where"] != "local" else "")}
-        self.diagram.set_pipeline(res["steps"], set(res["off"]), res["d1_where"], subs)
+                "d1": f"{c.get('intents', 0)} intents · " + {
+                    "local": "on this laptop", "hosted": f"hosted: {res['hosted_d1_model']}",
+                    "local-first": f"laptop, then {res['hosted_d1_model']}",
+                    "hosted-first": f"{res['hosted_d1_model']}, then laptop"}.get(res["d1_where"], "")}
+        self.diagram.set_pipeline(res["steps"], set(res["off"]), subs)
+        hosted_id = res.get("stt_hosted_model", "")
+        hosted_stt = agent_stt.HOSTED.get(hosted_id, hosted_id).split(" (")[0]
+        local_stt = agent_stt.MODELS[res["stt_model"]].label if res.get("stt_model") in agent_stt.MODELS else "local"
+        local_stt = local_stt.replace("TDT 0.6B ", "")
+        self.diagram.sub["stt"] = {"local": f"{local_stt} · laptop", "hosted": f"{hosted_stt} · hosted",
+                                   "local-first": f"laptop, then {hosted_stt}",
+                                   "hosted-first": f"{hosted_stt}, then laptop"}.get(res.get("stt_where"), "")
+        self.diagram.update()
+        self.d1_where.setCurrentIndex(max(0, self.d1_where.findData(res["d1_where"])))
         self.llm_model.setCurrentText(res["llm_model"])
         self.llm_reasoning.setCurrentIndex(max(0, self.llm_reasoning.findData(res["llm_reasoning"])))
         self.llm_private.setChecked(res["llm_private"])
@@ -1116,7 +1088,7 @@ class Decisions(QWidget):
                 self.load_pipeline()
                 return
             self.show_pipeline(res, None)
-            self.status.setText(f"<span style='color:{GREEN}'>Steps saved · live now</span>")
+            self.status.setText(f"<span style='color:{GREEN}'>✓ Saved · live now</span>")
             if then:
                 then()
 
@@ -1176,16 +1148,19 @@ class Decisions(QWidget):
         self.set_pipeline({"off": sorted(off)}, then)
 
     def where_changed(self, where: str):
+        if where == self.pipeline.get("d1_where"):
+            return
         keys = self.pipeline.get("keys", {})
-        if where != "local" and not keys.get("liquid"):
-            QMessageBox.information(self, "TV Agent", "Liquid's hosted d1 needs a Liquid key: Settings › Set Liquid "
-                                    "key. Until then only the local d1 is asked.")
+        if where != "local" and not keys.get("hosted_d1"):
+            QMessageBox.information(self, "TV Agent", "The hosted decision model needs its key (Liquid's for d1, "
+                                    "OpenRouter's for the others): Settings › API keys. Until then only the local one "
+                                    "is asked.")
         d1_on = "d1" not in self.pipeline.get("off", [])
         then = None
         if d1_on and where in ("local-first", "local", "hosted-first"):
             then = self._offer_local
         elif where == "hosted":
-            then = lambda: self._offer_stop("Only Liquid's hosted d1 is asked now.")        # noqa: E731
+            then = lambda: self._offer_stop("Only the hosted decision model is asked now.")        # noqa: E731
         self.set_pipeline({"d1_where": where}, then)
 
     def llm_changed(self):
@@ -1196,6 +1171,13 @@ class Decisions(QWidget):
         self.set_pipeline(change)
 
     # ---- the tester ----
+
+    def show_pattern_help(self):
+        box = QMessageBox(QMessageBox.Icon.Information, "How a pattern rule works", "", parent=self)
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setText(self.pattern_help_text)
+        box.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        box.exec()
 
     def node_clicked(self, node: str):
         if node in TAB_FOR:
