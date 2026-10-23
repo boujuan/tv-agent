@@ -832,21 +832,36 @@ class Agent:
                                                  "runtime_ms", "started") if k in data})
         self.state.now_playing = np
         if np.player == "tvplayer":
-            self.tvplayer.adopt(np.video_id)     # the player reconnects by itself and says what it has open
-            try:
-                await asyncio.wait_for(self.tvplayer.connected.wait(), 15)
-                await asyncio.sleep(1.5)
-            except asyncio.TimeoutError:
-                pass
-            playing = self.tvplayer.now()
-        else:
-            playing = (await self._just_status()) if np.player == "just" else (await self._kodi_player())
+            # It reconnects by itself (within ~10 s) and says what it has open: picked up then, without holding up
+            # the start of the agent (the voice listeners start after this)
+            self.tvplayer.adopt(np.video_id)
+            asyncio.create_task(self._restore_player(np))
+            return
+        playing = (await self._just_status()) if np.player == "just" else (await self._kodi_player())
         if playing is None:
             self.state.now_playing = None
             return
         meta = await cinemeta.meta(self.http, np.kind, np.imdb_id)
         self._follow(meta)
         log.info("picked up %s (%s) again after a restart", np.video_id, np.player)
+
+    async def _restore_player(self, np: NowPlaying):
+        """restore() for TV Agent Player: followed again once it has reconnected with this file still open."""
+        try:
+            await asyncio.wait_for(self.tvplayer.connected.wait(), 20)
+            await asyncio.sleep(1.5)            # its state, position and tracks come right after it connects
+        except asyncio.TimeoutError:
+            pass
+        if self.state.now_playing is not np:
+            return                              # something else has started meanwhile
+        if self.tvplayer.now() is None:
+            self.state.now_playing = None
+            return
+        try:
+            self._follow(await cinemeta.meta(self.http, np.kind, np.imdb_id))
+            log.info("picked up %s (%s) again after a restart", np.video_id, np.player)
+        except Exception as e:
+            log.info("following %s again: %s", np.video_id, type(e).__name__)
 
     def _stop_following(self):
         """The previous session's follower polls no more (it would read the new file's position); its last
