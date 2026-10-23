@@ -41,6 +41,11 @@ EPISODE_STOPWORDS = {"the", "and", "episode", "where", "when", "with", "that", "
                      "her", "their", "from", "into", "out", "about", "there", "this", "season", "part"}
 OWN_APP = "com.boujuan.tvagent"          # the TV app: its pill covers the app the commands are for
 KODI = "org.xbmc.kodi"
+# Kodi's player can hang inside the TV's Dolby Vision decoder (MediaCodec) while opening a file, and then takes every
+# later file without playing it until Kodi is restarted: its log stops mid-line (found 2026-10-23). A file that
+# stops at 0:00 this soon after opening, with nothing in that log since, gets Kodi restarted and opened again, once.
+KODI_LOG = "/sdcard/Android/data/org.xbmc.kodi/files/.kodi/temp/kodi.log"
+STUCK_WITHIN = 45
 LIST_SIZE = 6                # rows that fit the TV app's list
 STARTS = {"play_title", "continue_watching", "next_episode", "pick"}     # actions that start playback
 LIST_TTL = 300              # "number 2" refers to a list shown in the last 5 minutes
@@ -164,6 +169,7 @@ class Agent:
         self._skip_task: asyncio.Task | None = None
         self._starting = asyncio.Lock()          # one start at a time replaces the previous session
         self._user_stopped = False               # a stop that was asked for isn't the end of an episode
+        self._again: tuple[NowPlaying, float, object] | None = None    # the last Kodi start: (session, when, redo)
         self._duck: asyncio.Task | None = None
         self._ducked: tuple[str, int] | None = None   # ("kodi" or "tv", the volume before listening)
 
@@ -570,6 +576,10 @@ class Agent:
                 self.state.now_playing = NowPlaying(imdb, kind, video, name, "kodi", chosen.url + extra, runtime,
                                                     filename=chosen.filename, size=chosen.size,
                                                     video_hash=chosen.video_hash)
+                again = None if self._again and self._again[0].video_id == video and \
+                    time.monotonic() - self._again[1] < STUCK_WITHIN * 2 else \
+                    (lambda: self.play(imdb, kind, name, video, label, meta, resume_ms, prepared=chosen))
+                self._again = (self.state.now_playing, time.monotonic(), again)     # a retry isn't retried
                 self._tracks_task = asyncio.create_task(self._set_tracks(meta, label, addon_subs))
                 if kind == "series" and self.cfg.auto_skip:
                     self._start_skip_watch(self.state.now_playing)
@@ -832,6 +842,8 @@ class Agent:
         says otherwise); otherwise back to Home rather than the player's menus."""
         if self._user_stopped or how != "stopped" or self.dry_run or self.state.now_playing is not np:
             return                              # asked to stop, or something else has started meanwhile
+        if not last and await self._restart_stuck_kodi(np):
+            return
         at_end = bool(duration and last is not None and duration - last <= 8000)
         after, self._after_this = self._after_this, None
         try:
@@ -850,6 +862,38 @@ class Agent:
             log.warning("after %s ended: %s", np.video_id, type(e).__name__)
             await self.notify("Couldn't start the next episode")
             await self._home_unless_playing()
+
+    async def _restart_stuck_kodi(self, np: NowPlaying) -> bool:
+        """A file that stopped at 0:00 right after opening: when Kodi's log has nothing since the open, Kodi is
+        stuck (KODI_LOG's note), so it's restarted and the file opened again. True when it was."""
+        if not self._again or self._again[0] is not np or self._again[2] is None:
+            return False
+        _, opened, again = self._again
+        since = time.monotonic() - opened
+        if since > STUCK_WITHIN:
+            return False
+        try:
+            now, written = (await self.tv(lambda adb: adb.run(["sh", "-c", f"date +%s; stat -c %Y {KODI_LOG}"]))).split()
+            quiet = int(now) - int(written)
+        except Exception as e:
+            log.info("is Kodi stuck: %s", type(e).__name__)
+            return False
+        if quiet < since - 1:                   # Kodi wrote about this file: it failed on its own (e.g. the link)
+            return False
+        log.warning("Kodi is stuck (nothing in its log for %d s, the file opened %.0f s ago): restarting it", quiet,
+                    since)
+        await self.notify("Kodi was stuck: restarting it")
+        try:
+            await self.tv(lambda adb: adb.run(["am", "force-stop", KODI]))
+            await self.kodi.start()
+            out = await again()
+        except Exception as e:
+            log.warning("restarting Kodi: %s", type(e).__name__)
+            await self.notify("Kodi was stuck and didn't start again")
+            await self._home_unless_playing()
+            return True
+        await self.notify(out.say)
+        return True
 
     async def _note_position(self, pid: int):
         """Where Kodi is, read just before stopping it: the progress write and a "continue" right after use it."""

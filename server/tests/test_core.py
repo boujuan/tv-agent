@@ -1584,3 +1584,46 @@ def test_the_scene_search_jumps_to_where_the_llm_found_the_moment(monkeypatch):
     assert seen == {"title": "The Simpsons S6E25", "wanted": "Mr. Burns gets shot", "first": "0:01 line 1"}
     me.state.now_playing = None
     assert asyncio.run(Agent._find_scene(me, A.FindScene(what="x"))).say == "Nothing of yours is playing to search"
+
+
+def test_a_stuck_kodi_is_restarted_and_the_file_opened_again_once():
+    """Kodi's player hung in the TV's Dolby Vision decoder: it took files without playing them (its log stopped
+    mid-line). A stop at 0:00 right after opening, with nothing in Kodi's log since, restarts Kodi and replays."""
+    import asyncio
+    import time
+    import types
+    from tv_agent.agent import Agent
+
+    async def run(log_quiet_s: float, opened_ago: float = 10, again=True):
+        a = Agent.__new__(Agent)
+        did, said = [], []
+        np = NowPlaying("tt1439629", "series", "tt1439629:6:8", "Community", "kodi", "https://x/1")
+
+        async def tv(fn, *args):
+            adb = types.SimpleNamespace(run=lambda argv: did.append(argv) or "1700000100 %d" % (1700000100 - log_quiet_s))
+            return fn(adb, *args)
+
+        async def notify(text):
+            said.append(text)
+
+        async def start():
+            did.append("kodi start")
+
+        async def replay():
+            did.append("replay")
+            return types.SimpleNamespace(say="Playing Community · S6E8")
+
+        async def nothing(*args):
+            return None
+        a.tv, a.notify, a._home_unless_playing = tv, notify, nothing
+        a.kodi = types.SimpleNamespace(start=start)
+        a._again = (np, time.monotonic() - opened_ago, replay if again else None)
+        return await Agent._restart_stuck_kodi(a, np), did, said
+
+    restarted, did, said = asyncio.run(run(log_quiet_s=60))         # nothing written since well before the open
+    assert restarted and ["am", "force-stop", "org.xbmc.kodi"] in did and did[-2:] == ["kodi start", "replay"]
+    assert said == ["Kodi was stuck: restarting it", "Playing Community · S6E8"]
+    restarted, did, _ = asyncio.run(run(log_quiet_s=2))             # Kodi wrote about the file: a real failure
+    assert not restarted and "replay" not in did
+    assert not asyncio.run(run(log_quiet_s=60, again=False))[0]     # the retry itself isn't retried
+    assert not asyncio.run(run(log_quiet_s=600, opened_ago=300))[0]     # a stop long after the open: not this

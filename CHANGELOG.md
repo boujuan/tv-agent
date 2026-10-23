@@ -16,6 +16,10 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   the phone and shown to the panel.
 
 ### Fixed
+- A play that did nothing and went back to Home: Kodi's player can hang inside the TV's Dolby Vision decoder while
+  opening a 4K file, and from then on takes every file without playing it until Kodi is restarted (its log stops
+  mid-line). A file that stops at 0:00 within 45 s of opening, with nothing in Kodi's log since, now gets Kodi
+  restarted and opened again, once ("Kodi was stuck: restarting it").
 - `tv-agent tv install --help` (or an APK path that doesn't exist) printed a traceback instead of the usage.
 
 ## panel — unreleased
