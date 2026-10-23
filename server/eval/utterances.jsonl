@@ -79,7 +79,7 @@
 {"text": "tell me a joke", "expect": {"type": "none"}}
 {"text": "order a pizza", "expect": {"type": "none"}}
 {"text": "Go back to YouTube.", "expect": {"type": "open_app", "app": "tizentube"}}
-{"text": "Please, please.", "expect": {"type": "transport", "op": "pause"}}
+{"text": "Please, please.", "expect": {"type": "transport", "op": "toggle"}}
 {"text": "Open Stream U", "expect": {"type": "open_app", "app": "stremio"}}
 {"text": "Open Mobistar Plus", "expect": {"type": "open_app", "app": "movistar"}}
 {"text": "Increase the volume.", "expect": {"type": "volume", "op": "up"}}

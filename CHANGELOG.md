@@ -24,6 +24,8 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   phones (server — unreleased, below).
 
 ### Fixed
+- Run checks with the voice agent stopped said the rules "couldn't run" (connection refused): the saved rules are
+  tested here instead now, and the report says so. Decisions says the agent is stopped without an error.
 - A dialog opened from a finished background task (pairing a phone, Run checks, Diagnose) held back every other
   result until it closed: the pairing dialog never saw the phone pair or the code expire. Each result now arrives
   as its own event.

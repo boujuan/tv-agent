@@ -829,8 +829,7 @@ class Decisions(QWidget):
     def load(self):
         def done(res, err):
             if err:
-                self.status.setText(f"<span style='color:{RED}'>The voice agent isn't running: start it to see and "
-                                    "edit the rules.</span>")
+                self.status.setText("The voice agent is stopped: start it to see and edit the rules here")
                 return
             self.server = res
             self.raw = copy.deepcopy(res["rules"])

@@ -2,6 +2,7 @@
 tabs, on every one: Save and Revert for what Settings and Decisions have unsaved, Run checks, Files (export, import,
 open, reset) and About; messages from every tab show in the status bar at the bottom."""
 import json
+import re
 import subprocess
 import sys
 import time
@@ -18,8 +19,8 @@ from PySide6.QtWidgets import (QApplication, QDialog, QDialogButtonBox, QHBoxLay
 from .about import About
 from .activity_tab import Activity
 from .commands_tab import Commands
-from .common import (APP_ID, ICON, SERVICES, STYLE, Async, Prefs, agent_config, api, clock, episode_of, gpu_of,
-                     gpu_totals, human, pill, run_doctor, unit_info, GREEN, AMBER, RED)
+from .common import (APP_ID, ICON, REPO, SERVICES, STYLE, Async, Prefs, agent_config, api, clock, episode_of, gpu_of,
+                     gpu_totals, human, pill, run_doctor, run_eval, unit_info, GREEN, AMBER, RED)
 from .decisions import Decisions
 from .mic import Mic
 from .overview import Overview
@@ -216,12 +217,17 @@ class Panel(QMainWindow):
         self.say("Unsaved changes thrown away")
 
     def run_checks(self):
-        """tv-agent doctor and the rules (as edited) on the labelled sentences, in one report."""
-        try:
-            tests = self.decisions.tests_job()
-        except ValueError as e:
-            QMessageBox.warning(self, "TV Agent", str(e))
-            return
+        """tv-agent doctor and the rules (as edited) on the labelled sentences, in one report. With the voice agent
+        stopped, the saved rules are tested here instead (`tv-agent eval`)."""
+        agent_on = self.overview.cards["tv-agent"].active
+        if agent_on:
+            try:
+                tests = self.decisions.tests_job()
+            except ValueError as e:
+                QMessageBox.warning(self, "TV Agent", str(e))
+                return
+        else:
+            tests = run_eval
         self.say("Running the checks…", 120000)
         got: dict = {}
 
@@ -229,7 +235,16 @@ class Panel(QMainWindow):
             if len(got) < 2:
                 return
             res, err = got["tests"]
-            if err or not res:
+            if isinstance(res, str):                     # tested here: the voice agent is stopped
+                m = re.search(r"full action (\d+)/(\d+)", res)
+                bad = [line[4:] for line in res.splitlines() if line.startswith("BAD ")]
+                tests_text = ((f"{m[1]} of {m[2]} right" if m else "no result") + " (the saved rules, tested here: the "
+                              "voice agent is stopped" + ("; your unsaved edits need it running" if
+                                                           self.decisions.dirty else "") + ")"
+                              + "".join(f"\n✗ {b}" for b in bad))
+                summary = (f"<span style='color:{GREEN if m and m[1] == m[2] else AMBER}'>rules "
+                           f"{m[1]}/{m[2]}</span>" if m else "rules not tested")
+            elif err or not res:
                 tests_text = f"Couldn't run them: {err}"
                 summary = f"<span style='color:{RED}'>rules not tested</span>"
             else:
@@ -263,9 +278,12 @@ class Panel(QMainWindow):
             subprocess.Popen(["xdg-open", str(path)])
             return
         defaults = (self.decisions.server or {}).get("defaults")
-        if not defaults:
-            self.say("The voice agent isn't running: start it to see the rules")
-            return
+        if not defaults:                       # the voice agent is stopped: the built-in rules from this copy
+            try:
+                defaults = json.loads((REPO / "server/src/tv_agent/decide/default_rules.json").read_text())
+            except (OSError, ValueError) as e:
+                self.say(f"Can't read the built-in rules: {e}")
+                return
         box = QMessageBox(QMessageBox.Icon.Question, "TV Agent", "You're on the built-in rules, which improve with "
                           "each update. Edit them in the Decisions tab, or open them here as a file:", parent=self)
         look = box.addButton("Open them read-only", QMessageBox.ButtonRole.AcceptRole)

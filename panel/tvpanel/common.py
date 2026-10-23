@@ -256,6 +256,12 @@ def android_version() -> str | None:
         return None
 
 
+def run_eval() -> str:
+    """The saved rules on the labelled sentences, run here (`tv-agent eval`): for when the voice agent is stopped."""
+    r = subprocess.run([str(TV_AGENT), "eval"], capture_output=True, text=True, timeout=300)
+    return "\n".join(l for l in (r.stdout + r.stderr).splitlines() if " INFO " not in l)
+
+
 def run_doctor() -> str:
     r = subprocess.run([str(TV_AGENT), "doctor"], capture_output=True, text=True, timeout=60)
     return "\n".join(l for l in (r.stdout + r.stderr).splitlines() if " INFO " not in l)
