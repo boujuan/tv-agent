@@ -4,14 +4,16 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
-## android — unreleased
+## android 0.8.0 — 2026-10-23
 
 ### Fixed
 - The app no longer asks for audio focus while it listens. Asking as a voice assistant made the player pause when
   the pill opened and play again when it closed, which undid "pause" (and paused YouTube before "play"). tv-agent
-  already lowers the volume while you speak. Version 0.8.0.
+  already lowers the volume while you speak.
 
-## panel — unreleased
+## panel 0.3.0 — 2026-10-23
+
+Needs server 0.3.0 (the language hint, the vocabulary and paired phones come from it).
 
 ### Added
 - Decisions › Speech to text: the hosted model's language hint (your native language by default) and its
@@ -20,8 +22,7 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 - The hosted models are marked: * uses the language hint, ** the hint and the vocabulary (measured: the hint changed
   the answers of AssemblyAI, Voxtral, Deepgram, ElevenLabs and Whisper; only AssemblyAI takes a vocabulary).
 - Settings › Phones: the paired phones (last seen, from where), rename, revoke, and **Pair a phone…** with a QR code
-  (`qrencode`) or a code to type. Activity shows commands from a phone as 📱 Phone. Needs the server with paired
-  phones (server — unreleased, below).
+  (`qrencode`) or a code to type. Activity shows commands from a phone as 📱 Phone.
 
 ### Fixed
 - Run checks with the voice agent stopped said the rules "couldn't run" (connection refused): the saved rules are
@@ -33,30 +34,10 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   picked, so choosing Hosted again kept offering to unload it. Now it asks both ways: unload when Hosted doesn't use
   it, load (now, or when first needed) when a choice does.
 
-## android 0.7.0 — 2026-10-23
+## server 0.3.0 — 2026-10-23
 
-Upgrading from 0.3.0, which was signed with a debug key: uninstall it once (`tv-agent tv shell pm uninstall
-com.boujuan.tvagent`), then `tv-agent tv install tv-agent-android-<version>.apk`, which pairs again. Use it with
-server 0.2.0: the lists, the help screen and the streamed microphone come from it (with 0.1.0 the app sends the
-whole recording instead).
-
-### Added
-- "What can you do?" ("¿qué puedes hacer?"): every command as a pattern with its ‹placeholders› set apart, by
-  section, beside what it does, in the language you asked in; a scrolling list on the TV (0.6.0, patterns 0.7.0).
-- A numbered list on the TV for "what was I watching?", "what's new?" and "new films", with posters: say "number
-  2", or pick with OK or a number key. It stays visible while you speak (the pill opens beside it, bottom-right)
-  and closes when playback starts, on BACK, or after 90 s (`ChoicesActivity`, opened over adb only).
-- Streams the remote's microphone to tv-agent while you speak (TCP, `stream_port`, sent at pairing) and shows
-  what it has understood so far; tv-agent decides during your pause and tells the app to stop. Falls back to
-  sending the recording at the end when the stream isn't available (an older agent, a dropped connection).
-
-### Changed
-- Releases are signed with the project's release key (certificate SHA-256
-  `bd934e07d6784766bbfb3948bf3467ef9b2cb0c9c1146fdf9528dc76c8eb1e08`), so each release installs over the previous
-  one. Local builds use it when `~/.gradle/gradle.properties` has it and the debug key otherwise;
-  `build-and-install.sh` prints which.
-
-## server — unreleased
+The default rules know the new `recommend` and `find_scene`. A `rules.json` you saved keeps working but doesn't get
+them (the LLM still does both): Reset to defaults in the panel's Decisions tab, then redo your changes.
 
 ### Added
 - Paired phones, for the TV Agent phone app (`clients.py`): pairing with a one-time code from the panel (QR code),
@@ -66,7 +47,8 @@ whole recording instead).
   over TLS (`phone_stream_port`, 8769). `phones`, `phone_port`, `phone_stream_port`, `phone_hosts` in config.toml.
   The TV's listeners and checks are unchanged.
 - More of the local API (`remote.py`): what's playing with Kodi's tracks and the intro/recap/credits timestamps,
-  choosing a track, the remote's d-pad, OK and number keys, typing into the TV, the volume, the app list, the
+  choosing a track, the remote's d-pad, OK and number keys (and its gear and input buttons: the TV's settings menu and inputs panel;
+  the launcher ignores MENU, INFO and SETTINGS), typing into the TV, the volume, the app list, the
   "what was I watching / what's new / new films" lists returned instead of shown, the activity history and kept
   recordings, and the playback and language settings, live.
 - Commands from a phone are `phone` in the activity history.
@@ -92,7 +74,8 @@ whole recording instead).
   ("Better Console" → "Better Call Saul", "este remedio" → "Stremio"). AssemblyAI Universal-3.6 Pro is listed
   first: on 30 real commands it heard 27 right with the hint and 30 with the vocabulary, ~0.26 s, ~$0.0002 each,
   and nothing on silence (Voxtral makes up sentences there).
-- `GET /v1/pipeline` shows them; `POST` changes them. Your library's titles are read when the agent starts, so the
+- `GET /v1/pipeline` shows them, and every name sent (`stt_vocabulary_sent`: yours, then Twitch favourites and
+  library titles); `POST` changes them. Your library's titles are read when the agent starts, so the
   first command after a restart has them too.
 
 ### Changed
@@ -118,6 +101,29 @@ whole recording instead).
 - A film's runtime given as "1h 39min" was read as 39 minutes (the length used when Kodi doesn't report one).
 - Stopping or restarting the agent after a phone had been connected took over 10 s, so systemd killed it: a phone
   that had gone to sleep never answered the closing of its connection. Open connections now get 2 s.
+
+## android 0.7.0 — 2026-10-23
+
+Upgrading from 0.3.0, which was signed with a debug key: uninstall it once (`tv-agent tv shell pm uninstall
+com.boujuan.tvagent`), then `tv-agent tv install tv-agent-android-<version>.apk`, which pairs again. Use it with
+server 0.2.0: the lists, the help screen and the streamed microphone come from it (with 0.1.0 the app sends the
+whole recording instead).
+
+### Added
+- "What can you do?" ("¿qué puedes hacer?"): every command as a pattern with its ‹placeholders› set apart, by
+  section, beside what it does, in the language you asked in; a scrolling list on the TV (0.6.0, patterns 0.7.0).
+- A numbered list on the TV for "what was I watching?", "what's new?" and "new films", with posters: say "number
+  2", or pick with OK or a number key. It stays visible while you speak (the pill opens beside it, bottom-right)
+  and closes when playback starts, on BACK, or after 90 s (`ChoicesActivity`, opened over adb only).
+- Streams the remote's microphone to tv-agent while you speak (TCP, `stream_port`, sent at pairing) and shows
+  what it has understood so far; tv-agent decides during your pause and tells the app to stop. Falls back to
+  sending the recording at the end when the stream isn't available (an older agent, a dropped connection).
+
+### Changed
+- Releases are signed with the project's release key (certificate SHA-256
+  `bd934e07d6784766bbfb3948bf3467ef9b2cb0c9c1146fdf9528dc76c8eb1e08`), so each release installs over the previous
+  one. Local builds use it when `~/.gradle/gradle.properties` has it and the debug key otherwise;
+  `build-and-install.sh` prints which.
 
 ## server 0.2.0 — 2026-10-22
 
