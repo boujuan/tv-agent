@@ -14,6 +14,10 @@ LAN, port 8767 (stream_port): the same, streamed while you speak, so it's decide
                  then {"transcript", "say", "ok"} as /v1/utterance answers; then it closes
   Same address check and token; at most 12 s of audio; one at a time.
 
+Paired phones (the TV Agent phone app, clients.py): HTTPS on phone_port (8768) with the local API's panel endpoints
+for a phone's own token, and the stream above over TLS on phone_stream_port (8769) with that token instead of the
+agent's; pairing from the panel. The TV's listeners and checks are the same with or without them.
+
 Localhost (127.0.0.1:8766), for the panel, the CLI and the MCP server, same token:
     POST /v1/text {"text"}      decide and do it            POST /v1/audio  PCM16 from the laptop's mic
     POST /v1/decide {"text"}    decide only, with the path it took (the panel's diagram)
@@ -42,6 +46,8 @@ from pydantic import ValidationError
 from . import __version__
 from . import actions as A
 from . import activity
+from . import clients as clients_mod
+from . import remote
 from .agent import Agent
 from . import config as config_mod
 from .config import Config, lan_address
@@ -61,7 +67,7 @@ from .stt import model_dir as stt_model_dir
 
 log = logging.getLogger("tv_agent")
 MAX_BODY = 400_000          # 12 s of 16 kHz PCM16
-SOURCES = ("tv", "laptop", "text", "mcp")
+SOURCES = ("tv", "laptop", "text", "mcp", "phone")
 
 
 def describe(a: A.Action) -> str:
@@ -170,6 +176,7 @@ class Service:
         self._library_names: list[str] = []      # for the speech model's vocabulary, refreshed now and then
         self._library_names_at = 0.0
         self.token = cfg.secret("agent_token") or ""
+        self.clients = clients_mod.Clients()
         self._busy = asyncio.Lock()
         self._running: asyncio.Task | None = None
         self._rules_mtime = self._mtime()
@@ -213,6 +220,8 @@ class Service:
     # ---- requests ----
 
     def check(self, request: Request, lan: bool):
+        if not lan and request.scope.get(clients_mod.DEVICE):
+            return          # a paired phone, let in by the phone listener (its token checked there; clients.py)
         allowed = set(self.cfg.tv_hosts) | ({self.agent.adb.host} if self.agent.adb.host else set())
         if lan and (request.client is None or request.client.host not in allowed):
             raise HTTPException(403)
@@ -399,8 +408,10 @@ class Service:
         return "", {"stt": model if order[0] == "hosted" else "local", **failed}
 
 
-async def stream_client(svc: "Service", reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-    """One mic press, streamed (protocol in the module docstring)."""
+async def stream_client(svc: "Service", reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
+                        phone: bool = False):
+    """One mic press, streamed (protocol in the module docstring): from the TV app, or with phone a paired phone's
+    (TLS, its own token, from wherever it is)."""
     peer = (writer.get_extra_info("peername") or ("",))[0]
 
     async def send(msg: dict):
@@ -409,33 +420,37 @@ async def stream_client(svc: "Service", reader: asyncio.StreamReader, writer: as
 
     try:
         allowed = set(svc.cfg.tv_hosts) | ({svc.agent.adb.host} if svc.agent.adb.host else set())
-        if peer not in allowed:
+        if not phone and peer not in allowed:
             return
         hello = json.loads(await asyncio.wait_for(reader.readline(), 3) or b"{}")
         given = str(hello.get("token") or "")
-        if not svc.token or not hmac.compare_digest(given.encode(), svc.token.encode()):
+        if phone:
+            ok = svc.clients.verify(given, peer) is not None
+        else:
+            ok = bool(svc.token) and hmac.compare_digest(given.encode(), svc.token.encode())
+        if not ok:
             await send({"error": "unauthorized"})
             return
         if svc._busy.locked():
             await send({"error": "busy"})
             return
         async with svc._busy:
-            log.info("TV app streaming (from %s)", peer)
+            log.info("%s streaming (from %s)", "Phone" if phone else "TV app", peer)
             # Pressed on the screensaver, the app opens behind it, hidden and without the microphone: wake the TV.
             asyncio.create_task(svc.agent._wake())
             asyncio.create_task(svc.agent.warm())    # addons and library fresh before a play is asked for
             svc.agent.start_duck()              # half volume while you speak (the remote's mic hears the TV)
             try:
-                await stream_session(svc, reader, send)
+                await stream_session(svc, reader, send, "phone" if phone else "tv")
             finally:
                 await svc.agent.unduck()        # no-op once the session restored it
-    except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionError, ValueError) as e:
+    except (asyncio.TimeoutError, asyncio.IncompleteReadError, OSError, ValueError) as e:
         log.info("audio stream from %s ended: %s", peer, type(e).__name__)
     finally:
         writer.close()
 
 
-async def stream_session(svc: "Service", reader: asyncio.StreamReader, send):
+async def stream_session(svc: "Service", reader: asyncio.StreamReader, send, source: str = "tv"):
     svc.maybe_reload()
     rules = svc.agent.rules
     heard: dict = {}                    # how the last transcription went, and what they all cost (for the history)
@@ -476,9 +491,9 @@ async def stream_session(svc: "Service", reader: asyncio.StreamReader, send):
         log.info("decided %.0f ms after the last word", sess.endpoint_ms)
     extra["recording"] = await svc.keep_recording(bytes(sess.pcm))
     if d.action.type != "none":
-        svc.start(d, text, "tv", extra)
+        svc.start(d, text, source, extra)
     else:
-        svc.record("tv", text, d, False, unclear_say(text), None, extra)
+        svc.record(source, text, d, False, unclear_say(text), None, extra)
     await send({"transcript": text, "say": describe(d.action) if d.action.type != "none" else unclear_say(text),
                 "ok": d.action.type != "none"})
     # Read (and drop) what the app sent meanwhile until its end marker: closing with unread audio would reset the
@@ -561,17 +576,18 @@ def local_app(svc: Service) -> FastAPI:
 
     @app.post("/v1/audio")
     async def audio(request: Request):
-        """The panel's microphone: same as the TV's, but waits for the result to show it."""
+        """The panel's microphone (or a phone's): same as the TV's, but waits for the result to show it."""
         svc.check(request, lan=False)
+        source = "phone" if request.scope.get(clients_mod.DEVICE) else "laptop"
         if svc._busy.locked():
             raise HTTPException(429)
         async with svc._busy:
             heard, extra = await svc.hear(request)
             d = await svc.decide(heard)
             if d.action.type == "none":
-                svc.record("laptop", heard, d, False, unclear_say(heard), None, extra)
+                svc.record(source, heard, d, False, unclear_say(heard), None, extra)
                 return {"heard": heard, **decision_json(d), "ok": False, "say": unclear_say(heard)}
-        out = await svc.execute(d, heard, "laptop", extra)
+        out = await svc.execute(d, heard, source, extra)
         return {"heard": heard, **decision_json(d), "ok": out.ok, "say": out.say}
 
     @app.post("/v1/decide")
@@ -912,6 +928,8 @@ def local_app(svc: Service) -> FastAPI:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=422)
         return await evaluate.run(Router(svc.agent.d1, rules))
 
+    app.include_router(remote.routes(svc))
+    app.include_router(clients_mod.routes(svc))
     return app
 
 
@@ -928,12 +946,16 @@ async def serve(cfg: Config):
         log.warning("couldn't pick up the last session: %s", type(e).__name__)
     lan_host = lan_address(cfg)
     stream = await asyncio.start_server(lambda r, w: stream_client(svc, r, w), lan_host, cfg.stream_port)
+    local = local_app(svc)
     servers = [
         uvicorn.Server(uvicorn.Config(lan_app(svc), host=lan_host, port=cfg.lan_port, access_log=False,
                                       log_level="warning")),
-        uvicorn.Server(uvicorn.Config(local_app(svc), host="127.0.0.1", port=cfg.local_port, access_log=False,
+        uvicorn.Server(uvicorn.Config(local, host="127.0.0.1", port=cfg.local_port, access_log=False,
                                       log_level="warning")),
     ]
+    serving = [s.serve() for s in servers] + [stream.serve_forever()]
+    if cfg.phones:
+        serving += await phone_listeners(svc, local)
 
     async def keepalive():
         while True:
@@ -944,7 +966,42 @@ async def serve(cfg: Config):
              cfg.local_port)
     ka = asyncio.create_task(keepalive())
     try:
-        await asyncio.gather(*(s.serve() for s in servers), stream.serve_forever())
+        await asyncio.gather(*serving)
     finally:
         ka.cancel()
         await svc.agent.close()
+
+
+async def phone_listeners(svc: Service, local: FastAPI) -> list:
+    """The paired phones' HTTPS API and TLS audio stream on the LAN address and phone_hosts (clients.py). An address
+    that can't be had (Tailscale down, the port taken) is skipped with a warning: the TV's listeners don't depend
+    on these."""
+    cfg = svc.cfg
+    try:
+        fingerprint = await asyncio.to_thread(clients_mod.certificate)
+        ctx = clients_mod.tls_context()
+    except (OSError, ValueError, ImportError) as e:
+        log.error("phones: no certificate (%s), so no phone listener", e)
+        return []
+    app = clients_mod.gateway(svc, local)
+    out = []
+    for host in clients_mod.addresses(cfg):
+        api = audio = None
+        try:
+            api = clients_mod.listen_socket(host, cfg.phone_port)
+            audio = clients_mod.listen_socket(host, cfg.phone_stream_port)
+        except OSError as e:
+            log.warning("phones: not listening on %s (%s)", host, e)
+            if api:
+                api.close()
+            continue
+        server = uvicorn.Server(uvicorn.Config(app, access_log=False, log_level="warning", lifespan="off",
+                                               ssl_certfile=str(config_mod.TLS_CERT), ssl_keyfile=str(config_mod.TLS_KEY)))
+        stream = await asyncio.start_server(lambda r, w: stream_client(svc, r, w, phone=True), sock=audio, ssl=ctx,
+                                            ssl_handshake_timeout=5)
+        out += [server.serve(sockets=[api]), stream.serve_forever()]
+        log.info("phones: %s (HTTPS) and :%d (TLS)", clients_mod.host_port(host, cfg.phone_port), cfg.phone_stream_port)
+    if out:
+        svc.clients.fingerprint = fingerprint
+        log.info("phones: %d paired; certificate SHA-256 %s…", len(svc.clients.devices), fingerprint[:16])
+    return out

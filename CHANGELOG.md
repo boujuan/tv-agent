@@ -19,6 +19,9 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   if ticked), live at once.
 - The hosted models are marked: * uses the language hint, ** the hint and the vocabulary (measured: the hint changed
   the answers of AssemblyAI, Voxtral, Deepgram, ElevenLabs and Whisper; only AssemblyAI takes a vocabulary).
+- Settings › Phones: the paired phones (last seen, from where), rename, revoke, and **Pair a phone…** with a QR code
+  (`qrencode`) or a code to type. Activity shows commands from a phone as 📱 Phone. Needs the server with paired
+  phones (server — unreleased, below).
 
 ### Fixed
 - Decisions › Speech to text loaded this laptop's model without asking whenever a choice other than Hosted was
@@ -51,6 +54,17 @@ whole recording instead).
 ## server — unreleased
 
 ### Added
+- Paired phones, for the TV Agent phone app (`clients.py`): pairing with a one-time code from the panel (QR code),
+  a token per phone kept only as its SHA-256 (`clients.json`, mode 600), revoked at once; an HTTPS listener
+  (`phone_port`, 8768) with the agent's own certificate, which the app pins, passing the panel's endpoints through
+  for a phone's token (never the stream link, the rules editor or the list of phones); the TV app's audio stream
+  over TLS (`phone_stream_port`, 8769). `phones`, `phone_port`, `phone_stream_port`, `phone_hosts` in config.toml.
+  The TV's listeners and checks are unchanged.
+- More of the local API (`remote.py`): what's playing with Kodi's tracks and the intro/recap/credits timestamps,
+  choosing a track, the remote's d-pad, OK and number keys, typing into the TV, the volume, the app list, the
+  "what was I watching / what's new / new films" lists returned instead of shown, the activity history and kept
+  recordings, and the playback and language settings, live.
+- Commands from a phone are `phone` in the activity history.
 - Suggestions by voice: "recommend something like Dark", "what should we watch?", "put on a comedy under 90
   minutes", "recomiéndame una serie de miedo", "algo como La casa de papel". The LLM suggests titles that fit, with
   what you watched lately as taste; each one must be found by the title search (Cinemeta and your metadata addon,
