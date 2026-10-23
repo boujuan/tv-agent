@@ -4,7 +4,7 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
-## server — unreleased
+## server 0.4.0 — 2026-10-23
 
 ### Added
 - Each episode's file is checked to be that episode (`episode_check.py`): streaming rips follow the service's
@@ -29,7 +29,7 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 - Playing a file while another played in Kodi could give sound without a picture, a jump that ran to the end of
   the episode, or a Kodi that took files without playing them. On this TV the old file's video decoder isn't let go
   in time ("InstanceGuard locked" in Kodi's log), Dolby Vision or not. Kodi's file is now stopped, and its player
-  gone, before the next one opens (about 1.5 s more when switching).
+  gone, before the next one opens (about 2 s more when switching).
 - Jumps in a Dolby Vision file ("go to the part where…", "back 10 seconds", a time) reopen it at that time
   instead of seeking: this TV's Dolby Vision decoder can fail the flush a seek needs (black picture, or the time
   running to the end; a known problem on TCL sets with Kodi 21 and 22). The same for any file while Kodi is behind
@@ -44,7 +44,9 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   restarted and opened again, once ("Kodi was stuck: restarting it").
 - `tv-agent tv install --help` (or an APK path that doesn't exist) printed a traceback instead of the usage.
 
-## panel — unreleased
+## panel 0.4.0 — 2026-10-23
+
+Needs server 0.4.0 (the update checks and the phones' app versions come from it).
 
 ### Added
 - Settings › Updates: the latest releases against this computer, the TV app and the phones; Check now; install by
@@ -52,7 +54,7 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   the agent; "Update this computer" moves this checkout to a newer release tag (a fast-forward of a clean `main`,
   `uv sync`, the agent restarted), never over uncommitted or unpushed work. Checked soon after the panel starts and
   every 6 hours; news shows in the status bar and as a notification.
-- Settings › Phones shows each phone's app version, and when a newer one is out. Needs the agent from this version.
+- Settings › Phones shows each phone's app version, and when a newer one is out.
 
 ## android 0.8.0 — 2026-10-23
 
