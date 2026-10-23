@@ -4,6 +4,11 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
+## server — unreleased
+
+### Fixed
+- `tv-agent tv install --help` (or an APK path that doesn't exist) printed a traceback instead of the usage.
+
 ## android 0.8.0 — 2026-10-23
 
 ### Fixed

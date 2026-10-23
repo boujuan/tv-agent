@@ -270,10 +270,10 @@ def _tv(what: str, rest: list[str]) -> int:
                 return 2
             print(adb.run(rest, timeout=60), end="")
         elif what == "install":
-            if len(rest) != 1:
+            from pathlib import Path
+            if len(rest) != 1 or not Path(rest[0]).is_file():     # "--help" too: it arrives here as a file name
                 print("usage: tv-agent tv install <app.apk>", file=sys.stderr)
                 return 2
-            from pathlib import Path
             url = install_app(cfg, adb, Path(rest[0]))
             print(f"installed and paired with {url}")
         elif what == "pair":
