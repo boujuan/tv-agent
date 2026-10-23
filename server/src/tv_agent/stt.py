@@ -64,7 +64,7 @@ USES_LANGUAGE = {"assemblyai/universal-3-6-pro", "mistralai/voxtral-mini-transcr
                  "mistralai/voxtral-small-transcribe-3-0", "elevenlabs/scribe-v2", "openai/whisper-large-v3-turbo"}
 USES_VOCABULARY = {"assemblyai/universal-3-6-pro"}
 TRANSCRIBE_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
-VOCABULARY_MAX = 200                                     # names sent per request (more makes it hear them in noise)
+VOCABULARY_MAX = 100     # names sent per request: AssemblyAI refuses more (HTTP 400, measured 2026-10-24)
 NON_LATIN = re.compile(r"[^\W\d_a-zA-Z\u00C0-\u024F]")   # a letter outside Latin scripts: "Пауса", "Ютуб"
 RECORDINGS = DATA_DIR / "recordings"
 RECORDINGS_KEPT = 300

@@ -36,6 +36,10 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   computer away from home too (needs the player from its 0.1.0).
 
 ### Fixed
+- Hosted speech-to-text works again with a long watch history: the names it's asked to listen for (your
+  vocabulary, then your Twitch favourites and recent titles) are capped at 100, which AssemblyAI takes; at 101 or
+  more it refused every request (HTTP 400) and the laptop's Parakeet heard everything instead, worse ("Pulse" for
+  "Pause", "Doom" for "Dune"). The log and the Activity tab now give the HTTP status of a hosted failure.
 - TV Agent Player: a file the TV can't read is explained on the TV at once (the player's new `LOAD_FAILED`
   event, from player 0.1.1), e.g. "The TV can't look up this file's server: check its internet (DNS)", instead
   of a silent wait while it retries.

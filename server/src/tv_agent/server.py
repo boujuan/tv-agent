@@ -396,8 +396,11 @@ class Service:
                                                                  language=self.stt_language(),
                                                                  vocabulary=self.stt_vocabulary())
                 except (httpx.HTTPError, ValueError, KeyError) as e:
-                    log.warning("hosted speech-to-text (%s) didn't answer: %s", model, type(e).__name__)
-                    failed = {"stt_error": f"{model}: {type(e).__name__}",
+                    why = type(e).__name__
+                    if isinstance(e, httpx.HTTPStatusError):        # the status says which: a refused request or theirs
+                        why += f" {e.response.status_code}"
+                    log.warning("hosted speech-to-text (%s) didn't answer: %s", model, why)
+                    failed = {"stt_error": f"{model}: {why}",
                               "stt_failed_ms": round((time.perf_counter() - t) * 1000)}
                     continue
                 info = {"stt": model, "stt_cost": cost}
