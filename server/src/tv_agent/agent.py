@@ -46,7 +46,13 @@ KODI = "org.xbmc.kodi"
 # stops at 0:00 this soon after opening, with nothing in that log since, gets Kodi restarted and opened again, once.
 KODI_LOG = "/sdcard/Android/data/org.xbmc.kodi/files/.kodi/temp/kodi.log"
 STUCK_WITHIN = 45
-KODI_FREE = 1.0             # seconds after Kodi's player is gone before the next file opens (its decoder is let go)
+KODI_FREE = 2.0             # seconds after Kodi's player is gone before the next file opens (its decoder is let go)
+# A seek flushes the decoder, which this TV's Dolby Vision decoder can fail ("Reset: flush failed": black picture, or
+# the time running to the end; TCL sets with Kodi 21 and 22, github.com/xbmc/xbmc/issues/25692). Jumps in a Dolby
+# Vision file, or while Kodi is behind another screen (no window for the decoder), reopen it at the time instead:
+# a new decoder holds nothing to flush. A picture lost anyway shows as Kodi logging decoder failures nonstop.
+PICTURE_EVERY = 15
+DECODER_FAILED = re.compile(r"dequeue(Output|Input)Buffer failed|Reset: flush failed")
 LIST_SIZE = 6                # rows that fit the TV app's list
 STARTS = {"play_title", "continue_watching", "next_episode", "pick"}     # actions that start playback
 LIST_TTL = 300              # "number 2" refers to a list shown in the last 5 minutes
@@ -171,6 +177,8 @@ class Agent:
         self._starting = asyncio.Lock()          # one start at a time replaces the previous session
         self._user_stopped = False               # a stop that was asked for isn't the end of an episode
         self._again: tuple[NowPlaying, float, object] | None = None    # the last Kodi start: (session, when, redo)
+        self._reopen: tuple[NowPlaying, object] | None = None    # that start again at a time: (session, fn(ms))
+        self._picture_task: asyncio.Task | None = None
         self._duck: asyncio.Task | None = None
         self._ducked: tuple[str, int] | None = None   # ("kodi" or "tv", the volume before listening)
 
@@ -490,13 +498,14 @@ class Agent:
         return None
 
     async def play(self, imdb: str, kind: str, name: str, video: str, label: str, meta: dict,
-                   resume_ms: int = 0, prepared: streams.Stream | None = None) -> Outcome:
+                   resume_ms: int = 0, prepared: streams.Stream | None = None, jump: bool = False) -> Outcome:
         """Pick a cached debrid stream from your addons, start it in the player (Kodi or Just Player), then follow
-        its progress."""
+        its progress. `jump`: the same file reopened at resume_ms exactly (a jump in it), without a message."""
         if not self.account:
             return Outcome(False, "Stremio isn't signed in (tv-agent setup stremio)")
         t0 = time.perf_counter()
-        asyncio.create_task(self.notify(f"Finding {label}…"))
+        if not jump:
+            asyncio.create_task(self.notify(f"Finding {label}…"))
         kodi_ready = None
         if self.cfg.player == "kodi" and not self.dry_run:
             kodi_ready = asyncio.create_task(self._start_kodi())   # Kodi gets ready (or cold-starts) during the search
@@ -558,6 +567,7 @@ class Agent:
                 await self.kodi.prefer(languages.KODI_NAMES.get(plan.audio or "", "mediadefault"),
                                        "none" if plan.subtitles is None
                                        else languages.KODI_NAMES.get(plan.subtitles[0], "original"))
+                await self.kodi.allow_hdr(dolby_vision_only=chosen.dolby_vision and chosen.hdr10_plus)
             except KodiError as e:
                 log.warning("Kodi language settings: %s", e)
             t_kodi = time.perf_counter()
@@ -568,7 +578,7 @@ class Agent:
             async with self._starting:
                 if (pid := await self._kodi_player()) is not None:
                     await self._note_position(pid)      # a replay of this episode starts where it is
-                resume_ms = self._replace_session(video, resume_ms)
+                resume_ms = self._replace_session(video, resume_ms, exact=jump)
                 addon_subs = None
                 if plan.subtitles is not None:   # asked now for the file chosen, attached once Kodi has opened it
                     addon_subs = asyncio.create_task(subtitles.fetch(self.http, await self.addons(), kind, video,
@@ -580,7 +590,10 @@ class Agent:
                 t_open = time.perf_counter()
                 self.state.now_playing = NowPlaying(imdb, kind, video, name, "kodi", chosen.url + extra, runtime,
                                                     filename=chosen.filename, size=chosen.size,
-                                                    video_hash=chosen.video_hash)
+                                                    video_hash=chosen.video_hash, dolby_vision=chosen.dolby_vision)
+                self._reopen = (self.state.now_playing,
+                                lambda ms: self.play(imdb, kind, name, video, label, meta, ms, prepared=chosen, jump=True))
+                self._picture_task = asyncio.create_task(self._watch_picture(self.state.now_playing))
                 again = None if self._again and self._again[0].video_id == video and \
                     time.monotonic() - self._again[1] < STUCK_WITHIN * 2 else \
                     (lambda: self.play(imdb, kind, name, video, label, meta, resume_ms, prepared=chosen))
@@ -598,18 +611,18 @@ class Agent:
         quality = f" · {'4K' if chosen.height >= 2160 else f'{chosen.height}p'}" if chosen.height else ""
         return Outcome(True, f"Playing {label}{quality}" + (f" · from {_clock(resume_ms)}" if resume_ms else ""))
 
-    def _replace_session(self, video: str, resume_ms: int) -> int:
+    def _replace_session(self, video: str, resume_ms: int, exact: bool = False) -> int:
         """Right before a new file opens, what belonged to the previous start stops: its follower (it would read
         the new file's position; its last progress write finishes on its own), its track fixes, intro watch and
         next-episode preparation, and an "after this one" timer. Returns where to start: a "stop" a moment ago
-        on this same episode knows its position better than the library yet."""
+        on this same episode knows its position better than the library yet (not for a jump: `exact`)."""
         old = self.state.now_playing
-        if (resume_ms > 0 and old and old.video_id == video and old.stopped_at
+        if (not exact and resume_ms > 0 and old and old.video_id == video and old.stopped_at
                 and time.monotonic() - old.stopped_mono < 600):
             resume_ms = old.stopped_at
         self._stop_following()
         self._user_stopped, self._after_this = False, None
-        for task in (self._prefetch, self._tracks_task, self._skip_task):
+        for task in (self._prefetch, self._tracks_task, self._skip_task, self._picture_task):
             if task and not task.done() and task is not asyncio.current_task():
                 task.cancel()
         return resume_ms
@@ -867,6 +880,54 @@ class Agent:
             log.warning("after %s ended: %s", np.video_id, type(e).__name__)
             await self.notify("Couldn't start the next episode")
             await self._home_unless_playing()
+
+    async def _watch_picture(self, np: NowPlaying):
+        """While Kodi plays this file: a decoder that lost its picture (Kodi logging its failures nonstop, sound
+        going on) gets Kodi restarted and the file reopened where it was, once."""
+        try:
+            while True:
+                await asyncio.sleep(PICTURE_EVERY)
+                if self.state.now_playing is not np or (pid := await self._kodi_player()) is None:
+                    return
+                tail = await self.tv(lambda adb: adb.run(["tail", "-c", "4000", KODI_LOG], timeout=5))
+                if len(DECODER_FAILED.findall(tail)) < 8:
+                    continue
+                at = (await self.kodi.position(pid))[0]
+                log.warning("Kodi lost the picture of %s at %s (its decoder failing): restarting it", np.video_id,
+                            _clock(at))
+                await self._recover_kodi(np, at, "The picture was lost: restarting Kodi")
+                return
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.info("watching Kodi's picture: %s", type(e).__name__)
+
+    async def _recover_kodi(self, np: NowPlaying, at_ms: int, say: str) -> bool:
+        """Kodi force-stopped (its decoder is let go with it), started again, and this file reopened at at_ms."""
+        if not self._reopen or self._reopen[0] is not np:
+            return False
+        reopen = self._reopen[1]
+        await self.notify(say)
+        try:
+            await self.tv(lambda adb: adb.run(["am", "force-stop", KODI]))
+            await self.kodi.start()
+            out = await reopen(at_ms)
+        except Exception as e:
+            log.warning("restarting Kodi: %s", type(e).__name__)
+            await self.notify("Kodi didn't start again")
+            await self._home_unless_playing()
+            return True
+        await self.notify(out.say)
+        return True
+
+    async def _jump_by_reopening(self, pid: int, target_ms: int) -> Outcome | None:
+        """A jump as a fresh start of the same file at the time (PICTURE_EVERY's note), or None when the file isn't
+        ours to reopen."""
+        np = self.state.now_playing
+        if not self._reopen or self._reopen[0] is not np or np.player != "kodi":
+            return None
+        out = await self._reopen[1](max(0, target_ms))
+        return Outcome(out.ok, f"To {_clock(max(0, target_ms))}" if out.ok else out.say)
 
     async def _free_kodi(self, pid: int):
         """What Kodi plays is stopped, and its player gone, before another file opens. Opened over a playing file,
@@ -1824,6 +1885,16 @@ class Agent:
                 return Outcome(False, "Jumping to a time works in Kodi and Just Player only")
             await self.tv(media.dispatch, a.op)
             return Outcome(True, "Play/pause" if a.op == "toggle" else a.op.capitalize())
+        if pid is not None and a.op in ("seek_to", "forward", "back") and (
+                (np := self.state.now_playing) and np.dolby_vision or front not in (KODI, None)):
+            now, total, _ = await self.kodi.position(pid)
+            if a.op == "seek_to":
+                target = int(total * a.percent / 100) if a.percent is not None else (a.seconds or 0) * 1000
+            else:
+                step = (a.seconds or (30 if a.op == "forward" else 10)) * 1000
+                target = now + step if a.op == "forward" else now - step
+            if (out := await self._jump_by_reopening(pid, target)) is not None:
+                return out
         if pid is not None:
             if a.op in ("pause", "resume", "toggle"):
                 await self.kodi.play(pid, "toggle" if a.op == "toggle" else a.op == "resume")

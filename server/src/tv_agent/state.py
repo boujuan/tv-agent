@@ -19,6 +19,7 @@ class NowPlaying:
     filename: str = ""        # the file's name, size and hash: subtitle addons match on them
     size: int = 0
     video_hash: str = ""
+    dolby_vision: bool = False      # Kodi jumps in it by reopening (agent.py, KODI_LOG's note)
     stopped_at: int | None = None   # the exact position when "stop" was said (polls are 10 s apart)
     stopped_mono: float = field(default=0.0, repr=False)    # and when (time.monotonic())
 

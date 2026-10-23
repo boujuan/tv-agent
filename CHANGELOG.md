@@ -20,6 +20,14 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   the episode, or a Kodi that took files without playing them. On this TV the old file's video decoder isn't let go
   in time ("InstanceGuard locked" in Kodi's log), Dolby Vision or not. Kodi's file is now stopped, and its player
   gone, before the next one opens (about 1.5 s more when switching).
+- Jumps in a Dolby Vision file ("go to the part where…", "back 10 seconds", a time) reopen it at that time
+  instead of seeking: this TV's Dolby Vision decoder can fail the flush a seek needs (black picture, or the time
+  running to the end; a known problem on TCL sets with Kodi 21 and 22). The same for any file while Kodi is behind
+  another screen. A few seconds per jump; Dolby Vision is kept.
+- A file with both Dolby Vision and HDR10+ gets Dolby Vision only in Kodi (MediaTek decoders show such hybrids black
+  or unstable); every other file keeps both.
+- A picture lost anyway (Kodi logging decoder failures nonstop while the sound goes on) gets Kodi restarted and the
+  file reopened where it was, once.
 - A play that did nothing and went back to Home: Kodi's player can hang inside the TV's Dolby Vision decoder while
   opening a 4K file, and from then on takes every file without playing it until Kodi is restarted (its log stops
   mid-line). A file that stops at 0:00 within 45 s of opening, with nothing in Kodi's log since, now gets Kodi

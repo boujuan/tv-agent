@@ -139,6 +139,15 @@ class Kodi:
                 await self.call("Settings.SetSettingValue", {"setting": key, "value": value})
                 self._settings[key] = value
 
+    async def allow_hdr(self, dolby_vision_only: bool):
+        """The HDR metadata Kodi passes to the decoder: Dolby Vision and HDR10+ (its default), or Dolby Vision only
+        for a file that has both, which MediaTek decoders show black or unstable (Kodi then strips the HDR10+;
+        github.com/xbmc/xbmc/issues/26607)."""
+        value = [0] if dolby_vision_only else [0, 1]
+        if self._settings.get("videoplayer.allowedhdrformats") != value:
+            await self.call("Settings.SetSettingValue", {"setting": "videoplayer.allowedhdrformats", "value": value})
+            self._settings["videoplayer.allowedhdrformats"] = value
+
     async def add_subtitle(self, pid: int, url: str):
         """Load a subtitle file by link (Kodi detects the format from its content); it becomes the shown one."""
         await self.call("Player.AddSubtitle", {"playerid": pid, "subtitle": url}, timeout=15)

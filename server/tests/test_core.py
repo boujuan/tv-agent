@@ -894,7 +894,7 @@ def test_a_start_whose_links_fail_leaves_what_plays_alone():
         a.cfg = types.SimpleNamespace(player="kodi", probe_streams=True)
         a._start_kodi, a.streams_for, a._first_playable = ready, found, nothing      # no link answers
         a.track_plan = lambda meta: languages.TrackPlan("eng", None)
-        a.kodi = types.SimpleNamespace(prefer=nothing)
+        a.kodi = types.SimpleNamespace(prefer=nothing, allow_hdr=nothing)
         a._home_unless_playing = nothing
         a._replace_session = lambda *args: replaced.append(args)
         out = await Agent.play(a, "tt1", "movie", "X", "tt1", "X", {})
@@ -1675,9 +1675,10 @@ def test_a_file_opens_in_kodi_only_after_the_playing_one_has_let_go(monkeypatch)
         a.cfg = types.SimpleNamespace(player="kodi", probe_streams=False, auto_skip=False)
         a._start_kodi, a.streams_for, a._kodi_player = ready, found, player
         a.track_plan = lambda meta: languages.TrackPlan("eng", None)
-        a.kodi = types.SimpleNamespace(prefer=nothing, stop=stop, open=open_, position=position)
+        a.kodi = types.SimpleNamespace(prefer=nothing, allow_hdr=nothing, stop=stop, open=open_, position=position)
         a._progress, a._again, a._starting = None, None, asyncio.Lock()
-        a._replace_session = lambda video, resume_ms: resume_ms
+        a._watch_picture = nothing
+        a._replace_session = lambda video, resume_ms, exact=False: resume_ms
         a._set_tracks, a._started, a.timings = nothing, lambda *args: None, None
         a.state.timings = types.SimpleNamespace(add=lambda *args: None)
         out = await Agent.play(a, "tt1", "movie", "X", "tt1", "X", {})
@@ -1686,3 +1687,99 @@ def test_a_file_opens_in_kodi_only_after_the_playing_one_has_let_go(monkeypatch)
     out, did = asyncio.run(run())
     assert out.ok and did[0] == ("stop", 1)
     assert did.index(("wait", agent_mod.KODI_FREE)) < did.index(("open", "https://x/1"))
+
+
+def test_dolby_vision_and_hdr10_plus_are_told_apart_by_tags_or_name():
+    from tv_agent.stremio import streams as S
+    dv = S.Stream("AIOStreams", "u", "n", "", "Community.S02E15.2160p.NF.WEB-DL.DDP5.1.HDR.DV.HEVC-X.mkv", 0)
+    assert dv.dolby_vision and not dv.hdr10_plus
+    both = S.Stream("AIOStreams", "u", "n", "", "f.mkv", 0, visual=("DV", "HDR10+"))
+    assert both.dolby_vision and both.hdr10_plus
+    plain = S.Stream("AIOStreams", "u", "n", "", "Breaking.Bad.S01E07.2160p.NF.WEB-DL.DTS-HD.MA.5.1.HEVC-CRFW.mkv", 0)
+    assert not plain.dolby_vision and not S.Stream("A", "u", "n", "", "Movie.DVDRip.x264.mkv", 0).dolby_vision
+
+
+def test_jumps_in_dolby_vision_or_behind_another_screen_reopen_the_file():
+    """This TV's Dolby Vision decoder can fail a seek's flush (black picture, or time running to the end), and a
+    Kodi behind the home screen has no window for its decoder: those jumps reopen the file at the time instead."""
+    import asyncio
+    import types
+    from tv_agent.actions import Transport
+    from tv_agent.agent import Agent
+
+    async def run(dolby_vision: bool, front: str, op: Transport):
+        a = Agent.__new__(Agent)
+        did = []
+        np = NowPlaying("tt1", "series", "tt1:2:14", "Community", "kodi", "https://x/1", dolby_vision=dolby_vision)
+
+        async def front_app():
+            return front
+
+        async def player():
+            return 1
+
+        async def seek_to(pid, ms):
+            did.append(("seek", ms))
+
+        async def seek_by(pid, s):
+            did.append(("seek by", s))
+
+        async def position(pid):
+            return 600_000, 1_277_000, 1
+
+        async def reopen(ms):
+            did.append(("reopen", ms))
+            return types.SimpleNamespace(ok=True, say="Playing")
+        a.front_app, a._kodi_player = front_app, player
+        a.kodi = types.SimpleNamespace(seek_to=seek_to, seek_by=seek_by, position=position)
+        a.state = types.SimpleNamespace(now_playing=np)
+        a._reopen = (np, reopen)
+        out = await Agent._transport(a, op)
+        return out, did
+
+    out, did = asyncio.run(run(True, "org.xbmc.kodi", Transport(op="seek_to", seconds=168)))
+    assert did == [("reopen", 168_000)] and out.say == "To 2:48"
+    assert asyncio.run(run(True, "org.xbmc.kodi", Transport(op="back")))[1] == [("reopen", 590_000)]
+    assert asyncio.run(run(True, "org.xbmc.kodi", Transport(op="seek_to", percent=50)))[1] == [("reopen", 638_500)]
+    assert asyncio.run(run(False, "org.xbmc.kodi", Transport(op="seek_to", seconds=168)))[1] == [("seek", 168_000)]
+    assert asyncio.run(run(False, "home", Transport(op="forward", seconds=60)))[1] == [("reopen", 660_000)]
+
+
+def test_a_lost_picture_restarts_kodi_where_the_file_was(monkeypatch):
+    import asyncio
+    import types
+    from tv_agent import agent as agent_mod
+    from tv_agent.agent import Agent
+
+    async def run(tail: str):
+        a = Agent.__new__(Agent)
+        did = []
+        np = NowPlaying("tt1", "series", "tt1:2:14", "Community", "kodi", "https://x/1")
+        polls = [1, 1]
+
+        async def player():
+            return polls.pop(0) if polls else None
+
+        async def tv(fn, *args):
+            return fn(types.SimpleNamespace(run=lambda argv, timeout=None: tail))
+
+        async def position(pid):
+            return 206_000, 1_277_000, 1
+
+        async def recover(np_, at, say):
+            did.append((at, say))
+            return True
+
+        async def sleep(s):
+            return None
+        monkeypatch.setattr(agent_mod.asyncio, "sleep", sleep)
+        a.state = types.SimpleNamespace(now_playing=np)
+        a._kodi_player, a.tv, a._recover_kodi = player, tv, recover
+        a.kodi = types.SimpleNamespace(position=position)
+        await Agent._watch_picture(a, np)
+        return did
+
+    failing = "\n".join(["2026-10-23 13:14:09.914 T:10605   error <general>: CDVDVideoCodecAndroidMediaCodec:"
+                         "GetOutputPicture dequeueOutputBuffer failed"] * 30)
+    assert asyncio.run(run(failing)) == [(206_000, "The picture was lost: restarting Kodi")]
+    assert asyncio.run(run("2026-10-23 13:08:25 info <general>: Using codec: c2.mtk.avc.decoder\n" * 30)) == []

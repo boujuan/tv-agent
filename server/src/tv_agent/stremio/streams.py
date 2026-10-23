@@ -37,6 +37,8 @@ SIZE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(TB|GB|GiB|MB|MiB)\b", re.I)
 # Dubbed-only releases (one language, not the original): marked down unless the title is in that language.
 DUB_ONLY = re.compile(r"\b(truefrench|french|vff|vfq|vf2|castellano|spanish|latino|italian|ita|german)\b", re.I)
 MULTI = re.compile(r"\b(multi|dual)\b", re.I)
+DOLBY_VISION = re.compile(r"\b(dv|dovi|dolby[ ._-]?vision)\b", re.I)
+HDR10_PLUS = re.compile(r"hdr10(\+|plus|p\b)", re.I)
 DV_REMUX = re.compile(r"(\bdv\b|dolby ?vision|\bdovi\b).*\bremux\b|\bremux\b.*(\bdv\b|dolby ?vision|\bdovi\b)", re.I)
 UNIT = {"tb": 1e12, "gb": 1e9, "gib": 2**30, "mb": 1e6, "mib": 2**20}
 CAM_QUALITIES = {"cam", "ts", "tc", "scr"}
@@ -69,6 +71,14 @@ class Stream:
     score: float = 0.0
     why_dropped: str = ""
     rank_key: tuple = field(default=(), repr=False)
+
+    @property
+    def dolby_vision(self) -> bool:
+        return "DV" in self.visual or bool(DOLBY_VISION.search(self.filename or self.name))
+
+    @property
+    def hdr10_plus(self) -> bool:
+        return "HDR10+" in self.visual or bool(HDR10_PLUS.search(self.filename or self.name))
 
     def mbps(self, runtime_min: int | None) -> float | None:
         seconds = self.duration_ms / 1000 if self.duration_ms else (runtime_min or 0) * 60
