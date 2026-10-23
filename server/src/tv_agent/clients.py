@@ -37,7 +37,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from . import __version__
 from . import config as config_mod
-from .config import Config, lan_address
+from .config import Config, lan_address, tailscale_address
 
 log = logging.getLogger("tv_agent")
 DEVICE = "tv_agent.device"      # in a request's scope: the paired phone the phone listener let in (its id)
@@ -293,8 +293,19 @@ def tls_context() -> ssl.SSLContext:
 # ---- addresses ----
 
 def addresses(cfg: Config) -> list[str]:
-    """Where the phones' listeners are: the LAN address, then phone_hosts."""
-    return list(dict.fromkeys([lan_address(cfg), *cfg.phone_hosts]))
+    """Where the phones' listeners are, in the order a phone should try them: the LAN address, phone_hosts, then this
+    computer's Tailscale address while Tailscale runs (as for TV Agent Player), so a phone reaches the agent away from
+    home, or after the LAN address changed, without anything set by hand."""
+    return list(dict.fromkeys([lan_address(cfg), *cfg.phone_hosts, *filter(None, [tailscale_address()])]))
+
+
+def listening_on(svc) -> list[str]:
+    """The addresses the phones' listeners are up on now (Listeners.bound), the LAN's first; the configured ones
+    while the listeners aren't known (tests, a start in progress)."""
+    bound = getattr(getattr(svc, "listeners", None), "bound", None)
+    if bound is None:
+        return addresses(svc.cfg)
+    return sorted({host for what, host in bound if what == "phones"}, key=lambda h: (h.startswith("100."), h))
 
 
 def host_port(host: str, port: int) -> str:
@@ -414,11 +425,10 @@ def routes(svc) -> APIRouter:
     @r.get("/v1/clients")
     async def list_clients(request: Request):
         local_only(request)
-        bound = getattr(getattr(svc, "listeners", None), "bound", {})
         return {"devices": [d.public() for d in clients.devices], "pairing": pairing_state(), "enabled": svc.cfg.phones,
                 "listening": bool(clients.fingerprint), "fingerprint": clients.fingerprint,
                 "port": svc.cfg.phone_port, "stream_port": svc.cfg.phone_stream_port,
-                "addresses": sorted({host for what, host in bound if what == "phones"}), "now": time.time()}
+                "addresses": listening_on(svc), "now": time.time()}
 
     @r.post("/v1/clients/pairing")
     async def start_pairing(request: Request):
@@ -470,8 +480,11 @@ def routes(svc) -> APIRouter:
 
     @r.get("/v1/clients/me")
     async def whoami(request: Request):
-        """The phone's own entry, and the agent it's paired with."""
-        return {"device": me(request).public(), "agent": about(svc), "stream_port": svc.cfg.phone_stream_port}
+        """The phone's own entry, and the agent it's paired with: with the addresses it listens on for phones now, in
+        the order to try, so the app keeps its list current when this computer's addresses change (no pairing
+        again)."""
+        return {"device": me(request).public(), "agent": about(svc), "stream_port": svc.cfg.phone_stream_port,
+                "addresses": [f"https://{host_port(h, svc.cfg.phone_port)}" for h in listening_on(svc)]}
 
     @r.post("/v1/clients/me/forget")
     async def forget(request: Request):

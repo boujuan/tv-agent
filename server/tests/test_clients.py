@@ -466,3 +466,16 @@ def test_a_phone_sees_the_whole_vocabulary_sent_with_each_command(paths, monkeyp
     p = call(gate, "GET", "/v1/pipeline", paired(svc)).json()
     assert p["stt_vocabulary"] == ["Stremio", "Kodi"]
     assert p["stt_vocabulary_sent"] == ["Stremio", "Kodi", "Ibai", "The Bear"] and p["stt_vocabulary_count"] == 4
+
+
+def test_phones_are_offered_the_tailscale_address_and_told_the_current_ones(paths, monkeypatch):
+    """Nothing set by hand: Tailscale's address comes after the LAN's (and phone_hosts'), and a connected phone
+    learns where the agent listens now, so an address change doesn't need pairing again."""
+    monkeypatch.setattr(C, "tailscale_address", lambda: "100.125.125.38")
+    svc = service(paths)
+    assert C.addresses(svc.cfg) == ["192.168.1.51", "100.125.125.38"]
+    svc.listeners = types.SimpleNamespace(bound={("phones", "100.125.125.38"): 1, ("phones", "192.168.1.52"): 1,
+                                                 ("tv", "192.168.1.52"): 1})
+    gate = C.gateway(svc, server.local_app(svc))
+    me = call(gate, "GET", "/v1/clients/me", paired(svc)).json()
+    assert me["addresses"] == ["https://192.168.1.52:8768", "https://100.125.125.38:8768"]

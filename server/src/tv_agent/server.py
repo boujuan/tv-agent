@@ -997,6 +997,7 @@ async def serve(cfg: Config):
 
 CHECK_EVERY = 5             # seconds between looks at the LAN address (a route lookup: nothing is sent)
 RETRY_EVERY = 60            # seconds before a listener that couldn't be had, or a TV that didn't answer, is tried again
+TAILSCALE_EVERY = 60        # seconds between looks at this computer's Tailscale address (its CLI: not every check)
 ADDRESS_SETTINGS = ("lan_host", "tv_hosts", "phone_hosts")     # read again when config.toml changes
 # What listens on this computer's addresses: its name in the log, and the setting with its port
 LISTENERS = {"tv": ("the TV app", "lan_port"), "tv_stream": ("the TV app's audio", "stream_port"),
@@ -1053,6 +1054,8 @@ class Listeners:
         self.dirty = False                  # addresses changed since the listeners were last brought up to date
         self._retry_at = 0.0
         self._config_mtime = self._mtime()
+        self.tailscale = config_mod.tailscale_address()     # the player and the phones are offered it
+        self._tailscale_at = time.monotonic()
 
     async def load_certificate(self):
         """The phones' certificate, which TV Agent Player pins too (made the first time)."""
@@ -1146,6 +1149,12 @@ class Listeners:
         when either changed, or tried again when the last try didn't work."""
         if self._reread_config():
             self.dirty = True
+        if time.monotonic() - self._tailscale_at >= TAILSCALE_EVERY:   # Tailscale started, stopped or moved
+            self._tailscale_at = time.monotonic()
+            tailscale = await asyncio.to_thread(config_mod.tailscale_address)
+            if tailscale != self.tailscale:
+                log.info("this computer's Tailscale address is %s now (was %s)", tailscale, self.tailscale)
+                self.tailscale, self.dirty = tailscale, True
         try:
             lan = lan_address(self.cfg)
         except SystemExit:

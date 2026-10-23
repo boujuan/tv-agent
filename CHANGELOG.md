@@ -7,6 +7,10 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 ## server — unreleased
 
 ### Added
+- Phones are offered this computer's Tailscale address automatically (after the LAN address and `phone_hosts`), as
+  TV Agent Player already was, and the listeners follow it when Tailscale starts, stops or moves (looked at every
+  minute). `GET /v1/clients/me` returns the addresses the agent listens on for phones now, in the order to try, so
+  the phone app keeps its list current when this computer's addresses change, without pairing again.
 - `GET /v1/tv/status` lists the TV's own apps and players that run (TV Agent Player, Kodi, Just Player, the TV app):
   pid, CPU share over the same half second as the TV's, and memory.
 - `GET /v1/clients` says which addresses the phones' listeners are on (`addresses`) and the agent's clock (`now`);
