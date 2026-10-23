@@ -176,3 +176,74 @@ def test_through_the_phone_listener_the_header_counts_and_updates_are_readable(p
     r = asyncio.run(go("GET", "/v1/updates"))
     assert r.status_code == 200 and r.json()["components"]["server"]["current"] == __version__
     assert asyncio.run(go("POST", "/v1/updates/tv")).status_code == 404    # installing on the TV: the panel's only
+
+
+PLAYER_APK = b"PK\x03\x04 TV Agent Player 0.2.0"
+PLAYER = [release("v0.2.0", [("SHA256SUMS", "sha256:00"),
+                             ("tv-agent-player-0.2.0.apk", "sha256:" + hashlib.sha256(PLAYER_APK).hexdigest())]),
+          release("v0.1.0", [("tv-agent-player-0.1.0.apk", "sha256:44")])]
+
+
+def player_service(tmp_path, monkeypatch, player_version="0.1.0", playing=False):
+    """The TV app up to date; TV Agent Player installed (or not: None) and behind its repo's latest release."""
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    installed = []
+
+    def handler(request: httpx.Request):
+        path = request.url.path
+        if request.url.host == "api.github.com":
+            return httpx.Response(200, json=PLAYER if "tv-agent-player" in path else
+                                  PHONE if "tv-agent-phone" in path else MAIN)
+        return httpx.Response(200, content=PLAYER_APK if "player" in path else APK)
+
+    agent = types.SimpleNamespace(http=httpx.AsyncClient(transport=httpx.MockTransport(handler)), adb=object(),
+                                  tvplayer=types.SimpleNamespace(now=lambda: (60_000, 1_200_000, 1.0) if playing else None))
+    svc = types.SimpleNamespace(cfg=config.Config(tv_hosts=["192.168.1.40"]), _busy=asyncio.Lock(), agent=agent)
+    svc.updates = U.Updates(svc)
+    versions = {"tvagent": "0.9.0", "tvplayer": player_version}
+
+    def install(cfg, adb, path):
+        data = open(path, "rb").read()
+        installed.append(data)
+        versions["tvplayer" if data == PLAYER_APK else "tvagent"] = "0.2.0" if data == PLAYER_APK else "0.9.0"
+        return "ok"
+    monkeypatch.setattr(U.tv_status, "packages", lambda adb: {k: {"version": v} for k, v in versions.items()})
+    monkeypatch.setattr(U, "install_app", install)
+    return svc, installed
+
+
+def test_tv_agent_players_releases_are_checked_and_installed(tmp_path, monkeypatch):
+    svc, installed = player_service(tmp_path, monkeypatch)
+    asyncio.run(svc.updates.check())
+    player = svc.updates.state()["components"]["tvplayer"]
+    assert player["current"] == "0.1.0" and player["latest"] == "0.2.0" and player["newer"]
+    assert player["apk"].endswith("tv-agent-player-0.2.0.apk")
+    out = asyncio.run(svc.updates.install("tvplayer"))
+    assert out["installed"] and out["say"] == "TV Agent Player is now 0.2.0" and installed == [PLAYER_APK]
+
+
+def test_the_player_isnt_replaced_while_it_plays(tmp_path, monkeypatch):
+    svc, installed = player_service(tmp_path, monkeypatch, playing=True)
+    asyncio.run(svc.updates.check())
+    with pytest.raises(RuntimeError, match="playing"):
+        asyncio.run(svc.updates.install("tvplayer"))
+    assert installed == []
+
+
+def test_auto_updates_the_player_when_idle_and_installed_only(tmp_path, monkeypatch):
+    async def run(**kw):
+        svc, installed = player_service(tmp_path, monkeypatch, **kw)
+        svc.cfg.updates = "auto"
+        slept = []
+
+        async def sleep(s):
+            slept.append(s)
+            if len(slept) > 1:
+                raise asyncio.CancelledError
+        monkeypatch.setattr(U.asyncio, "sleep", sleep)
+        with pytest.raises(asyncio.CancelledError):
+            await U.loop(svc)
+        return installed
+    assert asyncio.run(run()) == [PLAYER_APK]
+    assert asyncio.run(run(playing=True)) == []
+    assert asyncio.run(run(player_version=None)) == []           # not installed: not put on the TV by itself

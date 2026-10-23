@@ -7,6 +7,10 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 ## server — unreleased
 
 ### Added
+- TV Agent Player's releases (boujuan/tv-agent-player, tags vX.Y.Z) are checked with the rest: `GET /v1/updates` has
+  `components.tvplayer` (its version on the TV against the latest release), `POST /v1/updates/tvplayer` installs it
+  over ADB with GitHub's SHA-256, and `updates = "auto"` does so by itself; never while the player plays, and never
+  onto a TV that doesn't have it.
 - **TV Agent Player** (`player = "tvplayer"`; [boujuan/tv-agent-player](https://github.com/boujuan/tv-agent-player)),
   a Media3 player of its own on the TV, driven over a TLS connection it opens to the agent (`player_port` 8770, the
   phones' certificate, its own `player_token`; `tv/tvplayer.py`). It's brought up during the stream lookup, loads
@@ -53,6 +57,7 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 ## panel — unreleased
 
 ### Added
+- Settings › Updates: a TV Agent Player row, with its version on the TV, the latest release and "Update the player".
 - Settings › Playback › Player: **TV Agent Player** (and the tray menu, the overview, About).
 - Settings › Updates has Kodi too: the version on the TV, the newest one (Kodi 22 Piers, a release candidate with
   fixes for seeking on MediaTek decoders like this TV's) and "Update Kodi", with its progress. Needs the agent from

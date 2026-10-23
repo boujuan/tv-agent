@@ -98,7 +98,9 @@ class UpdatesCard(QWidget):
         f.addRow("Updates", self.mode)
         self.rows = {}
         for key, label, button, fn in (("computer", "This computer", "Update this computer", self.update_computer),
-                                       ("tv", "TV app", "Update the TV app", self.update_tv),
+                                       ("tv", "TV app", "Update the TV app", lambda: self.update_app("tv")),
+                                       ("tvplayer", "TV Agent Player", "Update the player",
+                                        lambda: self.update_app("tvplayer")),
                                        ("kodi", "Kodi", "Update Kodi", self.update_kodi),
                                        ("phone", "Phone app", None, None)):
             line = QHBoxLayout()
@@ -162,9 +164,10 @@ class UpdatesCard(QWidget):
         parts = []
         if self.copy.get("tag"):
             parts.append(f"{self.copy['tag']} for this computer")
-        tv = (self.state.get("components") or {}).get("tv") or {}
-        if tv.get("newer"):
-            parts.append(f"TV app {tv['latest']}")
+        for key, name in (("tv", "TV app"), ("tvplayer", "TV Agent Player")):
+            c = (self.state.get("components") or {}).get(key) or {}
+            if c.get("newer") and c.get("current"):
+                parts.append(f"{name} {c['latest']}")
         if self.kodi.get("newer"):
             parts.append(f"Kodi {self.kodi['latest']['label']}")
         return ", ".join(parts)
@@ -194,18 +197,21 @@ class UpdatesCard(QWidget):
             text.setText(f"<span style='color:{GREEN}'>✔</span> {here} · has every release"
                          + (f" <span style='color:gray'>(latest: {latest})</span>" if latest else ""))
             b.setVisible(False)
-        text, b = self.rows["tv"]
-        tv = comps.get("tv") or {}
-        if self.state.get("installing"):
-            text.setText("Installing the TV app's update…")
-        elif tv.get("newer"):
-            text.setText(f"<span style='color:{AMBER}'>⬆</span> {tv.get('current') or 'unknown'} on the TV · "
-                         f"<b>{tv['latest']}</b> is out")
-        elif tv.get("latest"):
-            text.setText(f"<span style='color:{GREEN}'>✔</span> {tv.get('current')} on the TV, the latest")
-        else:
-            text.setText("<span style='color:gray'>not checked yet</span>")
-        b.setVisible(bool(tv.get("newer")) and not self.state.get("installing"))
+        for key in ("tv", "tvplayer"):             # the apps the agent installs on the TV
+            text, b = self.rows[key]
+            c = comps.get(key) or {}
+            if self.state.get("installing"):
+                text.setText("Installing an update on the TV…")
+            elif c.get("newer"):
+                text.setText(f"<span style='color:{AMBER}'>⬆</span> {c.get('current') or 'not installed'} on the TV · "
+                             f"<b>{c['latest']}</b> is out")
+            elif c.get("latest"):
+                text.setText(f"<span style='color:{GREEN}'>✔</span> {c.get('current')} on the TV, the latest")
+            elif c.get("current"):
+                text.setText(f"{c['current']} on the TV <span style='color:gray'>· no release on GitHub yet</span>")
+            else:
+                text.setText("<span style='color:gray'>not checked yet</span>")
+            b.setVisible(bool(c.get("newer")) and not self.state.get("installing"))
         self.show_kodi()
         text, _ = self.rows["phone"]
         phone = comps.get("phone") or {}
@@ -277,20 +283,24 @@ class UpdatesCard(QWidget):
                 "backup just made restored into it (settings, libraries, add-ons).") == QMessageBox.StandardButton.Yes:
             self.update_kodi(replace=True)
 
-    def update_tv(self):
-        tv = (self.state.get("components") or {}).get("tv") or {}
-        if QMessageBox.question(self, "TV Agent", f"Install the TV app {tv.get('latest')} from GitHub on the TV? It "
-                                "takes a few seconds and pairs it again.") != QMessageBox.StandardButton.Yes:
+    def update_app(self, key: str):
+        """The TV app's or TV Agent Player's latest release installed on the TV through the agent."""
+        name = {"tv": "the TV app", "tvplayer": "TV Agent Player"}[key]
+        c = (self.state.get("components") or {}).get(key) or {}
+        if QMessageBox.question(self, "TV Agent", f"Install {name} {c.get('latest')} from GitHub on the TV? It takes a "
+                                "few seconds and pairs it again." + ("\n\nIt isn't replaced while it plays."
+                                                                     if key == "tvplayer" else "")
+                                ) != QMessageBox.StandardButton.Yes:
             return
-        self.rows["tv"][1].setEnabled(False)
-        self.status.setText("Downloading and installing the TV app…")
+        self.rows[key][1].setEnabled(False)
+        self.status.setText(f"Downloading and installing {name}…")
 
         def done(res, err):
-            self.rows["tv"][1].setEnabled(True)
+            self.rows[key][1].setEnabled(True)
             self.status.setText(f"<span style='color:{AMBER}'>Not updated: {html.escape(str(err))}</span>" if err else
                                 f"<span style='color:{GREEN}'>✓ {html.escape(res.get('say', 'Done'))}</span>")
-            self.check()
-        self.panel.bg.run(lambda: api("/v1/updates/tv", {}, timeout=180), done)
+            self.check(force=True)
+        self.panel.bg.run(lambda: api(f"/v1/updates/{key}", {}, timeout=180), done)
 
     def update_computer(self, ask: bool = True):
         if self.updated_to:                         # the button now restarts the panel
