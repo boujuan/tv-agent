@@ -110,6 +110,18 @@ class DryAdb:
     reconnect = close
 
 
+def load_failed_text(msg: dict) -> str:
+    """What to say on the TV when TV Agent Player can't read a file (its LOAD_FAILED event)."""
+    cause, http = str(msg.get("cause") or ""), msg.get("http")
+    if cause == "UnknownHostException":
+        return "The TV can't look up this file's server: check its internet (DNS)"
+    if http:
+        return f"The file's server refused it (HTTP {http})"
+    if "Timeout" in cause or "Connect" in cause:
+        return "The TV can't reach this file's server"
+    return "The TV is having trouble loading this file"
+
+
 def _watched_some(item: dict) -> bool:
     """A library item you've watched (some of): not only added to your list."""
     st = item.get("state") or {}
@@ -236,6 +248,12 @@ class Agent:
             log.warning("TV Agent Player: %s%s playing %s", msg.get("code"), f" (HTTP {msg['http']})" if msg.get("http")
                         else "", np.video_id)
             asyncio.create_task(self._try_another(np, msg))
+        elif t == "error" and msg.get("code") == "LOAD_FAILED":
+            # The player retries for a while before giving up: say why now (2026-10-24: a DNS setting on the TV left
+            # every name unresolvable, and the start just sat buffering).
+            log.warning("TV Agent Player can't read %s: %s%s", np.video_id, msg.get("cause"),
+                        f" (HTTP {msg['http']})" if msg.get("http") else "")
+            asyncio.create_task(self.notify(load_failed_text(msg)))
 
     async def _wake(self):
         """End the screensaver. A command from the laptop (panel, MCP, CLI) presses no key, and an app started

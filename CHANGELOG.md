@@ -36,6 +36,11 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   computer away from home too (needs the player from its 0.1.0).
 
 ### Fixed
+- TV Agent Player: a file the TV can't read is explained on the TV at once (the player's new `LOAD_FAILED`
+  event, from player 0.1.1), e.g. "The TV can't look up this file's server: check its internet (DNS)", instead
+  of a silent wait while it retries.
+- A start that never got going (no position, no length) writes no progress to Stremio: a failed open had written
+  0:00 over the resume point.
 - The agent follows this computer's address on the TV's network. It listened only on the address it started with,
   so when the laptop moved from Ethernet to Wi-Fi the TV app's microphone and TV Agent Player could no longer reach
   it, and nothing said so. The LAN address is looked at every 5 s; when it changes, the TV app's, the player's and

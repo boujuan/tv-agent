@@ -80,8 +80,8 @@ async def track(poll, account: Account, library: Library, np: NowPlaying, meta: 
         nonlocal unwritten, last_write, last_pos
         if np.stopped_at is not None:
             last_pos = np.stopped_at            # "stop" read the exact position before stopping
-        if last_pos is None:
-            return
+        if last_pos is None or (not last_pos and not duration):
+            return                              # it never got going (no position, no length): a resume point stays
         item = await library.get(np.imdb_id)
         await account.put([updated(item, np, last_pos, duration, unwritten, meta, videos)])
         library.invalidate()

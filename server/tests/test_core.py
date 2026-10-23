@@ -540,6 +540,35 @@ def test_progress_marks_the_episode_watched_at_90_percent():
     assert "watched" not in updated(None, np, 500_000, 1_000_000, 60_000, {}, videos)["state"]
 
 
+def test_a_start_that_never_played_writes_no_progress():
+    """A file that sat buffering at 0:00 with no length known (2026-10-24: the TV couldn't look up the server) and was
+    closed: nothing is written, so the resume point in Stremio stays."""
+    import asyncio
+    import types
+    from tv_agent.stremio import progress as P
+    puts = []
+
+    def run(polls):
+        async def poll():
+            return polls.pop(0) if polls else None
+
+        async def put(items):
+            puts.append(items[0]["state"]["timeOffset"])
+
+        async def get(imdb):
+            return None
+        account = types.SimpleNamespace(put=put)
+        library = types.SimpleNamespace(get=get, invalidate=lambda: None)
+        np = NowPlaying("tt1", "movie", "tt1", "X", "tvplayer")
+        asyncio.run(P.track(poll, account, library, np, {}, every_s=0))
+        return np
+
+    run([(0, 0, 0.0), (0, 0, 0.0)])
+    assert puts == []
+    run([(60_000, 1_000_000, 1.0), (70_000, 1_000_000, 0.0)])         # one that played: written on pause and at the end
+    assert puts == [70_000, 70_000]
+
+
 def test_search_merges_names_and_popularity_settles_namesakes():
     from tv_agent.stremio import cinemeta as C
     from tv_agent.stremio.search import merge, said_exactly

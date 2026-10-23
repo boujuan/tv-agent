@@ -340,3 +340,23 @@ def test_the_player_is_told_the_lan_address_then_tailscales(monkeypatch):
     assert T.addresses(cfg) == ["192.168.1.52", "100.125.125.38"]        # once each, in the order to try
     monkeypatch.setattr(T, "tailscale_address", lambda: None)              # Tailscale not running
     assert T.addresses(cfg) == ["192.168.1.52"]
+
+
+def test_a_file_the_tv_cant_read_is_explained_on_the_tv_at_once():
+    async def run():
+        player = FakeTvPlayer()
+        a = bare_agent(player)
+        a.state.now_playing = NowPlaying("tt1", "movie", "tt1", "X", "tvplayer")
+        said = []
+
+        async def notify(text):
+            said.append(text)
+        a.notify = notify
+        Agent._player_event(a, {"t": "error", "item": "tt1:1:2#1", "code": "LOAD_FAILED",
+                                "cause": "UnknownHostException", "fatal": False})
+        await asyncio.sleep(0)
+        return said
+
+    assert asyncio.run(run()) == ["The TV can't look up this file's server: check its internet (DNS)"]
+    assert agent_mod.load_failed_text({"cause": "InvalidResponseCodeException", "http": 403}) == \
+        "The file's server refused it (HTTP 403)"
