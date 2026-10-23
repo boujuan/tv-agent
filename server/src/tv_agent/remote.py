@@ -42,7 +42,10 @@ KEYS = {**tv_status.KEYS, "up": "KEYCODE_DPAD_UP", "down": "KEYCODE_DPAD_DOWN", 
         "guide": "KEYCODE_GUIDE", "search": "KEYCODE_SEARCH", "power": "KEYCODE_POWER", "enter": "KEYCODE_ENTER",
         "delete": "KEYCODE_DEL", "rewind": "KEYCODE_MEDIA_REWIND", "fast_forward": "KEYCODE_MEDIA_FAST_FORWARD",
         "next": "KEYCODE_MEDIA_NEXT", "previous": "KEYCODE_MEDIA_PREVIOUS", "channel_up": "KEYCODE_CHANNEL_UP",
-        "channel_down": "KEYCODE_CHANNEL_DOWN", **{str(n): f"KEYCODE_{n}" for n in range(10)}}
+        "channel_down": "KEYCODE_CHANNEL_DOWN", **{str(n): f"KEYCODE_{n}" for n in range(10)},
+        # What the TCL remote's gear and input buttons send (its key layout, Vendor_0417_Product_0304.kl): the launcher
+        # opens its settings menu and the inputs panel for them, and ignores MENU, INFO and SETTINGS (found 2026-10-23)
+        "gear": "KEYCODE_NOTIFICATION", "input": "KEYCODE_TV_INPUT"}
 LISTS = {"recent": ("Continue watching", "_recent_items"), "new": ("New episodes of your shows", "_new_episode_items"),
          "movies": ("New films", "_new_film_items")}
 EPISODE = re.compile(r"^tt\d+:(\d+):(\d+)$")

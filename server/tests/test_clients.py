@@ -379,6 +379,8 @@ def test_tracks_lose_links_in_their_names():
 def test_remote_keys_include_the_d_pad_and_numbers():
     assert {"up", "down", "left", "right", "ok", "back", "home", "0", "9"} <= set(remote.KEYS)
     assert all(v.startswith("KEYCODE_") for v in remote.KEYS.values())
+    # the keys the TCL remote's gear and input buttons send (the launcher answers these, not SETTINGS or MENU)
+    assert remote.KEYS["gear"] == "KEYCODE_NOTIFICATION" and remote.KEYS["input"] == "KEYCODE_TV_INPUT"
 
 
 def test_activity_for_the_phone_pages_back_in_time(paths, monkeypatch):
