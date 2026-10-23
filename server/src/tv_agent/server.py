@@ -122,6 +122,8 @@ def describe(a: A.Action) -> str:
             return f"Back {a.seconds} s"
         case A.ShowList():
             return {"recent": "What you were watching…", "new": "New episodes…", "movies": "New films…"}[a.list]
+        case A.FindScene():
+            return f"Looking for “{a.what}”…"
         case A.Recommend():
             return "Buscando recomendaciones…" if T.spanish(a.query) else "Looking for suggestions…"
         case A.Pick():

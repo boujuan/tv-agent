@@ -1,8 +1,11 @@
 """Subtitles from your Stremio subtitle addons (SubSense, OpenSubtitles…), asked the way Stremio asks: by IMDb id
 plus the chosen file's hash, size and name, so the subtitles that best match that release come first. Kodi loads
-them by link (Player.AddSubtitle); Just Player can't be handed a list of links over ADB.
+them by link (Player.AddSubtitle); Just Player can't be handed a list of links over ADB. `download()` and `cues()`
+read one as timed lines (the scene search: "go to the part where…").
 """
 import asyncio
+import gzip
+import html
 import logging
 import re
 from dataclasses import dataclass, field
@@ -98,4 +101,37 @@ def choose(subs: list[Subtitle], langs: list[str]) -> list[tuple[str, Subtitle]]
         best = sorted(found, key=lambda s: (s.impaired, s.ai))[0]
         used.add(best.url)
         out.append((lang, best))
+    return out
+
+
+CUE = re.compile(r"(?:(\d+):)?(\d{1,2}):(\d{2})[,.](\d{1,3})\s*-->")
+TAG = re.compile(r"<[^>]+>|\{[^}]*\}")
+
+
+async def download(http: httpx.AsyncClient, url: str, timeout: float = 10.0) -> str:
+    """A subtitle file's text (SRT or WebVTT; gzipped or not; UTF-8, else Windows-1252)."""
+    r = await http.get(url, timeout=timeout, follow_redirects=True)
+    r.raise_for_status()
+    data = r.content[:3_000_000]
+    if data[:2] == b"\x1f\x8b":
+        data = gzip.decompress(data)[:3_000_000]
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return data.decode("cp1252", errors="replace")
+
+
+def cues(text: str) -> list[tuple[int, str]]:
+    """(start in ms, the words) of each cue, tags and position codes removed."""
+    out = []
+    for block in re.split(r"\r?\n\s*\r?\n", text):
+        m = CUE.search(block)
+        if not m:
+            continue
+        h, mi, se = (int(x or 0) for x in m.groups()[:3])
+        start = ((h * 60 + mi) * 60 + se) * 1000 + int(m.group(4).ljust(3, "0"))    # ",5" is 500 ms, ",040" 40
+        words = " ".join(html.unescape(TAG.sub("", line)).strip() for line in block[m.end():].splitlines()[1:])
+        words = " ".join(words.split())
+        if words:
+            out.append((start, words))
     return out

@@ -35,7 +35,7 @@ ACTIONS = ["play_title", "continue_watching", "show_in_stremio", "info", "next_e
            "subtitles_off", "subtitles_toggle", "subtitles", "audio", "skip_intro", "skip_recap", "skip_credits",
            "auto_skip_on", "auto_skip_off", "stop_after_this", "turn_off_after_this", "stop_in", "turn_off_in",
            "cancel_timer", "binge_on", "binge_off", "library_add", "library_remove", "mark_watched", "mark_unwatched",
-           "show_recent", "show_new", "show_movies", "recommend", "pick", "help", "wrong", "none"]
+           "show_recent", "show_new", "show_movies", "recommend", "find_scene", "pick", "help", "wrong", "none"]
 SLOTS = {"title": "string", "season": "integer", "episode": "integer", "episode_name": "string", "seconds": "integer",
          "number": "integer", "app": "string", "language": "string", "query": "string"}
 SCHEMA = {"type": "object", "additionalProperties": False, "required": ["action", *SLOTS],
@@ -68,6 +68,8 @@ library_add, library_remove, mark_watched, mark_unwatched: title, season, episod
 show_recent (a list of what was being watched, not finished yet), show_new ("what's new"), show_movies (new films),
 help ("what can you do") · recommend: query (they want suggestions: "something like Dark", "a short comedy", "what
 should we watch?"; the query is their request, in their words)
+find_scene: query (a moment of what's playing described in words, in English: "go to the part where Mr. Burns
+gets shot")
 pick: number (an item of the list on screen) · wrong ("that's wrong": the last command was misunderstood)
 
 Titles: copy one exactly from "candidates" when it's what was said, even misheard ("the bare" is "The Bear"). When
@@ -91,6 +93,7 @@ Examples:
 "go back to what I was watching yesterday" -> {"action":"continue_watching"}
 "the second thing on the list" -> {"action":"pick","number":2}
 "algo de miedo que no sea muy largo" -> {"action":"recommend","query":"algo de miedo que no sea muy largo"}
+"vete al minuto en el que mr burns le dispara" -> {"action":"find_scene","query":"Mr. Burns gets shot"}
 "what was the weather like yesterday" -> {"action":"none"}"""
 
 
@@ -126,6 +129,14 @@ EPISODE_SYSTEM = """Someone asked their TV for one episode of a series by its na
 ("wanted"). Which of these episodes is it? Use the episode names and summaries, and what you know about the series.
 People misremember details ("killed" for "shot", the wrong character): pick the closest episode. When a story spans
 several episodes, the first one. Answer only with the JSON object: its id, or null only when nothing is close."""
+
+
+SCENE_SYSTEM = """Someone watching a film or episode ("watching") asked to jump to a moment they described
+("wanted", maybe misremembered). Below are its subtitles, one cue per line: "m:ss text" (or "h:mm:ss"). Find where
+that moment starts: what's said just before or as it happens; a moment without words (a gunshot, a kiss) is between
+the lines around it, and what you know about the story helps place it. Answer only with the JSON object: "seconds"
+from the start (a few seconds before the moment), and "line", the subtitle you placed it by; both null when it isn't
+there."""
 
 
 class Llm:
@@ -239,6 +250,24 @@ class Llm:
         got = (json.loads(content) if isinstance(content, str) else content).get("id")
         return got if got in ids else None
 
+    async def find_moment(self, title: str, wanted: str, lines: str) -> tuple[int | None, str]:
+        """When a described moment happens, from the subtitles ("m:ss line" per cue): (seconds, the line), or None."""
+        schema = {"type": "object", "additionalProperties": False, "required": ["seconds", "line"],
+                  "properties": {"seconds": {"type": ["integer", "null"]}, "line": {"type": ["string", "null"]}}}
+        data = await self._post({
+            "max_tokens": 120,
+            "response_format": {"type": "json_schema",
+                                "json_schema": {"name": "moment", "strict": True, "schema": schema}},
+            "messages": [{"role": "system", "content": SCENE_SYSTEM},
+                         {"role": "user", "content": json.dumps({"watching": title, "wanted": wanted},
+                                                                ensure_ascii=False) + "\n\nSubtitles:\n" + lines}]},
+            20.0)
+        self.last_usage = data.get("usage") or {}
+        content = data["choices"][0]["message"]["content"]
+        got = json.loads(content) if isinstance(content, str) else content
+        secs = got.get("seconds")
+        return (secs if isinstance(secs, int) and secs >= 0 else None), str(got.get("line") or "")[:160]
+
     async def answer(self, said: str, context: dict) -> tuple[bool, A.Action | None]:
         """(whether it answered, its action or None for "not a command")."""
         try:
@@ -335,6 +364,8 @@ def to_action(a: dict, said: str, candidates: list[str], rules: Rules) -> A.Acti
                 return A.Pick(number=num("number"))
             case "recommend":
                 return A.Recommend(query=((a.get("query") or "").strip() or said)[:300])
+            case "find_scene":
+                return A.FindScene(what=((a.get("query") or "").strip() or said)[:300])
     except ValidationError:
         log.info("LLM answer out of range: %s", kind)
     return None

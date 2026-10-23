@@ -1522,3 +1522,64 @@ def test_the_llm_names_an_episode():
     got = to_action({"action": "play_title", "title": "Community", "episode_name": "Advanced Dungeons and Dragons"},
                     "abre community capítulo advanced dungeons and dragons", [], RULES)
     assert got == A.PlayTitle(title="Community", episode_name="Advanced Dungeons and Dragons")
+
+
+@pytest.mark.parametrize("text,what", [
+    ("go to the part where they kiss", "they kiss"),
+    ("skip to the scene where Walter meets Gus", "walter meets gus"),
+    ("Vete al minuto en el cual Mr. Burns le dispara.", "mr. burns le dispara"),
+    ("ve a la parte en la que se besan", "se besan"),
+    ("go to minute 12", None),                                    # a time, not a moment
+])
+def test_a_moment_described_is_searched_for(text, what):
+    got = rule_action(text)
+    if what is None:
+        assert got == A.Transport(op="seek_to", seconds=720)
+    else:
+        assert got == A.FindScene(what=what), got
+
+
+def test_subtitle_cues_are_read_with_their_times():
+    from tv_agent.stremio import subtitles as S
+    srt = "1\n00:00:01,500 --> 00:00:03,000\n<i>Hello</i> there\n\n2\n00:21:05,040 --> 00:21:07,000\n{\\an8}Who shot me?\n"
+    assert S.cues(srt) == [(1500, "Hello there"), (1265040, "Who shot me?")]
+    assert S.cues("WEBVTT\n\n01:02:03.250 --> 01:02:04.000\nLong &amp; form\n") == [(3723250, "Long & form")]
+
+
+def test_the_scene_search_jumps_to_where_the_llm_found_the_moment(monkeypatch):
+    import asyncio
+    import types
+    from tv_agent import agent as agent_mod
+    from tv_agent.agent import Agent, Outcome
+    from tv_agent.stremio import subtitles as S
+    lines = "".join(f"{n}\n00:{n // 60:02d}:{n % 60:02d},000 --> 00:{n // 60:02d}:{n % 60:02d},900\nline {n}\n\n"
+                    for n in range(1, 40))
+
+    async def fetch(*a, **k):
+        return [S.Subtitle("u", "eng", "x", "SubSense")]
+
+    async def download(http, url):
+        return lines
+    monkeypatch.setattr(agent_mod.subtitles, "fetch", fetch)
+    monkeypatch.setattr(agent_mod.subtitles, "download", download)
+    seen, jumped = {}, []
+
+    class Llm:
+        async def find_moment(self, title, wanted, text):
+            seen.update(title=title, wanted=wanted, first=text.splitlines()[0])
+            return 30, "line 30"
+
+    async def addons():
+        return []
+
+    async def transport(a):
+        jumped.append(a)
+        return Outcome(True, "To 0:28")
+    np = NowPlaying("tt1", "series", "tt1:6:25", "The Simpsons")
+    me = types.SimpleNamespace(state=types.SimpleNamespace(now_playing=np), llm=Llm(), http=None, addons=addons,
+                               cfg=types.SimpleNamespace(subtitle_languages=["eng"]), _transport=transport)
+    out = asyncio.run(Agent._find_scene(me, A.FindScene(what="Mr. Burns gets shot")))
+    assert out.ok and jumped == [A.Transport(op="seek_to", seconds=28)]      # a moment before it
+    assert seen == {"title": "The Simpsons S6E25", "wanted": "Mr. Burns gets shot", "first": "0:01 line 1"}
+    me.state.now_playing = None
+    assert asyncio.run(Agent._find_scene(me, A.FindScene(what="x"))).say == "Nothing of yours is playing to search"

@@ -13,7 +13,8 @@ import httpx
 from rapidfuzz import fuzz
 
 from . import __version__, activity, languages, skips, twitch, youtube
-from .actions import (Action, AutoSkip, Binge, ContinueWatching, Help, Home, Info, LibraryEdit, NextEpisode, OpenApp,
+from .actions import (Action, AutoSkip, Binge, ContinueWatching, FindScene, Help, Home, Info, LibraryEdit, NextEpisode,
+                      OpenApp,
                       OpenInStremio, Pick, PlayTitle, Recommend, Replay, Sequence, ShowList, Skip, Timer, Tracks,
                       Transport, Twitch, Unclear, Volume, Wrong, YouTube)
 from .commands import LEGEND, SECTIONS, TV_HINT
@@ -1164,6 +1165,46 @@ class Agent:
         self._shown = Shown(title, items, time.monotonic())
         await self._show_on_tv(self._shown)
         return Outcome(True, f"{title}: say a number")
+
+    async def _find_scene(self, a: FindScene) -> Outcome:
+        """"Go to the part where Mr. Burns gets shot": the subtitles of what's playing (your subtitle addons, English
+        first) go to the LLM with their times; it says when that moment is, and the player jumps there."""
+        np = self.state.now_playing
+        if np is None:
+            return Outcome(False, "Nothing of yours is playing to search")
+        if self.llm is None:
+            return Outcome(False, "Finding a moment needs the LLM (Settings › API keys: OpenRouter)")
+        stream = streams.Stream("", np.url, "", "", np.filename, 0, size=np.size, video_hash=np.video_hash)
+        try:
+            subs = await subtitles.fetch(self.http, await self.addons(), np.kind, np.video_id, stream)
+        except Exception as e:
+            log.info("subtitles for the scene search: %s", type(e).__name__)
+            subs = []
+        found: list[tuple[int, str]] = []
+        for _, sub in (subtitles.choose(subs, ["eng", "spa", *self.cfg.subtitle_languages]) or
+                       [("", s) for s in subs])[:3]:
+            try:
+                found = subtitles.cues(await subtitles.download(self.http, sub.url))
+            except (httpx.HTTPError, OSError, ValueError) as e:
+                log.info("subtitles from %s: %s", sub.addon, type(e).__name__)
+                continue
+            if len(found) >= 20:
+                break
+        if len(found) < 20:
+            return Outcome(False, "No subtitles to search in this one")
+        m = re.match(r"^tt\d+:(\d+):(\d+)$", np.video_id)
+        title = np.name + (f" S{m.group(1)}E{m.group(2)}" if m else "")
+        lines = "\n".join(f"{_clock(ms)} {words[:90]}" for ms, words in found[:3000])
+        try:
+            secs, line = await self.llm.find_moment(title, a.what, lines)
+        except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError) as e:
+            log.info("scene search unavailable (%s)", type(e).__name__)
+            return Outcome(False, "Couldn't search for that moment right now")
+        if secs is None:
+            return Outcome(False, f"Couldn't find “{a.what}”")
+        log.info("moment %r of %s at %d s (%r)", a.what, title, secs, line)
+        out = await self._transport(Transport(op="seek_to", seconds=max(0, secs - 2)))
+        return Outcome(out.ok, f"To {_clock(secs * 1000)}: “{line}”" if out.ok and line else out.say)
 
     async def _recommend(self, a: Recommend) -> Outcome:
         """Suggestions for a request ("something like Dark", "a short comedy"): the LLM proposes titles, with your

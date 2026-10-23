@@ -51,6 +51,10 @@ whole recording instead).
   are watching is left out. They're shown as a numbered list on the TV with posters, ratings and a reason; "number 2"
   plays it (a series where you were, or from its first episode). Rules, the LLM and the decision model all know the
   new `recommend` action. Needs the OpenRouter key; about $0.0004 and 3-7 s per request.
+- Jump to a moment described in words: "go to the part where Mr. Burns gets shot", "vete al minuto en el que…".
+  The subtitles of what's playing (your subtitle addons, English first) go to the LLM with their times; it says when
+  the moment is (wordless ones placed between the lines around them), and the player jumps a moment before. On "Who
+  Shot Mr. Burns?" it found 20:36, just before the shot; a moment that isn't there finds nothing. ~1-3 s, ~$0.0015.
 - Episodes by name or by what happens in them: "Abre Community, capítulo Advanced Dungeons & Dragons", "the
   Simpsons episode where Mr. Burns is shot". The LLM fills a new `episode_name`; the agent matches episode names
   itself, and for a description lets the LLM pick from the episodes whose name and summary share its words (Spanish

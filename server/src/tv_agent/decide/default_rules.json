@@ -832,6 +832,16 @@
       "note": "Spanish: recomiéndame algo, ¿qué vemos?, algo como Dark, pon una peli de miedo"
     },
     {
+      "id": "find_scene",
+      "stage": "grammar",
+      "match": "^(?:go|jump|skip|take me|fast forward|rewind|go back|open|salta|s[aá]ltate|ll[eé]vame|pon(?:lo)?|ve|vete)(?: back)?\\s+(?:to |a |al |hasta )?(?:the |la |el )?(?:minute|moment|part|bit|scene|point|place|time|minuto|momento|parte|escena|trozo|punto)s?\\s+(?:where|when|in which|that|en (?:el|la) (?:que|cual)|donde|cuando|del? que)\\b\\s*(?P<what>.+)$",
+      "do": {
+        "type": "find_scene",
+        "what": "{what|text!}"
+      },
+      "note": "“go to the part where they kiss”, “vete al minuto en el que…”: found in the subtitles"
+    },
+    {
       "id": "previous_episode",
       "stage": "grammar",
       "match": "^(?:play |go to |go back to |skip to |jump to |watch |put on )?(?:the )?(?:previous|last|prior)(?: episode| one)?(?: again)?$|^(?:go |skip |jump )?back (?:an|one) episode$|^(?:play |go to )?the episode before(?: this(?: one)?)?$",
@@ -1599,6 +1609,13 @@
         "do": {
           "type": "recommend",
           "query": "{text|text}"
+        }
+      },
+      "find_scene": {
+        "describe": "jump to a moment of what is playing described in words (e.g. 'go to the part where they kiss')",
+        "do": {
+          "type": "find_scene",
+          "what": "{text|text}"
         }
       }
     }

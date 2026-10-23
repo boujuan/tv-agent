@@ -84,6 +84,9 @@ SECTIONS = [
         Command("go to ‹time›", "ve al minuto ‹n›", "Jumps to that point", "Salta a ese punto", "transport"),
         Command("go to the middle · start over", "ve a la mitad · desde el principio",
                 "Half way, or the beginning", "La mitad, o el principio", "transport"),
+        Command("go to the part where ‹moment›", "ve a la parte en la que ‹momento›",
+                "Finds that moment in the subtitles and jumps there", "Busca ese momento en los subtítulos y salta",
+                "find_scene"),
         Command("what did they say?", "¿qué ha dicho?",
                 "Back 10 s, with subtitles for a moment", "Atrás 10 s, con subtítulos un momento", "replay"),
     ]),
@@ -156,11 +159,11 @@ TV_HINT = {"en": "Press the mic and say one · ▲▼ to scroll · BACK closes",
 EXAMPLES = {
     "en": {"title": "The Bear", "n": "three", "time": "twenty minutes", "language": "Spanish", "app": "YouTube",
            "search": "paella recipes", "channel": "Ibai", "level": "twenty", "first, second…": "third",
-           "something": "a short comedy",
+           "something": "a short comedy", "moment": "they kiss",
            "command": ["play The Bear season three", "skip the intro"]},
     "es": {"título": "La casa de papel", "n": "tres", "tiempo": "veinte minutos", "idioma": "inglés", "app": "YouTube",
            "búsqueda": "recetas de paella", "canal": "Ibai", "nivel": "veinte", "primero, segundo…": "tercero",
-           "algo": "una serie de miedo",
+           "algo": "una serie de miedo", "momento": "se besan",
            "orden": ["pon La casa de papel", "salta la intro"]},
 }
 PLACEHOLDER = re.compile(r"‹([^›]+)›")

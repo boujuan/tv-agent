@@ -141,6 +141,11 @@ class Help(_Action):
     lang: Literal["en", "es"] | None = None     # the language it was asked in (the list is shown in it)
 
 
+class FindScene(_Action):
+    type: Literal["find_scene"] = "find_scene"  # "go to the part where Mr. Burns gets shot": found in the subtitles
+    what: Annotated[str, Field(min_length=1, max_length=300)]
+
+
 class Info(_Action):
     type: Literal["info"] = "info"              # "what am I watching?", "where am I in Severance?"
     title: Title | None = None                  # None: what's playing
@@ -156,7 +161,8 @@ class Unclear(_Action):
 
 
 STEPS = (PlayTitle, ContinueWatching, NextEpisode, OpenInStremio, YouTube, Twitch, OpenApp, Home, Transport, Volume,
-         Binge, Timer, Tracks, Replay, ShowList, Recommend, Pick, LibraryEdit, Skip, AutoSkip, Help, Info, Wrong)
+         Binge, Timer, Tracks, Replay, ShowList, Recommend, Pick, LibraryEdit, Skip, AutoSkip, Help, Info, FindScene,
+         Wrong)
 Step = Annotated[Union[STEPS], Field(discriminator="type")]
 
 
