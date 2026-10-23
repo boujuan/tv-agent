@@ -15,6 +15,7 @@ import base64
 import hashlib
 import io
 import os
+import re
 import tarfile
 import threading
 import time
@@ -44,9 +45,10 @@ MODELS = {
                          "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf", 487_170_055),
 }
 FILES = ("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt")
-# OpenRouter's transcription models that did well on short commands (2026-10-22), by name
-HOSTED = {"mistralai/voxtral-mini-transcribe-3-0": "Voxtral Mini Transcribe 3",
-          "assemblyai/universal-3-6-pro": "AssemblyAI Universal-3.6 Pro",
+# OpenRouter's transcription models that did well on short commands, by name; AssemblyAI first: the best on
+# your own recordings with a Spanish hint (2026-10-23: 3 wrong of 30, ~0.25 s), and it takes a vocabulary
+HOSTED = {"assemblyai/universal-3-6-pro": "AssemblyAI Universal-3.6 Pro",
+          "mistralai/voxtral-mini-transcribe-3-0": "Voxtral Mini Transcribe 3",
           "deepgram/nova-3": "Deepgram Nova-3",
           "mistralai/voxtral-small-transcribe-3-0": "Voxtral Small Transcribe 3",
           "x-ai/grok-stt-1.0": "Grok STT 1.0",
@@ -57,6 +59,8 @@ HOSTED = {"mistralai/voxtral-mini-transcribe-3-0": "Voxtral Mini Transcribe 3",
           "nvidia/parakeet-tdt-0.6b-v3": "Parakeet TDT 0.6B v3 (hosted)",
           "openai/whisper-large-v3-turbo": "Whisper large v3 turbo"}
 TRANSCRIBE_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
+VOCABULARY_MAX = 200                                     # names sent per request (more makes it hear them in noise)
+NON_LATIN = re.compile(r"[^\W\d_a-zA-Z\u00C0-\u024F]")   # a letter outside Latin scripts: "Пауса", "Ютуб"
 RECORDINGS = DATA_DIR / "recordings"
 RECORDINGS_KEPT = 300
 RATE = 16000
@@ -72,11 +76,18 @@ def wav(pcm16: bytes, rate: int = RATE) -> bytes:
     return out.getvalue()
 
 
-async def hosted_transcribe(http, key: str, model: str, pcm16: bytes, timeout: float = 6.0) -> tuple[str, float | None]:
-    """(text, cost in $) from one of OpenRouter's transcription models; raises httpx errors."""
+async def hosted_transcribe(http, key: str, model: str, pcm16: bytes, timeout: float = 6.0, language: str = "",
+                            vocabulary: list[str] | None = None) -> tuple[str, float | None]:
+    """(text, cost in $) from one of OpenRouter's transcription models; raises httpx errors. `language`: an ISO 639-1
+    hint. `vocabulary`: names to hear, passed to AssemblyAI as its keyterms (OpenRouter's own "keyterms" field isn't
+    taken by these models; measured 2026-10-23: "Better Console" -> "Better Call Saul", "este remedio" -> "Stremio")."""
+    body = {"model": model, "input_audio": {"data": base64.b64encode(wav(pcm16)).decode(), "format": "wav"}}
+    if language:
+        body["language"] = language
+    if vocabulary and model.startswith("assemblyai/"):
+        body["provider"] = {"options": {"assemblyai": {"keyterms_prompt": vocabulary[:VOCABULARY_MAX]}}}
     r = await http.post(TRANSCRIBE_URL, timeout=timeout, headers={"Authorization": f"Bearer {key}", "X-Title": "tv-agent"},
-                        json={"model": model, "input_audio": {"data": base64.b64encode(wav(pcm16)).decode(),
-                                                              "format": "wav"}})
+                        json=body)
     r.raise_for_status()
     data = r.json()
     return str(data.get("text") or "").strip(), (data.get("usage") or {}).get("cost")

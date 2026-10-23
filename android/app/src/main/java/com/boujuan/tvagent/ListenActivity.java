@@ -6,10 +6,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
-import android.media.AudioAttributes;
-import android.media.AudioFocusRequest;
 import android.media.AudioFormat;
-import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.net.Uri;
@@ -210,12 +207,8 @@ public class ListenActivity extends Activity {
     }
 
     private void listen() {
-        AudioManager am = getSystemService(AudioManager.class);
-        AudioFocusRequest focus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
-                .setAudioAttributes(new AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ASSISTANT)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-                .build();
+        // No audio focus: asking for it as an assistant made players pause when the pill opened and play again when
+        // it closed, which undid "pause". tv-agent lowers the TV's volume itself while you speak.
         int min = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
         AudioRecord rec;
         try {
@@ -230,7 +223,6 @@ public class ListenActivity extends Activity {
             done("Microphone unavailable", "", 2500);
             return;
         }
-        am.requestAudioFocus(focus);
         AudioStream stream = openStream();
         // Kept even while streaming: if the connection breaks, this is sent the old way.
         ByteArrayOutputStream speech = new ByteArrayOutputStream(RATE * 2 * 6);
@@ -284,7 +276,6 @@ public class ListenActivity extends Activity {
         } finally {
             rec.stop();
             rec.release();
-            am.abandonAudioFocusRequest(focus);
         }
         if (!running) {
             if (stream != null) stream.close();

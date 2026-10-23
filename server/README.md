@@ -82,11 +82,16 @@ what it has understood so far. Pressing the mic again sends at once; without the
 recording until 0.7 s of quiet and sending it all. Logic: `listen_stream.py`; protocol: `server.py`.
 
 Speech-to-text can also be hosted (`stt_where = "hosted"`, or `"hosted-first"` with this laptop's model as backup,
-or `"local-first"`, hosted only when this laptop's model fails or hears nothing): an OpenRouter transcription model (`stt_hosted_model`, Voxtral Mini Transcribe 3 by default) gets the
-recording at the same checkpoints, which adds ~0.4-1 s and a small cost per command (about $0.0003 for a 5 s
-command); the local model then isn't loaded (~1 GB less memory). `keep_recordings = true` keeps each spoken
-command's audio (the last 300, in `~/.local/share/tv-agent/recordings/`, mode 600) for the panel's Activity tab
-to play or transcribe again.
+or `"local-first"`, hosted only when this laptop's model fails, hears nothing or writes in another script): an
+OpenRouter transcription model (`stt_hosted_model`) gets the recording at the same checkpoints, with a language hint
+(`stt_language`, your native language by default) and, for AssemblyAI, a vocabulary of names to hear as written
+(`stt_vocabulary`, plus your library's titles and Twitch favourites with `stt_vocabulary_library`). Parakeet guesses
+the language of every command and can't be limited: on 30 real commands from a Spanish speaker it wrote 11 wrong
+(Russian or French spellings of short Spanish commands, "Simpsons" as "sin"), where AssemblyAI Universal-3.6 Pro
+with a Spanish hint and the vocabulary wrote none wrong, ~0.26 s and ~$0.0002 a command (docs/research §2.12). The
+local model then isn't loaded (~1 GB less memory). `keep_recordings = true` keeps each spoken command's audio (the
+last 300, in `~/.local/share/tv-agent/recordings/`, mode 600) for the panel's Activity tab to play or transcribe
+again.
 
 ## How it decides
 

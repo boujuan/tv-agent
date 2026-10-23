@@ -67,7 +67,7 @@ def test_numbers():
     ("set the volume to 15", A.Volume(op="set", amount=15)),
     ("turn it down a bit", A.Volume(op="down", amount=3)),
     ("next episode", A.NextEpisode()),
-    ("Please, please.", A.Transport(op="pause")),
+    ("Please, please.", A.Transport(op="toggle")),                   # a misheard pause or play: whichever fits
 ])
 def test_grammar(text, expect):
     assert rule_action(text) == expect
@@ -1228,7 +1228,10 @@ def _bare_service(monkeypatch, tmp_path):
     from tv_agent import server, stt
     svc = server.Service.__new__(server.Service)
     svc.cfg = types.SimpleNamespace(stt_where="hosted", stt_model="a", stt_hosted_model="x/y", keep_recordings=True,
-                                    log_transcripts=True, secret=lambda k: "key")
+                                    log_transcripts=True, secret=lambda k: "key", stt_language="native",
+                                    native_language="spa", stt_vocabulary=["Stremio"], stt_vocabulary_library=False,
+                                    twitch_favorites=[])
+    svc._library_names, svc._library_names_at = [], 0.0
     svc.agent = types.SimpleNamespace(http=None, state=types.SimpleNamespace(
         timings=types.SimpleNamespace(add=lambda *a: None)))
     svc.stt, svc._stt_name, svc._stt_gen, svc._stt_loading = None, "", 0, asyncio.Lock()
@@ -1389,3 +1392,133 @@ def test_suggestions_are_real_titles_that_fit_and_play_from_the_list(monkeypatch
     assert me.llm.seen[0] == ["Severance"]
     asyncio.run(Agent._pick(me, A.Pick(number=1)))
     assert played == [("tt1", "series")]                # a series from the list: where you were, or its first episode
+
+
+
+def test_the_hosted_model_gets_a_language_hint_and_the_vocabulary(monkeypatch, tmp_path):
+    import asyncio
+    svc, server, stt = _bare_service(monkeypatch, tmp_path)
+    sent = {}
+
+    async def hosted(http, key, model, pcm, timeout=6.0, language="", vocabulary=None):
+        sent.update(language=language, vocabulary=vocabulary)
+        return "Abre Stremio", 0.0002
+    monkeypatch.setattr(stt, "hosted_transcribe", hosted)
+    svc.cfg.twitch_favorites = ["Ibai"]
+    svc.cfg.stt_vocabulary_library = True
+    svc._library_names, svc._library_names_at = ["The Bear", "stremio"], 1e12      # fresh: no refresh started
+    asyncio.run(svc.transcribe(b"\0" * 32000))
+    assert sent == {"language": "es", "vocabulary": ["Stremio", "Ibai", "The Bear"]}   # native Spanish; no repeats
+    svc.cfg.stt_language = ""
+    asyncio.run(svc.transcribe(b"\0" * 32000))
+    assert sent["language"] == ""                    # the model guesses
+
+
+def test_another_script_from_this_laptop_asks_the_hosted_model(monkeypatch, tmp_path):
+    import asyncio
+    svc, server, stt = _bare_service(monkeypatch, tmp_path)
+    svc.cfg.stt_where = "local-first"
+    svc.stt, svc._stt_name = types_stt("Пауса."), "a"
+
+    async def hosted(*a, **k):
+        return "Pausa.", 0.0002
+    monkeypatch.setattr(stt, "hosted_transcribe", hosted)
+    text, info = asyncio.run(svc.transcribe(b"\0" * 32000))
+    assert text == "Pausa." and info["stt_error"] == "this laptop heard another script"
+
+
+def test_hosted_requests_carry_the_hint_and_assemblyai_the_keyterms():
+    import asyncio
+    from tv_agent import stt
+
+    class Http:
+        async def post(self, url, timeout, headers, json):
+            self.body = json
+
+            class R:
+                def raise_for_status(self):
+                    pass
+
+                def json(self):
+                    return {"text": "Abre Stremio.", "usage": {"cost": 0.0002}}
+            return R()
+    http = Http()
+    asyncio.run(stt.hosted_transcribe(http, "k", "assemblyai/universal-3-6-pro", b"\0" * 3200, language="es",
+                                      vocabulary=["Stremio"]))
+    assert http.body["language"] == "es"
+    assert http.body["provider"] == {"options": {"assemblyai": {"keyterms_prompt": ["Stremio"]}}}
+    asyncio.run(stt.hosted_transcribe(http, "k", "mistralai/voxtral-mini-transcribe-3-0", b"\0" * 3200,
+                                      vocabulary=["Stremio"]))
+    assert "provider" not in http.body and "language" not in http.body
+
+
+def test_play_and_pause_go_to_the_app_in_front_not_to_kodi_behind_it():
+    import asyncio
+    import types
+    from tv_agent.agent import Agent
+    from tv_agent.tv import media
+    tasks = ("  * Task{6a #1270 type=standard A=10200:com.boujuan.tvagent U=0 visible=true}\n"
+             "  * Task{6b #1254 type=standard A=10099:io.gh.reisxd.tizentube.cobalt U=0 visible=true}\n"
+             "  * Task{9b #1263 type=standard A=10135:org.xbmc.kodi:2055 U=0 visible=false}\n")
+    sent = []
+
+    async def tv(fn, *args):
+        if fn is media.dispatch:
+            sent.append(args[0])
+            return None
+        return fn(types.SimpleNamespace(run=lambda argv, timeout=10: tasks))
+
+    async def no_kodi():
+        return None
+
+    async def started():
+        raise AssertionError("Kodi was brought up over the app in front")
+    me = types.SimpleNamespace(tv=tv, _kodi_player=no_kodi, kodi=types.SimpleNamespace(start=started),
+                               state=types.SimpleNamespace(now_playing=None))
+    me.front_app = lambda: Agent.front_app(me)
+    assert asyncio.run(me.front_app()) == "io.gh.reisxd.tizentube.cobalt"      # under the TV app's pill
+    out = asyncio.run(Agent._transport(me, A.Transport(op="resume")))
+    assert out.ok and sent == ["resume"]
+    assert not asyncio.run(Agent._transport(me, A.Transport(op="seek_to", seconds=60))).ok
+
+
+def test_an_episode_by_its_name_or_by_what_happens_in_it():
+    import asyncio
+    import types
+    from tv_agent.agent import Agent
+    eps = [{"id": "tt1:2:13", "season": 2, "episode": 13, "name": "Celebrity Pharmacology", "overview": "A play."},
+           {"id": "tt1:2:14", "season": 2, "episode": 14, "name": "Advanced Dungeons & Dragons",
+            "overview": "Abed invites Fat Neil to play Dungeons & Dragons."},
+           {"id": "tt1:6:25", "season": 6, "episode": 25, "name": "Who Shot Mr. Burns? (1)",
+            "overview": "When Burns winds up shot, everyone is a suspect."}]
+
+    class Llm:
+        asked = []
+
+        async def pick_episode(self, series, wanted, candidates):
+            self.asked.append([c[0] for c in candidates])
+            return "tt1:6:25"
+    me = types.SimpleNamespace(llm=None)
+    # by name: matched here, no model needed ("and" for "&")
+    assert asyncio.run(Agent._find_episode(me, "Community", eps, "Advanced Dungeons and Dragons"))["id"] == "tt1:2:14"
+    assert asyncio.run(Agent._find_episode(me, "Community", eps, "Mr. Burns gets shot")) is None   # no LLM to ask
+    me.llm = Llm()
+    assert asyncio.run(Agent._find_episode(me, "The Simpsons", eps, "Mr. Burns gets shot"))["id"] == "tt1:6:25"
+    assert me.llm.asked[0][0] == "tt1:6:25"            # the one whose summary shares the words comes first
+
+
+@pytest.mark.parametrize("text", [
+    "Can you play The Simpsons, um, that episode where Mr. Burns is killed?",
+    "Can you play the scenes um in that episode where Mr. Burns is killed?",
+    "pon el capítulo de los simpson en el que homer va al espacio",
+])
+def test_a_described_episode_is_for_the_llm_not_the_title_search(text):
+    got = rule_action(text)
+    assert got is None or got.type != "play_title", got
+
+
+def test_the_llm_names_an_episode():
+    from tv_agent.decide.llm import to_action
+    got = to_action({"action": "play_title", "title": "Community", "episode_name": "Advanced Dungeons and Dragons"},
+                    "abre community capítulo advanced dungeons and dragons", [], RULES)
+    assert got == A.PlayTitle(title="Community", episode_name="Advanced Dungeons and Dragons")

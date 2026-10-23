@@ -529,8 +529,6 @@
         "pause",
         "pause it",
         "hold on",
-        "please",
-        "please please",
         "pause this",
         "pause the movie",
         "pause the show",
@@ -550,6 +548,18 @@
         "op": "pause"
       },
       "note": "speech-to-text often hears “pause please” as “please please”"
+    },
+    {
+      "id": "toggle",
+      "say": [
+        "please",
+        "please please"
+      ],
+      "do": {
+        "type": "transport",
+        "op": "toggle"
+      },
+      "note": "a lone “please” is a misheard “pause” or “play”: playing pauses, paused plays"
     },
     {
       "id": "resume",
@@ -1613,7 +1623,10 @@
       "activity": "com.stremio.tv.MainActivity",
       "aliases": [
         "stremio",
-        "stream io"
+        "stream io",
+        "estremio",
+        "streamio",
+        "stream yo"
       ]
     },
     {

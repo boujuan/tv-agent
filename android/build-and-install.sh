@@ -19,7 +19,7 @@ rm -f "$APK"
 ./gradlew assembleRelease -q --console=plain 2>&1 | grep -v "SDK XML" || true
 [ -f "$APK" ] || { echo "build failed" >&2; exit 1; }
 APKSIGNER="$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)"
-echo "built $APK, signed by $("$APKSIGNER" verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate DN: //p')"
+echo "built $APK, signed by $("$APKSIGNER" verify --print-certs "$APK" 2>/dev/null | sed -n 's/^.*Signer.*certificate DN: //p' | head -1)"
 [ "${1:-}" = --build ] && exit 0
 TV_AGENT="${TV_AGENT:-$(command -v tv-agent || echo "$HERE/../server/.venv/bin/tv-agent")}"
 "$TV_AGENT" tv install "$APK"

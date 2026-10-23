@@ -90,7 +90,8 @@ class Kodi:
         options = {"resume": _time(resume_ms)} if resume_ms > 0 else {}
         await self.call("Player.Open", {"item": {"file": url}, "options": options}, timeout=15)
 
-    async def play(self, pid: int, on: bool):
+    async def play(self, pid: int, on: bool | str):
+        """on: True plays, False pauses, "toggle" switches."""
         await self.call("Player.PlayPause", {"playerid": pid, "play": on})
 
     async def stop(self, pid: int):

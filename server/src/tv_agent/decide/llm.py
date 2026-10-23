@@ -36,8 +36,8 @@ ACTIONS = ["play_title", "continue_watching", "show_in_stremio", "info", "next_e
            "auto_skip_on", "auto_skip_off", "stop_after_this", "turn_off_after_this", "stop_in", "turn_off_in",
            "cancel_timer", "binge_on", "binge_off", "library_add", "library_remove", "mark_watched", "mark_unwatched",
            "show_recent", "show_new", "show_movies", "recommend", "pick", "help", "wrong", "none"]
-SLOTS = {"title": "string", "season": "integer", "episode": "integer", "seconds": "integer", "number": "integer",
-         "app": "string", "language": "string", "query": "string"}
+SLOTS = {"title": "string", "season": "integer", "episode": "integer", "episode_name": "string", "seconds": "integer",
+         "number": "integer", "app": "string", "language": "string", "query": "string"}
 SCHEMA = {"type": "object", "additionalProperties": False, "required": ["action", *SLOTS],
           "properties": {"action": {"type": "string", "enum": ACTIONS},
                          **{k: {"type": [t, "null"]} for k, t in SLOTS.items()}}}
@@ -49,7 +49,9 @@ sounds like ("of" or "all" after subtitles, "oh" after mode: on / off; "beach mo
 "sops", "sobs": subs). The command may be in Spanish.
 
 Actions and their fields (every other field null):
-play_title: title, season, episode · continue_watching: title, or null for what was watched last
+play_title: title, season, episode, episode_name (an episode named or described instead of numbered: its name as
+said, or what happens in it, in English; numbers too only when said or certain) · continue_watching: title, or null
+for what was watched last
 show_in_stremio: title (its page, without playing)
 info: title, or null for what's playing ("what am I watching", "what episode of X am I on", "where am I in X")
 next_episode, previous_episode, pause, resume, stop, home, start_over, replay ("what did they say?")
@@ -75,6 +77,8 @@ Numbers as digits ("season three" -> 3, "a couple of minutes" -> 120 seconds). L
 Examples:
 "put that bear show on, third season" -> {"action":"play_title","title":"The Bear","season":3}
 "the series with the chemistry teacher who cooks meth" -> {"action":"play_title","title":"Breaking Bad"}
+"pon community, el capítulo del Dungeons and Dragons" -> {"action":"play_title","title":"Community","episode_name":"Dungeons and Dragons"}
+"the simpsons episode where mr burns gets shot" -> {"action":"play_title","title":"The Simpsons","episode_name":"Mr. Burns gets shot"}
 "can you make it so I can actually hear them" -> {"action":"volume_up"}
 "I'm off to bed, switch it all off when this one's done" -> {"action":"turn_off_after_this"}
 "take me to the halfway point" -> {"action":"seek_percent","number":50}
@@ -116,6 +120,12 @@ leaves room. Leave out what's in "seen". Give each title as on IMDb (original or
 movie or series, and "why": one short reason, at most 8 words, in "language". "max_minutes": the longest a film may
 run when they set a limit ("under 90 minutes": 90, "menos de hora y media": 90, "something short": 100), else null.
 Answer only with the JSON object."""
+
+
+EPISODE_SYSTEM = """Someone asked their TV for one episode of a series by its name or by what happens in it
+("wanted"). Which of these episodes is it? Use the episode names and summaries, and what you know about the series.
+People misremember details ("killed" for "shot", the wrong character): pick the closest episode. When a story spans
+several episodes, the first one. Answer only with the JSON object: its id, or null only when nothing is close."""
 
 
 class Llm:
@@ -211,6 +221,24 @@ class Llm:
                             "why": str(t.get("why") or "").strip()[:80]})
         return out[:10], limit if isinstance(limit, int) and 20 <= limit <= 400 else None
 
+    async def pick_episode(self, series: str, wanted: str, candidates: list[tuple[str, str]]) -> str | None:
+        """Which of a series' episodes (id, "S6E25 name: summary") is the one named or described; None if none."""
+        ids = [c[0] for c in candidates]
+        schema = {"type": "object", "additionalProperties": False, "required": ["id"],
+                  "properties": {"id": {"type": ["string", "null"], "enum": [*ids, None]}}}
+        data = await self._post({
+            "max_tokens": 60,
+            "response_format": {"type": "json_schema",
+                                "json_schema": {"name": "episode", "strict": True, "schema": schema}},
+            "messages": [{"role": "system", "content": EPISODE_SYSTEM},
+                         {"role": "user", "content": json.dumps({"series": series, "wanted": wanted,
+                                                                 "episodes": [{"id": i, "about": t} for i, t in candidates]},
+                                                                ensure_ascii=False)}]}, 6.0)
+        self.last_usage = data.get("usage") or {}
+        content = data["choices"][0]["message"]["content"]
+        got = (json.loads(content) if isinstance(content, str) else content).get("id")
+        return got if got in ids else None
+
     async def answer(self, said: str, context: dict) -> tuple[bool, A.Action | None]:
         """(whether it answered, its action or None for "not a command")."""
         try:
@@ -239,7 +267,8 @@ def to_action(a: dict, said: str, candidates: list[str], rules: Rules) -> A.Acti
     try:
         match kind:
             case "play_title" if title:
-                return A.PlayTitle(title=title, season=num("season"), episode=num("episode"))
+                return A.PlayTitle(title=title, season=num("season"), episode=num("episode"),
+                                   episode_name=(a.get("episode_name") or "").strip()[:200] or None)
             case "continue_watching":
                 return A.ContinueWatching(title=title)
             case "show_in_stremio" if title:

@@ -169,7 +169,13 @@ NOT_A_TITLE = re.compile(r"^(?:it|this|that|something|anything|again|the movie|t
 DESCRIBED = re.compile(r"^(?:the one (?:with|where|about|that)|la de|el de|la que|el que|lo de)\b|"
                        r"\b(?:film|movie|series|show|documentary|peli|pel[ií]cula|serie|documental)\s+"
                        r"(?:that\s+|esa\s+|ese\s+|esta\s+|este\s+)?(?:about|where|in which|with the|sobre|donde|"
-                       r"en la que|del?)\b")
+                       r"en la que|del?)\b|"
+                       # an episode or scene described: "the simpsons, that episode where mr. burns is shot"
+                       r"\b(?:episode|episodio|cap[ií]tulo|scene|escena)s?\s+(?:where|when|in which|with|that|about|"
+                       r"donde|cuando|en (?:el|la) que|del? que|sobre)\b|"
+                       # "the episode of the simpsons where…", "el capítulo de los simpson en el que…"
+                       r"\b(?:episode|episodio|cap[ií]tulo|scene|escena)s?\b.*\b(?:where|in which|donde|en (?:el|la) que)\b")
+LONGEST_TITLE = 12                      # words: a longer "title" is a description, for the LLM
 
 
 def _play(v, rules):
@@ -177,7 +183,7 @@ def _play(v, rules):
     s = T.title_slots(v)
     t = s["title"]
     if not t or t in T.CURRENT or NOT_A_TITLE.search(t) or DESCRIBED.search(t) or DESCRIBED.search(v.strip()) \
-            or _alias(t, rules):
+            or len(t.split()) > LONGEST_TITLE or _alias(t, rules):
         return None
     return s
 

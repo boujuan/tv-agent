@@ -4,7 +4,7 @@ import re
 
 from .adb import Adb
 
-KEYS = {"pause": "pause", "resume": "play", "stop": "stop", "forward": "fast-forward", "back": "rewind",
+KEYS = {"pause": "pause", "resume": "play", "toggle": "play-pause", "stop": "stop", "forward": "fast-forward", "back": "rewind",
         "next": "next", "previous": "previous"}
 MUSIC = "3"   # AudioManager.STREAM_MUSIC; on this TV its index runs 0..100
 

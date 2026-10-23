@@ -4,8 +4,8 @@ debugging in the Activity tab. Live at once (/v1/pipeline)."""
 import subprocess
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QHBoxLayout, QMessageBox, QPushButton,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFormLayout, QHBoxLayout, QMessageBox,
+                               QPlainTextEdit, QPushButton, QVBoxLayout, QWidget)
 
 from .common import (AMBER, GREEN, TV_AGENT, WHERE, KeyLine, agent_stt, dim, offer_to_delete_recordings,
                      openrouter_check)
@@ -53,6 +53,34 @@ class SpeechToText(QWidget):
         form.addRow("", self.hosted_check)
         self.key = KeyLine(panel)
         form.addRow("", self.key)
+        self.language = QComboBox()
+        for code, label in (("native", "Your native language"), ("", "None: the model guesses"), ("es", "Spanish"),
+                            ("en", "English")):
+            self.language.addItem(label, code)
+        self.language.setToolTip("The language the hosted model expects. A Spanish hint still gets English commands "
+                                 "right; an English one garbles Spanish; with none it often writes short Spanish "
+                                 "commands in another language")
+        self.language.activated.connect(lambda _i: self.decisions.set_pipeline(
+            {"stt_language": self.language.currentData()}))
+        form.addRow("Language hint", self.language)
+        self.vocabulary = QPlainTextEdit()
+        self.vocabulary.setPlaceholderText("One name per line: Stremio, Better Call Saul…")
+        self.vocabulary.setToolTip("Names the hosted model should hear as they're written (AssemblyAI only: other "
+                                   "models don't take a list). Few and distinctive works best.")
+        self.vocabulary.setFixedHeight(96)
+        save = QPushButton("Save vocabulary")
+        save.clicked.connect(self.save_vocabulary)
+        vrow = QVBoxLayout()
+        vrow.addWidget(self.vocabulary)
+        hrow = QHBoxLayout()
+        self.vocab_library = QCheckBox("Also your library's titles and Twitch favourites")
+        self.vocab_library.clicked.connect(lambda on: self.decisions.set_pipeline({"stt_vocabulary_library": on}))
+        hrow.addWidget(self.vocab_library, 1)
+        hrow.addWidget(save)
+        vrow.addLayout(hrow)
+        self.vocab_state = dim("", wrap=False)
+        vrow.addWidget(self.vocab_state)
+        form.addRow("Vocabulary", vrow)
         self.keep = QCheckBox("Keep recordings of commands, for debugging (the last 300, with the history on)")
         self.keep.setToolTip("In Activity, right-click a 🔊 command to hear what the microphone heard, or to try "
                              "another speech model on it and compare (nothing is transcribed twice by itself)")
@@ -93,6 +121,15 @@ class SpeechToText(QWidget):
         self.key.show_key(res.get("keys", {}).get("openrouter", False), "OpenRouter",
                           " (needed for a hosted model)")
         self.keep.setChecked(bool(res.get("keep_recordings")))
+        now = res.get("stt_language_now", "")
+        self.language.setItemText(0, f"Your native language ({now})" if now else "Your native language")
+        self.language.setCurrentIndex(max(0, self.language.findData(res.get("stt_language", "native"))))
+        if not self.vocabulary.hasFocus():
+            self.vocabulary.setPlainText("\n".join(res.get("stt_vocabulary") or []))
+        self.vocab_library.setChecked(bool(res.get("stt_vocabulary_library")))
+        assembly = res.get("stt_hosted_model", "").startswith("assemblyai/")
+        self.vocab_state.setText(f"{res.get('stt_vocabulary_count', 0)} names sent with each command"
+                                 if assembly else "Used by AssemblyAI only: the chosen hosted model doesn't take a list")
         if self._checked != hosted:
             self._checked = hosted
             self.panel.bg.run(lambda: openrouter_check(hosted, "transcription"),
@@ -152,6 +189,10 @@ class SpeechToText(QWidget):
         model = self.selected_hosted()
         if model and model != self.state.get("stt_hosted_model"):
             self.decisions.set_pipeline({"stt_hosted_model": model})
+
+    def save_vocabulary(self):
+        words = [w.strip() for w in self.vocabulary.toPlainText().replace(",", "\n").splitlines() if w.strip()]
+        self.decisions.set_pipeline({"stt_vocabulary": words})
 
     def keep_changed(self, on: bool):
         self.decisions.set_pipeline({"keep_recordings": on})

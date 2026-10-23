@@ -35,6 +35,11 @@ from .tv.kodi import Kodi, KodiError
 log = logging.getLogger(__name__)
 SAY_RECEIVER = "com.boujuan.tvagent/.SayReceiver"
 CHOICES = "com.boujuan.tvagent/.ChoicesActivity"
+# Words that say nothing about which episode it is
+EPISODE_STOPWORDS = {"the", "and", "episode", "where", "when", "with", "that", "one", "gets", "get", "who", "what", "his",
+                     "her", "their", "from", "into", "out", "about", "there", "this", "season", "part"}
+OWN_APP = "com.boujuan.tvagent"          # the TV app: its pill covers the app the commands are for
+KODI = "org.xbmc.kodi"
 LIST_SIZE = 6                # rows that fit the TV app's list
 STARTS = {"play_title", "continue_watching", "next_episode", "pick"}     # actions that start playback
 LIST_TTL = 300              # "number 2" refers to a list shown in the last 5 minutes
@@ -1013,6 +1018,13 @@ class Agent:
             eps = cinemeta.episodes(meta)
             if not eps:
                 return Outcome(False, f"No episodes listed for {name}")
+            if a.episode_name and (a.season is None or a.episode is None):
+                v = await self._find_episode(name, eps, a.episode_name)
+                if v is None:
+                    return Outcome(False, f"Couldn't find that episode of {name}: “{a.episode_name}”")
+                resume = state.get("timeOffset", 0) if state.get("video_id") == v["id"] and not a.restart else 0
+                self.prefetch(kind, v["id"])
+                return await self.play(imdb, kind, name, v["id"], _episode_label(name, v), meta, resume)
             season = a.season
             if season is None and a.episode is not None:
                 # "episode 3 of the bear": the season you're on, else the first
@@ -1034,6 +1046,36 @@ class Agent:
             video, label = v["id"], _episode_label(name, v)
         resume = state.get("timeOffset", 0) if state.get("video_id") == video and not a.restart else 0
         return await self.play(imdb, kind, name, video, label, meta, resume)
+
+    async def _find_episode(self, series: str, eps: list[dict], wanted: str) -> dict | None:
+        """An episode by its name ("Advanced Dungeons & Dragons": matched here), or by what happens in it ("Mr. Burns
+        gets shot": the episodes whose name and summary share its words, and the LLM picks one of them)."""
+        def norm(t: str) -> str:
+            return re.sub(r"\s+", " ", re.sub(r"[^\w ]", " ", cinemeta.norm(t.replace("&", " and ")))).strip()
+        want = norm(wanted)
+        named = sorted(((fuzz.token_set_ratio(want, norm(v.get("name") or "")), i) for i, v in enumerate(eps)),
+                       reverse=True)
+        if named and named[0][0] >= 90 and (len(named) == 1 or named[1][0] < named[0][0]):
+            return eps[named[0][1]]
+        if self.llm is None:
+            return None
+        words = [w for w in want.split() if len(w) >= 3 and w not in EPISODE_STOPWORDS]
+        scored = []
+        for i, v in enumerate(eps):
+            about = norm(f"{v.get('name') or ''} {v.get('overview') or v.get('description') or ''}")
+            title = norm(v.get("name") or "")
+            hits = sum(2 if w in title else 1 for w in words if w in about)
+            scored.append((hits + named[[n[1] for n in named].index(i)][0] / 100, i))
+        top = [eps[i] for _, i in sorted(scored, reverse=True)[:40]]
+        candidates = [(v["id"], f"S{v['season']}E{v.get('episode')} {v.get('name') or ''}: "
+                                f"{(v.get('overview') or v.get('description') or '')[:160]}") for v in top]
+        try:
+            got = await self.llm.pick_episode(series, wanted, candidates)
+        except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError) as e:
+            log.info("episode choice unavailable (%s)", type(e).__name__)
+            return None
+        log.info("episode “%s” of %s: %s", wanted, series, got)
+        return next((v for v in top if v["id"] == got), None)
 
     async def _continue_watching(self, a: ContinueWatching) -> Outcome:
         if not a.title and (pid := await self._kodi_player()) is not None:
@@ -1650,11 +1692,34 @@ class Agent:
         await self.tv(apps.view, app, uri, True)
         return Outcome(True, f"Stremio: {m.label}")
 
+    async def front_app(self) -> str | None:
+        """The app on screen under the TV app's pill: its package, "home" for the launcher; None if unknown. The
+        activity manager lists the tasks top first."""
+        try:
+            out = await self.tv(lambda adb: adb.run(["sh", "-c", "dumpsys activity activities | grep -m12 -E "
+                                                                  "'^ +\\* Task\\{'"], timeout=4))
+        except Exception as e:
+            log.info("app in front: %s", type(e).__name__)
+            return None
+        for line in out.splitlines():
+            m = re.search(r"A=\d+:([\w.]+)", line)
+            if not m or m.group(1) == OWN_APP:
+                continue
+            return "home" if "type=home" in line else m.group(1)
+        return None
+
     async def _transport(self, a: Transport) -> Outcome:
-        pid = await self._kodi_player()
+        front, pid = await asyncio.gather(self.front_app(), self._kodi_player())
+        other = front not in (None, "home", KODI, justplayer.PACKAGE)     # another app is on screen: it gets the keys
+        if other:
+            log.info("%s for %s, the app in front", a.op, front)
+            if a.op == "seek_to":
+                return Outcome(False, "Jumping to a time works in Kodi and Just Player only")
+            await self.tv(media.dispatch, a.op)
+            return Outcome(True, "Play/pause" if a.op == "toggle" else a.op.capitalize())
         if pid is not None:
-            if a.op in ("pause", "resume"):
-                await self.kodi.play(pid, a.op == "resume")
+            if a.op in ("pause", "resume", "toggle"):
+                await self.kodi.play(pid, "toggle" if a.op == "toggle" else a.op == "resume")
             elif a.op == "stop":
                 self._user_stopped = True
                 await self._note_position(pid)
@@ -1673,14 +1738,14 @@ class Agent:
                 await self.kodi.seek_to(pid, 0)
             if a.op == "seek_to":
                 return Outcome(True, f"To {a.percent}%" if a.percent is not None else f"To {_clock((a.seconds or 0) * 1000)}")
-            return Outcome(True, a.op.replace("_", " ").capitalize())
+            return Outcome(True, "Play/pause" if a.op == "toggle" else a.op.replace("_", " ").capitalize())
         if (st := await self._just_status()) is not None:
             return await self._just_transport(a, st)
         if a.op == "seek_to":
             return Outcome(False, "Jumping to a time works in Kodi and Just Player only")
         if a.op == "resume":
             sessions = [x for x in await self.tv(media.sessions) if x[1] and x[2] in ("PAUSED", "PLAYING")]
-            if any(pkg == "org.xbmc.kodi" for pkg, _, _ in sessions):
+            if any(pkg == KODI for pkg, _, _ in sessions):
                 await self.kodi.start()                  # Kodi paused in the background: front, then play
                 if (pid := await self._kodi_player()) is not None:
                     await self.kodi.play(pid, True)
@@ -1688,7 +1753,7 @@ class Agent:
             if not sessions:                             # nothing paused anywhere: what you watched last
                 return await self._continue_watching(ContinueWatching(title=None))
         await self.tv(media.dispatch, a.op)
-        return Outcome(True, a.op.capitalize())
+        return Outcome(True, "Play/pause" if a.op == "toggle" else a.op.capitalize())
 
     async def _just_transport(self, a: Transport, st: tuple[str, int, float]) -> Outcome:
         """Just Player: media keys for pause/resume/stop and short skips (+15 s / -5 s a press); a longer jump
@@ -1696,9 +1761,9 @@ class Agent:
         np = self.state.now_playing
         if a.op in ("next", "previous"):
             return await self._next_episode(NextEpisode(offset=1 if a.op == "next" else -1))
-        if a.op in ("pause", "resume", "stop"):
+        if a.op in ("pause", "resume", "toggle", "stop"):
             await self.tv(media.dispatch, a.op)
-            return Outcome(True, a.op.capitalize())
+            return Outcome(True, "Play/pause" if a.op == "toggle" else a.op.capitalize())
         pos = st[1]
         if a.op in ("forward", "back"):
             step = a.seconds or (30 if a.op == "forward" else 10)

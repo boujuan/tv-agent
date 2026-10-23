@@ -4,6 +4,20 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
+## android — unreleased
+
+### Fixed
+- The app no longer asks for audio focus while it listens. Asking as a voice assistant made the player pause when
+  the pill opened and play again when it closed, which undid "pause" (and paused YouTube before "play"). tv-agent
+  already lowers the volume while you speak. Version 0.8.0.
+
+## panel — unreleased
+
+### Added
+- Decisions › Speech to text: the hosted model's language hint (your native language by default) and its
+  vocabulary, the names it should hear as written (one per line, plus your library's titles and Twitch favourites
+  if ticked), live at once.
+
 ## android 0.7.0 — 2026-10-23
 
 Upgrading from 0.3.0, which was signed with a debug key: uninstall it once (`tv-agent tv shell pm uninstall
@@ -37,6 +51,28 @@ whole recording instead).
   are watching is left out. They're shown as a numbered list on the TV with posters, ratings and a reason; "number 2"
   plays it (a series where you were, or from its first episode). Rules, the LLM and the decision model all know the
   new `recommend` action. Needs the OpenRouter key; about $0.0004 and 3-7 s per request.
+- Episodes by name or by what happens in them: "Abre Community, capítulo Advanced Dungeons & Dragons", "the
+  Simpsons episode where Mr. Burns is shot". The LLM fills a new `episode_name`; the agent matches episode names
+  itself, and for a description lets the LLM pick from the episodes whose name and summary share its words (Spanish
+  descriptions work; misremembered details too). The rules hand such sentences to the LLM instead of searching for
+  the whole description as a title.
+- Hosted speech-to-text takes a language hint (`stt_language`: your native language by default; a Spanish hint
+  keeps English commands intact, an English one garbles Spanish) and a vocabulary (`stt_vocabulary`, plus your
+  library's titles and Twitch favourites with `stt_vocabulary_library`), passed to AssemblyAI as its keyterms
+  ("Better Console" → "Better Call Saul", "este remedio" → "Stremio"). AssemblyAI Universal-3.6 Pro is listed
+  first: on 30 real commands it heard 27 right with the hint and 30 with the vocabulary, ~0.26 s, ~$0.0002 each,
+  and nothing on silence (Voxtral makes up sentences there).
+- `GET /v1/pipeline` shows them; `POST` changes them.
+
+### Changed
+- Play, pause and stop go to the app on screen: "play" while YouTube was in front brought Kodi up and resumed it.
+  Kodi is only woken when it, or the home screen, is in front.
+- A lone "please" (a misheard "pause" or "play") pauses what plays and plays what's paused (`toggle`), instead of
+  always pausing.
+- "local-first" speech-to-text also asks the hosted model when this laptop's model writes in another script
+  ("Пауса", "Ютуб"): Parakeet guesses the language every time and can't be limited.
+- Stremio is also "estremio", "streamio".
+- Rules: a "title" over 12 words is a description, for the LLM.
 
 ### Fixed
 - A film's runtime given as "1h 39min" was read as 39 minutes (the length used when Kodi doesn't report one).

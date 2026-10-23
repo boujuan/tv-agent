@@ -21,6 +21,8 @@ class PlayTitle(_Action):
     restart: bool = False
     latest: bool = False                 # "the latest episode of …": the newest one out
     guess: bool = False                  # no model understood it: played only if the title is found exactly
+    # an episode named or described instead of numbered: "Advanced Dungeons & Dragons", "Mr. Burns gets shot"
+    episode_name: Annotated[str, Field(min_length=1, max_length=200)] | None = None
 
 
 class ContinueWatching(_Action):
@@ -62,7 +64,7 @@ class Home(_Action):
 
 class Transport(_Action):
     type: Literal["transport"] = "transport"
-    op: Literal["pause", "resume", "stop", "forward", "back", "seek_to", "next", "previous"]
+    op: Literal["pause", "resume", "toggle", "stop", "forward", "back", "seek_to", "next", "previous"]
     seconds: int | None = Field(None, ge=0, le=14400)   # for forward/back/seek_to
     percent: int | None = Field(None, ge=0, le=100)     # seek_to a share of the runtime ("the middle")
 

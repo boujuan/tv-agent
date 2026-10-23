@@ -5,6 +5,7 @@ web password and, when set, the Liquid and OpenRouter API keys of the cloud fall
 """
 import json
 import os
+import re
 import secrets as random_tokens
 import socket
 import stat
@@ -21,6 +22,9 @@ SECRET_NAMES = ("agent_token", "stremio_auth_key", "kodi_password", "liquid_api_
 OPTIONAL_SECRETS = ("liquid_api_key", "openrouter_api_key")     # only for the cloud steps
 STEPS = ("phrases", "patterns", "llm", "d1")                     # the decision steps (decide/router.py)
 D1_WHERE = ("local-first", "hosted-first", "local", "hosted")
+# What the hosted speech model should hear by name: the apps, the way they're said
+STT_VOCABULARY = ("Stremio", "TizenTube", "YouTube", "YouTube Music", "Kodi", "Twitch", "Movistar Plus", "Prime Video",
+                  "RTVE Play", "TDTChannels")
 LEGACY = ("hosted_d1", "llm_fallback", "llm_first")              # before decide_steps, decide_off and d1_where
 
 
@@ -39,6 +43,13 @@ class Config:
     stt_model: str = "parakeet-v2"          # speech model: "parakeet-v2" (English), "parakeet-v3" (25 languages), a path
     stt_where: str = "local"                # "local", "hosted" (OpenRouter), or "local-first" / "hosted-first" (the other if it fails)
     stt_hosted_model: str = "mistralai/voxtral-mini-transcribe-3-0"   # an OpenRouter transcription model
+    # The hosted model's language hint: "native" (native_language: a Spanish hint keeps English commands intact, an
+    # English one garbles Spanish), "" (it guesses, and gets short commands wrong), or an ISO 639-1 code
+    stt_language: str = "native"
+    # Names the hosted model should hear (AssemblyAI's keyterms: "Stremio", not "este remedio"), and whether your
+    # library's titles and Twitch favourites are added to them
+    stt_vocabulary: list[str] = field(default_factory=lambda: list(STT_VOCABULARY))
+    stt_vocabulary_library: bool = True
     keep_recordings: bool = False           # each command's audio kept (the last 300), playable in the Activity tab
     kodi_port: int = 8080
     kodi_user: str = "kodi"
@@ -107,6 +118,10 @@ def load() -> Config:
     cfg.decide_steps = [s for s in cfg.decide_steps if s in STEPS] + [s for s in STEPS if s not in cfg.decide_steps]
     if cfg.stt_where not in ("local", "hosted", "local-first", "hosted-first"):
         raise SystemExit(f"{CONFIG_FILE}: stt_where must be local, hosted, local-first or hosted-first")
+    if cfg.stt_language not in ("native", "") and not re.fullmatch(r"[a-z]{2}", cfg.stt_language):
+        raise SystemExit(f"{CONFIG_FILE}: stt_language must be \"native\", \"\" or a two-letter code such as \"es\"")
+    if not isinstance(cfg.stt_vocabulary, list) or not all(isinstance(x, str) for x in cfg.stt_vocabulary):
+        raise SystemExit(f"{CONFIG_FILE}: stt_vocabulary must be a list of words and names")
     if cfg.d1_where not in D1_WHERE:
         raise SystemExit(f"{CONFIG_FILE}: d1_where must be one of {', '.join(D1_WHERE)}")
     if SECRETS_FILE.exists():

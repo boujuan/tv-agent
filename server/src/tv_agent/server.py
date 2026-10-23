@@ -50,6 +50,7 @@ from .decide import text as T
 from .decide import rules as R
 from .decide.d1 import WHERE
 from .decide.router import STEPS, Decision, Router, normalize
+from .languages import ANDROID_LOCALE
 from .languages import name as language_name
 from .listen_stream import StreamSession
 from . import stt as stt_mod
@@ -75,6 +76,8 @@ def describe(a: A.Action) -> str:
                 return f"Going to {' '.join(parts)}…"
             if a.latest:
                 return f"Finding the latest {a.title.title()}…"
+            if a.episode_name:
+                return f"Finding {a.title.title()}: “{a.episode_name}”…"
             return f"Finding {a.title.title()}{ep}…"
         case A.ContinueWatching():
             return f"Continuing {a.title.title()}…" if a.title else "Continuing…"
@@ -94,6 +97,8 @@ def describe(a: A.Action) -> str:
             return "To the middle"
         case A.Transport() if a.op == "seek_to" and (a.seconds or 0) == 0 and a.percent is None:
             return "From the start"
+        case A.Transport() if a.op == "toggle":
+            return "Play/pause"
         case A.Transport():
             return a.op.replace("_", " ").capitalize()
         case A.Volume():
@@ -160,6 +165,8 @@ class Service:
         self._stt_gen = 0                       # bumped by unload_stt, so a load finishing after it isn't kept
         self._stt_loading = asyncio.Lock()
         self._panel_adb: Adb | None = None
+        self._library_names: list[str] = []      # for the speech model's vocabulary, refreshed now and then
+        self._library_names_at = 0.0
         self.token = cfg.secret("agent_token") or ""
         self._busy = asyncio.Lock()
         self._running: asyncio.Task | None = None
@@ -307,6 +314,38 @@ class Service:
         self.stt, self._stt_name = None, ""
         self._stt_gen += 1
 
+    def stt_language(self) -> str:
+        """The hosted model's language hint: your native language's code by default ("es"), else as set."""
+        lang = self.cfg.stt_language
+        return ANDROID_LOCALE.get(self.cfg.native_language, "").split("_")[0] if lang == "native" else lang
+
+    def stt_vocabulary(self) -> list[str]:
+        """The names the hosted model should hear: yours (Settings), then your Twitch favourites and the titles you
+        watched lately; the library part is refreshed in the background every 10 minutes."""
+        names = list(self.cfg.stt_vocabulary)
+        if self.cfg.stt_vocabulary_library:
+            names += list(self.cfg.twitch_favorites) + self._library_names
+            if time.monotonic() - self._library_names_at > 600:
+                self._library_names_at = time.monotonic()
+                asyncio.create_task(self._refresh_library_names())
+        seen, out = set(), []
+        for n in names:
+            n = n.strip()[:100]
+            if n and n.lower() not in seen:
+                seen.add(n.lower())
+                out.append(n)
+        return out[:stt_mod.VOCABULARY_MAX]
+
+    async def _refresh_library_names(self):
+        try:
+            items = await self.agent.library.items()
+        except Exception as e:
+            log.info("library titles for the speech model: %s", type(e).__name__)
+            return
+        recent = sorted((i for i in items if i.get("type") in ("movie", "series") and i.get("name")),
+                        key=lambda i: (i.get("state") or {}).get("lastWatched") or "", reverse=True)
+        self._library_names = [i["name"] for i in recent[:150]]
+
     async def transcribe(self, pcm: bytes, where: str | None = None, model: str | None = None,
                          fallback: bool = True) -> tuple[str, dict]:
         """The text of some audio, where stt_where says: "local-first" / "hosted-first" try the other when the
@@ -329,7 +368,9 @@ class Service:
                     failed = {"stt_error": "no OpenRouter key"}
                     continue
                 try:
-                    text, cost = await stt_mod.hosted_transcribe(self.agent.http, key, model, pcm)
+                    text, cost = await stt_mod.hosted_transcribe(self.agent.http, key, model, pcm,
+                                                                 language=self.stt_language(),
+                                                                 vocabulary=self.stt_vocabulary())
                 except (httpx.HTTPError, ValueError, KeyError) as e:
                     log.warning("hosted speech-to-text (%s) didn't answer: %s", model, type(e).__name__)
                     failed = {"stt_error": f"{model}: {type(e).__name__}",
@@ -344,8 +385,10 @@ class Service:
                     continue
                 text = await asyncio.to_thread(local.transcribe, pcm)
                 info = {"stt": "local"}
-                if not text.strip() and i < len(order) - 1 and len(pcm) >= HALF_SECOND:
-                    failed = {"stt_error": "this laptop heard nothing",
+                if i < len(order) - 1 and (stt_mod.NON_LATIN.search(text) or (not text.strip()
+                                                                               and len(pcm) >= HALF_SECOND)):
+                    # nothing in half a second or more, or another script ("Пауса"): Parakeet guessed the language
+                    failed = {"stt_error": "this laptop heard " + ("nothing" if not text.strip() else "another script"),
                               "stt_failed_ms": round((time.perf_counter() - t) * 1000)}
                     continue
             ms = (time.perf_counter() - t) * 1000
@@ -635,6 +678,9 @@ def local_app(svc: Service) -> FastAPI:
                 "counts": svc.agent.rules.counts, "learned": len(learned.load()),
                 "stt_where": c.stt_where, "stt_hosted_model": c.stt_hosted_model, "stt_model": c.stt_model,
                 "stt_loaded": svc.stt is not None, "keep_recordings": c.keep_recordings, "d1_model": str(c.d1_model),
+                "stt_language": c.stt_language, "stt_language_now": svc.stt_language(),
+                "stt_vocabulary": list(c.stt_vocabulary), "stt_vocabulary_library": c.stt_vocabulary_library,
+                "stt_vocabulary_count": len(svc.stt_vocabulary()),
                 "llama_server": c.llama_server}
 
     @app.get("/v1/pipeline")
@@ -692,11 +738,28 @@ def local_app(svc: Service) -> FastAPI:
             if not stt_mod.installed(choice):
                 raise HTTPException(422, f"speech model {choice}: not downloaded (or not a model folder)")
             new["stt_model"] = choice
-        for key in ("keep_recordings", "llm_private"):
+        if "stt_language" in body:
+            lang = str(body["stt_language"]).strip().lower()
+            if lang not in ("native", "") and not re.fullmatch(r"[a-z]{2}", lang):
+                raise HTTPException(422, "stt_language: native, \"\" (the model guesses) or a two-letter code")
+            new["stt_language"] = lang
+        if "stt_vocabulary" in body:
+            words = body["stt_vocabulary"]
+            if not isinstance(words, list) or len(words) > 500 or not all(isinstance(w, str) for w in words):
+                raise HTTPException(422, "stt_vocabulary: a list of up to 500 words or names")
+            clean = []
+            for w in words:
+                w = " ".join(w.split())[:100]
+                if w and w.lower() not in {x.lower() for x in clean}:
+                    clean.append(w)
+            new["stt_vocabulary"] = clean
+        for key in ("keep_recordings", "llm_private", "stt_vocabulary_library"):
             if key in body and not isinstance(body[key], bool):
                 raise HTTPException(422, f"{key}: true or false")
         if "keep_recordings" in body:
             new["keep_recordings"] = body["keep_recordings"]
+        if "stt_vocabulary_library" in body:
+            new["stt_vocabulary_library"] = body["stt_vocabulary_library"]
         if "d1_model" in body:
             path = Path(str(body["d1_model"])).expanduser()
             if path.suffix != ".gguf" or not path.is_file():
