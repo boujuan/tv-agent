@@ -46,6 +46,7 @@ KODI = "org.xbmc.kodi"
 # stops at 0:00 this soon after opening, with nothing in that log since, gets Kodi restarted and opened again, once.
 KODI_LOG = "/sdcard/Android/data/org.xbmc.kodi/files/.kodi/temp/kodi.log"
 STUCK_WITHIN = 45
+KODI_FREE = 1.0             # seconds after Kodi's player is gone before the next file opens (its decoder is let go)
 LIST_SIZE = 6                # rows that fit the TV app's list
 STARTS = {"play_title", "continue_watching", "next_episode", "pick"}     # actions that start playback
 LIST_TTL = 300              # "number 2" refers to a list shown in the last 5 minutes
@@ -565,12 +566,16 @@ class Agent:
                 return Outcome(False, f"The links for {label} didn't answer")
             t_check = time.perf_counter()
             async with self._starting:
+                if (pid := await self._kodi_player()) is not None:
+                    await self._note_position(pid)      # a replay of this episode starts where it is
                 resume_ms = self._replace_session(video, resume_ms)
                 addon_subs = None
                 if plan.subtitles is not None:   # asked now for the file chosen, attached once Kodi has opened it
                     addon_subs = asyncio.create_task(subtitles.fetch(self.http, await self.addons(), kind, video,
                                                                      chosen))
                 extra = "|" + urlencode(chosen.headers) if chosen.headers else ""
+                if pid is not None:
+                    await self._free_kodi(pid)
                 await self.kodi.open(link + extra, resume_ms)
                 t_open = time.perf_counter()
                 self.state.now_playing = NowPlaying(imdb, kind, video, name, "kodi", chosen.url + extra, runtime,
@@ -862,6 +867,20 @@ class Agent:
             log.warning("after %s ended: %s", np.video_id, type(e).__name__)
             await self.notify("Couldn't start the next episode")
             await self._home_unless_playing()
+
+    async def _free_kodi(self, pid: int):
+        """What Kodi plays is stopped, and its player gone, before another file opens. Opened over a playing file,
+        this TV's video decoder isn't free yet ("InstanceGuard locked" in Kodi's log): the new file plays without a
+        picture, a seek in it runs to the end, or Kodi hangs (found 2026-10-23)."""
+        try:
+            await self.kodi.stop(pid)
+        except (KodiError, httpx.HTTPError) as e:
+            log.info("stopping Kodi before the next file: %s", e)
+        for _ in range(20):
+            if await self._kodi_player() is None:
+                break
+            await asyncio.sleep(0.25)
+        await asyncio.sleep(KODI_FREE)
 
     async def _restart_stuck_kodi(self, np: NowPlaying) -> bool:
         """A file that stopped at 0:00 right after opening: when Kodi's log has nothing since the open, Kodi is

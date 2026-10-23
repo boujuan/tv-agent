@@ -16,6 +16,10 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   the phone and shown to the panel.
 
 ### Fixed
+- Playing a file while another played in Kodi could give sound without a picture, a jump that ran to the end of
+  the episode, or a Kodi that took files without playing them. On this TV the old file's video decoder isn't let go
+  in time ("InstanceGuard locked" in Kodi's log), Dolby Vision or not. Kodi's file is now stopped, and its player
+  gone, before the next one opens (about 1.5 s more when switching).
 - A play that did nothing and went back to Home: Kodi's player can hang inside the TV's Dolby Vision decoder while
   opening a 4K file, and from then on takes every file without playing it until Kodi is restarted (its log stops
   mid-line). A file that stops at 0:00 within 45 s of opening, with nothing in Kodi's log since, now gets Kodi

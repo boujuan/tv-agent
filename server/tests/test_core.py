@@ -1627,3 +1627,62 @@ def test_a_stuck_kodi_is_restarted_and_the_file_opened_again_once():
     assert not restarted and "replay" not in did
     assert not asyncio.run(run(log_quiet_s=60, again=False))[0]     # the retry itself isn't retried
     assert not asyncio.run(run(log_quiet_s=600, opened_ago=300))[0]     # a stop long after the open: not this
+
+
+def test_a_file_opens_in_kodi_only_after_the_playing_one_has_let_go(monkeypatch):
+    """Opened over a playing file, this TV's decoder isn't free yet ("InstanceGuard locked"): no picture, seeks
+    running to the end. Kodi is stopped first, and the next file opens once its player is gone."""
+    import asyncio
+    import types
+    from tv_agent import agent as agent_mod
+    from tv_agent.agent import Agent
+    from tv_agent.stremio import streams as S
+
+    async def run():
+        a = Agent.__new__(Agent)
+        did, players = [], [1, 1, None]           # Kodi's player: there, still there, gone
+
+        async def nothing(*args, **kw):
+            return None
+
+        async def ready():
+            return True
+
+        async def found(kind, video, meta):
+            return [S.Stream("AIOStreams", "https://x/1", "n", "", "f.mkv", 0, library=True)]
+
+        async def tv(fn, *args):
+            return ""
+
+        async def player():
+            return players.pop(0) if players else None
+
+        async def stop(pid):
+            did.append(("stop", pid))
+
+        async def open_(url, resume_ms=0):
+            did.append(("open", url))
+
+        async def position(pid):
+            return 168_000, 1_277_000, 1
+        real_sleep = asyncio.sleep
+
+        async def sleep(s):
+            did.append(("wait", s))
+            await real_sleep(0)
+        monkeypatch.setattr(agent_mod.asyncio, "sleep", sleep)
+        a.account, a.dry_run, a.notify, a.tv, a.state = object(), False, nothing, tv, agent_mod.State()
+        a.cfg = types.SimpleNamespace(player="kodi", probe_streams=False, auto_skip=False)
+        a._start_kodi, a.streams_for, a._kodi_player = ready, found, player
+        a.track_plan = lambda meta: languages.TrackPlan("eng", None)
+        a.kodi = types.SimpleNamespace(prefer=nothing, stop=stop, open=open_, position=position)
+        a._progress, a._again, a._starting = None, None, asyncio.Lock()
+        a._replace_session = lambda video, resume_ms: resume_ms
+        a._set_tracks, a._started, a.timings = nothing, lambda *args: None, None
+        a.state.timings = types.SimpleNamespace(add=lambda *args: None)
+        out = await Agent.play(a, "tt1", "movie", "X", "tt1", "X", {})
+        return out, did
+
+    out, did = asyncio.run(run())
+    assert out.ok and did[0] == ("stop", 1)
+    assert did.index(("wait", agent_mod.KODI_FREE)) < did.index(("open", "https://x/1"))
