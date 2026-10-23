@@ -90,7 +90,8 @@ whole recording instead).
   ("Better Console" → "Better Call Saul", "este remedio" → "Stremio"). AssemblyAI Universal-3.6 Pro is listed
   first: on 30 real commands it heard 27 right with the hint and 30 with the vocabulary, ~0.26 s, ~$0.0002 each,
   and nothing on silence (Voxtral makes up sentences there).
-- `GET /v1/pipeline` shows them; `POST` changes them.
+- `GET /v1/pipeline` shows them; `POST` changes them. Your library's titles are read when the agent starts, so the
+  first command after a restart has them too.
 
 ### Changed
 - Play, pause and stop go to the app on screen: "play" while YouTube was in front brought Kodi up and resumed it.

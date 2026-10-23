@@ -944,6 +944,9 @@ async def serve(cfg: Config):
     svc = Service(cfg)
     if cfg.stt_where != "hosted" or not cfg.secret("openrouter_api_key"):
         await svc.local_stt()               # hosted only: loaded if ever needed, ~1 GB of memory saved
+    if cfg.stt_vocabulary_library:          # the first command's vocabulary has your titles too, not only the apps
+        svc._library_names_at = time.monotonic()
+        asyncio.create_task(svc._refresh_library_names())
     try:
         await svc.agent.restore()
         asyncio.create_task(svc.agent.warm())
