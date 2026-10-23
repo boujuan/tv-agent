@@ -14,7 +14,10 @@ d1_url = "http://127.0.0.1:8091"
 kodi_port = 8080
 kodi_user = "kodi"
 
-player = "kodi"            # "just" for Just Player (simpler on screen; fewer controls), "kodi" for full control
+player = "kodi"            # "tvplayer" for TV Agent Player (github.com/boujuan/tv-agent-player: fastest, exact jumps,
+                           # tracks by name, add-on subtitles; `tv-agent tv install` + `tv-agent tv pair`),
+                           # "kodi" for Kodi, "just" for Just Player (simpler; fewer controls)
+# player_port = 8770       # TV Agent Player connects here (TLS with the phones' certificate, its own token)
 max_height = 2160          # largest resolution to pick
 max_mbps = 60.0            # skip files whose bitrate the TV's 100 Mbit/s port can't carry; 0: no limit
 probe_streams = true       # check a debrid link answers before handing it to Kodi; false while the TV uses a VPN

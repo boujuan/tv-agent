@@ -175,7 +175,8 @@ def render(info: dict | None) -> str:
                   f"{agent_stt.HOSTED.get(agent['stt_hosted_model'], agent['stt_hosted_model'])}<br>"
                   f"Decision model: {agent['d1_where']} · {html.escape(agent['d1_model'].rsplit('/', 1)[-1])} · "
                   f"hosted {agent['hosted_d1_model']}<br>LLM: {agent['llm_model']} · player: {agent['player']}")
-        players = [f"{n} {tv[k]['version']}" for k, n in (("kodi", "Kodi"), ("just", "Just Player"))
+        players = [f"{n} {tv[k]['version']}" for k, n in (("tvplayer", "TV Agent Player"), ("kodi", "Kodi"),
+                                                             ("just", "Just Player"))
                    if tv.get(k, {}).get("installed")]
         if players:
             models += f"<br>On the TV: {', '.join(players)}"

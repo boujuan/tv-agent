@@ -12,7 +12,7 @@ class NowPlaying:
     kind: str                 # "movie" or "series"
     video_id: str             # the movie id, or tt…:season:episode
     name: str
-    player: str = "kodi"      # "kodi" or "just"
+    player: str = "kodi"      # "tvplayer", "kodi" or "just"
     url: str = field(default="", repr=False)   # the debrid link (secret; memory only), to reopen it at a time
     runtime_ms: int = 0       # Cinemeta's runtime, for Just Player (its session doesn't give a duration)
     started: float = field(default_factory=time.time)

@@ -47,12 +47,28 @@ intro", "eso está mal". A clean-up layer turns the Spanish into the English the
 Anything it doesn't understand shows "Didn't get that: …" and does nothing. While the pill listens, the volume
 is halved (Kodi's own volume when Kodi plays, else the TV's) and comes back afterwards; nothing is paused.
 
-## Player: Kodi (default) or Just Player
+## Player: TV Agent Player, Kodi or Just Player
 
-`player = "kodi"` or `player = "just"` in `~/.config/tv-agent/config.toml` (or the panel's Settings). Kodi is the
-default: it's the only player the laptop can fully drive, including subtitles from your Stremio subtitle addons
-(why: [research of 2026-10-22](../docs/research-2026-10-22.md)). When Kodi isn't running, it's started while the
-stream is still being looked up.
+`player = "tvplayer"`, `"kodi"` (the default) or `"just"` in `~/.config/tv-agent/config.toml` (or the panel's
+Settings). Whichever it is, it's brought up while the stream is still being looked up.
+
+**TV Agent Player** ([boujuan/tv-agent-player](https://github.com/boujuan/tv-agent-player)) is a Media3 player
+built for this TV and this agent: an app of its own on the TV that connects to the agent (`player_port`, 8770, TLS
+with the phones' certificate, which it pins; its own `player_token`) and is driven over that connection. Install it
+with `tv-agent tv install tv-agent-player-<version>.apk` (it's also compiled ahead of time and paired); `tv-agent tv
+pair` pairs it again. Measured on the TV (its DESIGN.md): the first frame 1.3 s after the command (Just Player 2.9 s,
+Kodi 2.4 s warm), the next episode in binge mode 0.1 s (opened in the background 2.5 minutes before the end), jumps
+of ±10-30 s 0.1 s from what's in memory, 105-204 MB while playing a WEB-DL (Kodi 277 MB) and nothing resident between
+plays.
+
+| | TV Agent Player | Kodi |
+|---|---|---|
+| A new title or episode | Loads in place in the open player: no relaunch, no home screen in between | Opened over the playing one, after its decoder is let go (2 s) |
+| Jumps, skips, intros | Exact, in place, also in Dolby Vision; ±N s at the nearest keyframe, fast commands added up | Exact, but a Dolby Vision file is reopened at the time (its decoder's flush fails on this TV) |
+| Audio and subtitles | Your rule applied in the player's own first choice, before the first frame: commentary never, Simplified or Traditional Chinese by name, Castilian first, the file's main track; with subtitles off, a forced track in the audio's language still shows. Add-on subtitles drawn by the player, no rebuffering | Your rule set after the start, rechecked 8 s later; add-on subtitles loaded by Kodi |
+| What it tells the agent | State, position every second, tracks, decoder and HDR, sound output, errors, the exact position it closed at: nothing is polled | Polled over its API |
+| While you speak | Its own volume lowered: no volume bar, no key presses | Kodi's volume |
+| A file that fails to start | The next copy from your addons takes over where it was | Kodi restarted if it's stuck |
 
 | | Just Player 0.217 (`com.brouken.player`) | Kodi 21.2 |
 |---|---|---|
@@ -239,7 +255,7 @@ Localhost (127.0.0.1:8766), for the panel, the CLI and the MCP server, same toke
 | `GET /v1/tv/status`; `POST /v1/tv/speedtest`, `/diagnose`, `/reconnect` | the TV, its network and the ADB link |
 | `POST /v1/tv/key` `{"key"}`; `GET /v1/tv/screenshot` | a key from a fixed list; the screen as PNG |
 | `GET /v1/now-playing/link`; `POST /v1/tv/play-link` `{"url"}` | the stream the agent plays; play any http(s) link |
-| `GET /v1/tv/packages` | the TV app, Kodi and Just Player on the TV: installed, version, enabled; the app's APK SHA-256 |
+| `GET /v1/tv/packages` | the TV app, TV Agent Player, Kodi and Just Player on the TV: installed, version, enabled; the app's APK SHA-256 |
 | `GET /v1/about` | this agent's version, Python, start time and the models it uses |
 | `GET /v1/now-playing` | the title, episode (name, poster), position, Kodi's audio and subtitle tracks, intro/recap/credits |
 | `POST /v1/now-playing/track` `{"audio": i}` / `{"subtitle": i \| null}` | one of Kodi's tracks by its index |
@@ -285,6 +301,9 @@ Tailscale address), for the [TV Agent phone app](https://github.com/boujuan/tv-a
   speech-to-text): OpenRouter and Liquid may keep it. `GET /v1/now-playing/link` returns the debrid link, on the
   local API only, and is never logged.
 - **Kodi** web control is plain HTTP on the LAN with a password, like ADB.
+- **TV Agent Player** gets the debrid link and its headers only inside its TLS connection to the agent (never on an
+  ADB command line, an intent or in logcat); it only talks to the certificate it was paired with, and the agent only
+  accepts it from the TV's address with its own token (`player_token` in `secrets.toml`, sent at pairing over ADB).
 - **Just Player** gets the debrid link on its `am start` command line (over ADB), and `ffprobe` gets it as an
   argument on this computer.
 - **ADB** must stay on for this (USB debugging, port 5555).
@@ -295,6 +314,7 @@ Tailscale address), for the [TV Agent phone app](https://github.com/boujuan/tv-a
 systemctl --user disable --now tv-agent llama-d1 && rm ~/.config/systemd/user/{tv-agent,llama-d1}.service
 tv-agent logout                                              # invalidates the Stremio auth key
 tv-agent tv shell pm uninstall com.boujuan.tvagent
+tv-agent tv shell pm uninstall com.boujuan.tvagent.player                 # TV Agent Player, if installed
 tv-agent tv shell settings put secure accessibility_captioning_enabled 0   # if a Just Player session was cut off
 # Remove "84:com.boujuan.tvagent" from your launcher's key mapping
 # On the TV: Kodi > Settings > Services > Control > HTTP off; Settings > Privacy > Microphone off (if wanted)

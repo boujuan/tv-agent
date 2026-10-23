@@ -19,7 +19,7 @@ from .actions import (Action, AutoSkip, Binge, ContinueWatching, FindScene, Help
                       OpenInStremio, Pick, PlayTitle, Recommend, Replay, Sequence, ShowList, Skip, Timer, Tracks,
                       Transport, Twitch, Unclear, Volume, Wrong, YouTube)
 from .commands import LEGEND, SECTIONS, TV_HINT
-from .config import CONFIG_DIR, Config, set_value
+from .config import CONFIG_DIR, Config, read_secret, set_value
 from .decide import rules as rules_mod
 from .decide import text as T
 from .decide.d1 import D1
@@ -30,9 +30,10 @@ from .stremio import search as title_search
 from .stremio.account import Account, Addon, now_iso
 from .stremio import library as library_mod
 from .stremio.library import Library
-from .tv import apps, justplayer, media
+from .tv import apps, justplayer, media, tvplayer
 from .tv.adb import Adb
 from .tv.kodi import Kodi, KodiError
+from .tv.tvplayer import TvPlayer
 
 log = logging.getLogger(__name__)
 SAY_RECEIVER = "com.boujuan.tvagent/.SayReceiver"
@@ -54,6 +55,9 @@ KODI_FREE = 2.0             # seconds after Kodi's player is gone before the nex
 # a new decoder holds nothing to flush. A picture lost anyway shows as Kodi logging decoder failures nonstop.
 PICTURE_EVERY = 15
 DECODER_FAILED = re.compile(r"dequeue(Output|Input)Buffer failed|Reset: flush failed")
+DUCK = 0.4                  # TV Agent Player's own volume while the pill listens
+SKIPS_WHERE = "Skipping works in TV Agent Player and Kodi, for what the agent started"
+PRELOAD_BEFORE = 150_000    # the next episode opens in the background this long before the end (binge)
 LIST_SIZE = 6                # rows that fit the TV app's list
 STARTS = {"play_title", "continue_watching", "next_episode", "pick"}     # actions that start playback
 LIST_TTL = 300              # "number 2" refers to a list shown in the last 5 minutes
@@ -151,6 +155,9 @@ class Agent:
         self.account = Account(self.http, key) if key else None
         self.library = Library(self.account)
         self.kodi = Kodi(self.http, self.adb, cfg.kodi_port, cfg.kodi_user, cfg.secret("kodi_password"))
+        # TV Agent Player connects to this agent (server.py listens for it); its token is read at each connection
+        self.tvplayer = TvPlayer(lambda: read_secret("player_token"), self._tv_addresses, __version__)
+        self.tvplayer.listeners.append(self._player_event)
         self.d1 = D1(self.http, cfg.d1_url, cfg.secret("liquid_api_key"), cfg.hosted_d1_model, cfg.d1_where,
                      cfg.secret("openrouter_api_key"))
         self.rules, self.rules_error = rules_mod.load_safe()
@@ -184,7 +191,10 @@ class Agent:
         self._episode_cues: dict[tuple[str, str], list[tuple[int, str]]] = {}   # (video, lang): subtitles by id
         self._verify_task: asyncio.Task | None = None
         self._duck: asyncio.Task | None = None
-        self._ducked: tuple[str, int] | None = None   # ("kodi" or "tv", the volume before listening)
+        self._ducked: tuple[str, int] | None = None   # ("kodi", "tvplayer" or "tv", the volume before listening)
+        self._preload_task: asyncio.Task | None = None
+        self._preloaded: tuple[str, str, str] | None = None   # (video id, stream url, link) open in TV Agent Player
+        self._fallback: tuple[NowPlaying, list[streams.Stream], tuple, float] | None = None   # another file, if it fails
 
     async def close(self):
         if self._progress and not self._progress.done():
@@ -199,6 +209,33 @@ class Agent:
     async def tv(self, fn, *args):
         """Run a blocking TV call (adb_shell is synchronous) off the event loop."""
         return await asyncio.to_thread(fn, self.adb, *args)
+
+    def _tv_addresses(self) -> set[str]:
+        return set(self.cfg.tv_hosts) | ({self.adb.host} if self.adb.host else set())
+
+    def _ctl(self, pid: int | str) -> Kodi | TvPlayer:
+        """The player a player id belongs to: TV Agent Player's (tvplayer.PID) or Kodi's (a number). Both have the
+        same surface (kodi.py)."""
+        return self.tvplayer if pid == tvplayer.PID else self.kodi
+
+    def _player_event(self, msg: dict):
+        """What TV Agent Player tells about the file this agent opened in it: the exact position it closed at (the
+        progress write uses it), the remote's next/previous, and a file that fails soon after opening (another copy
+        takes over)."""
+        np, t = self.state.now_playing, msg.get("t")
+        if not np or np.player != "tvplayer":
+            return
+        if t == "key" and msg.get("key") in ("next", "previous"):
+            asyncio.create_task(self._next_episode(NextEpisode(offset=1 if msg["key"] == "next" else -1)))
+            return
+        if msg.get("item") != self.tvplayer.item:
+            return
+        if t == "closed":
+            np.stopped_at, np.stopped_mono = int(msg.get("pos") or 0), time.monotonic()
+        elif t == "error" and msg.get("fatal"):
+            log.warning("TV Agent Player: %s%s playing %s", msg.get("code"), f" (HTTP {msg['http']})" if msg.get("http")
+                        else "", np.video_id)
+            asyncio.create_task(self._try_another(np, msg))
 
     async def _wake(self):
         """End the screensaver. A command from the laptop (panel, MCP, CLI) presses no key, and an app started
@@ -513,16 +550,23 @@ class Agent:
 
     async def play(self, imdb: str, kind: str, name: str, video: str, label: str, meta: dict,
                    resume_ms: int = 0, prepared: streams.Stream | None = None, jump: bool = False) -> Outcome:
-        """Pick a cached debrid stream from your addons, start it in the player (Kodi or Just Player), then follow
-        its progress. `jump`: the same file reopened at resume_ms exactly (a jump in it), without a message."""
+        """Pick a cached debrid stream from your addons, start it in the player (TV Agent Player, Kodi or Just
+        Player), then follow its progress. `jump`: the same file reopened at resume_ms exactly (a jump in it), without
+        a message."""
         if not self.account:
             return Outcome(False, "Stremio isn't signed in (tv-agent setup stremio)")
         t0 = time.perf_counter()
         if not jump:
             asyncio.create_task(self.notify(f"Finding {label}…"))
-        kodi_ready = None
+        kodi_ready = player_ready = kodi_open = None
         if self.cfg.player == "kodi" and not self.dry_run:
             kodi_ready = asyncio.create_task(self._start_kodi())   # Kodi gets ready (or cold-starts) during the search
+        elif self.cfg.player == "tvplayer" and not self.dry_run:
+            # The player's screen comes up and connects during the search (~0.3 s), so the link goes to a ready player.
+            # Whether Kodi plays too (it's stopped first: one player at a time) is asked meanwhile as well: a Kodi
+            # frozen in the background answers only by its 1.5 s timeout.
+            player_ready = asyncio.create_task(self.tvplayer.ready(self.adb))
+            kodi_open = asyncio.create_task(self._kodi_player())
         if prepared is not None:            # found and checked while the previous episode played
             found = [prepared]
         else:
@@ -530,14 +574,17 @@ class Agent:
         if self.cfg.player == "just":
             found = [s for s in found if not s.headers]     # Just Player can't send an addon's extra headers
         if not found:
-            if kodi_ready is not None:
-                asyncio.create_task(self._home_unless_playing(kodi_ready))
+            if kodi_ready is not None or player_ready is not None:
+                asyncio.create_task(self._home_unless_playing(kodi_ready or player_ready))
             return Outcome(False, f"No playable stream for {label}")
         t_streams = time.perf_counter()
-        chosen, link, checking = found[0], found[0].url, None
+        # The next episode, already open in TV Agent Player (preload): its link as it was opened, nothing to check.
+        preloaded = (self._preloaded[2] if self.cfg.player == "tvplayer" and prepared is not None and self._preloaded
+                     and self._preloaded[:2] == (video, prepared.url) else None)
+        chosen, link, checking = found[0], preloaded or found[0].url, None
         verifying = (self._verify(found[0], video, meta) if kind == "series" and self.cfg.check_episodes
                      and not self.dry_run else None)
-        if self.cfg.probe_streams:      # runs while Kodi gets ready; also finds where the link leads
+        if self.cfg.probe_streams and not preloaded:      # runs while the player gets ready; finds where the link leads
             checking = asyncio.create_task(self._first_playable(found[:3]))
         # A file in your debrid library, or one checked while the last episode played, is opened even if the
         # check fails now (it may be a passing hiccup); anything else needs an answer.
@@ -559,7 +606,51 @@ class Agent:
                                  f"{chosen.filename or chosen.name}" + (f" from {_clock(resume_ms)}" if resume_ms else ""))
         runtime = (_runtime_min(meta) or 0) * 60_000
         plan = self.track_plan(meta)
-        if self.cfg.player == "just":
+        if self.cfg.player == "tvplayer":
+            if not await checked():              # what was playing carries on, followed as before
+                await self._home_unless_playing(player_ready)
+                return Outcome(False, f"The links for {label} didn't answer")
+            if not (player_ready is not None and await player_ready) and not await self.tvplayer.ready(self.adb):
+                return Outcome(False, "TV Agent Player didn't open: is it installed and paired (tv-agent tv pair)?")
+            t_ready = time.perf_counter()
+            if verifying is not None and verifying.done() and chosen is found[0] and not preloaded:
+                chosen, link, verifying = self._known_right(verifying, chosen, link, found, video, meta)
+            async with self._starting:
+                if self.tvplayer.now() is not None:
+                    await self._note_position(tvplayer.PID)    # a replay of this episode starts where it is
+                resume_ms = self._replace_session(video, resume_ms, exact=jump)
+                addon_subs = None
+                if plan.subtitles is not None:   # asked now for the file chosen, added if the file lacks the language
+                    addon_subs = asyncio.create_task(subtitles.fetch(self.http, await self.addons(), kind, video,
+                                                                     chosen))
+                # One player at a time: Kodi stopped if it plays. With the player's screen already up (binge, a jump,
+                # the next title) Kodi can't be in front, so that's done after the file opens instead of before
+                if kodi_open is not None and not self.tvplayer.up and (kodi := await kodi_open) is not None:
+                    await self.kodi.stop(kodi)
+                await self.tvplayer.open(link, resume_ms, item=video, title=label, headers=chosen.headers or None,
+                                         audio=plan.audio, subs=plan.subtitles)
+                if kodi_open is not None and not kodi_open.done():
+                    asyncio.create_task(self._stop_kodi_when(kodi_open))
+                t_open = time.perf_counter()
+                self.state.now_playing = NowPlaying(imdb, kind, video, name, "tvplayer", chosen.url, runtime,
+                                                    filename=chosen.filename, size=chosen.size,
+                                                    video_hash=chosen.video_hash, dolby_vision=chosen.dolby_vision)
+                self._fallback = (self.state.now_playing, [s for s in found if s is not chosen][:2],
+                                  (imdb, kind, name, video, label, meta), time.monotonic())
+                if kind == "series" and self.cfg.check_episodes:
+                    self._verify_task = asyncio.create_task(self._switch_if_wrong(
+                        self.state.now_playing, chosen, verifying if chosen is found[0] else None,
+                        (imdb, kind, name, video, label, meta)))
+                self._tracks_task = asyncio.create_task(self._player_subs(plan, addon_subs, label))
+                if kind == "series" and self.cfg.auto_skip:
+                    self._start_skip_watch(self.state.now_playing)
+                self._started(imdb, name, kind, video, meta)
+            for stage, a, b in (("streams", t0, t_streams), ("player", t_streams, t_ready), ("open", t_ready, t_open)):
+                self.state.timings.add(f"start:{stage}", (b - a) * 1000)
+            log.info("start %s: streams %.0f ms, then the link checked and the player ready %.0f ms, open %.0f ms%s",
+                     video, (t_streams - t0) * 1000, (t_ready - t_streams) * 1000, (t_open - t_ready) * 1000,
+                     " (preloaded)" if preloaded else "")
+        elif self.cfg.player == "just":
             if not await checked():
                 return Outcome(False, f"The links for {label} didn't answer")
             async with self._starting:
@@ -648,7 +739,8 @@ class Agent:
             resume_ms = old.stopped_at
         self._stop_following()
         self._user_stopped, self._after_this = False, None
-        for task in (self._prefetch, self._tracks_task, self._skip_task, self._picture_task, self._verify_task):
+        for task in (self._prefetch, self._tracks_task, self._skip_task, self._picture_task, self._verify_task,
+                     self._preload_task):
             if task and not task.done() and task is not asyncio.current_task():
                 task.cancel()
         return resume_ms
@@ -660,12 +752,12 @@ class Agent:
         if kind == "series":
             self._prefetch = asyncio.create_task(self._prepare_next(imdb, name, video, meta))
 
-    async def _home_unless_playing(self, kodi_ready: asyncio.Task | None = None):
-        """Kodi was brought up for a start that didn't happen: back to Home, unless it's playing something."""
-        if kodi_ready is not None:
-            await asyncio.gather(kodi_ready, return_exceptions=True)
+    async def _home_unless_playing(self, ready: asyncio.Task | None = None):
+        """The player was brought up for a start that didn't happen: back to Home, unless it's playing something."""
+        if ready is not None:
+            await asyncio.gather(ready, return_exceptions=True)
         try:
-            if await self._kodi_player() is None:
+            if await self._player_id() is None:
                 await self.tv(apps.home)
         except Exception as e:
             log.info("back to Home: %s", type(e).__name__)
@@ -739,7 +831,16 @@ class Agent:
         np = NowPlaying(**{k: data[k] for k in ("imdb_id", "kind", "video_id", "name", "player", "url",
                                                  "runtime_ms", "started") if k in data})
         self.state.now_playing = np
-        playing = (await self._just_status()) if np.player == "just" else (await self._kodi_player())
+        if np.player == "tvplayer":
+            self.tvplayer.adopt(np.video_id)     # the player reconnects by itself and says what it has open
+            try:
+                await asyncio.wait_for(self.tvplayer.connected.wait(), 15)
+                await asyncio.sleep(1.5)
+            except asyncio.TimeoutError:
+                pass
+            playing = self.tvplayer.now()
+        else:
+            playing = (await self._just_status()) if np.player == "just" else (await self._kodi_player())
         if playing is None:
             self.state.now_playing = None
             return
@@ -770,13 +871,17 @@ class Agent:
                 return None
             return st[1], np.runtime_ms, st[2]
 
+        async def player_poll():                 # what TV Agent Player last said: no TV round trip
+            return self.tvplayer.now()
+
         self._stop_following()                   # never two followers
         stop = self._follow_stop = asyncio.Event()
 
         async def follow():
             try:
                 videos = await self.stremio_videos(np.imdb_id) if np.kind == "series" else None
-                how, last, duration = await progress.track(just_poll if np.player == "just" else kodi_poll,
+                poll = {"just": just_poll, "tvplayer": player_poll}.get(np.player, kodi_poll)
+                how, last, duration = await progress.track(poll,
                                                            self.account, self.library, np, meta,
                                                            videos=videos, stop=stop)
                 log.info("%s %s at %s", np.video_id, how, _clock(last or 0))
@@ -803,6 +908,13 @@ class Agent:
             return None
         return st if st and st[0] in ("PLAYING", "PAUSED", "BUFFERING") else None
 
+    async def _player_id(self) -> int | str | None:
+        """The player with something open, to pass to _ctl(): TV Agent Player (tvplayer.PID, known from what it
+        reports, without asking the TV) or Kodi (its video player id); None when neither plays."""
+        if self.tvplayer.now() is not None:
+            return tvplayer.PID
+        return await self._kodi_player()
+
     async def _kodi_player(self) -> int | None:
         """Kodi's video player id when Kodi is playing something, else None (Kodi off or not set up)."""
         if not self.kodi.auth or self.dry_run:
@@ -815,12 +927,16 @@ class Agent:
     # ---- while you speak: the TV quieter ----
 
     async def duck(self):
-        """Half the volume while the pill listens (the TV's sound reaches the remote's microphone): Kodi's own
-        volume when it plays (no volume bar on screen), else the TV's while another app plays something."""
+        """Half the volume while the pill listens (the TV's sound reaches the remote's microphone): the player's own
+        volume when TV Agent Player or Kodi plays (no volume bar on screen), else the TV's while another app plays
+        something."""
         if self.dry_run or self._ducked:
             return
         try:
-            if (pid := await self._kodi_player()) is not None:
+            if self.tvplayer.now() is not None:
+                await self.tvplayer.volume(DUCK)
+                self._ducked = ("tvplayer", 1)
+            elif (pid := await self._kodi_player()) is not None:
                 vol = (await self.kodi.call("Application.GetProperties", {"properties": ["volume"]}))["volume"]
                 await self.kodi.call("Application.SetVolume", {"volume": max(1, vol // 2)})
                 self._ducked = ("kodi", vol)
@@ -844,7 +960,9 @@ class Agent:
             return
         where, level = ducked
         try:
-            if where == "kodi":
+            if where == "tvplayer":
+                await self.tvplayer.volume(1.0)
+            elif where == "kodi":
                 await self.kodi.call("Application.SetVolume", {"volume": level})
             elif action is not None and action.type == "volume":
                 self.state.volume_base = level
@@ -880,10 +998,89 @@ class Agent:
             self._next_up = (nxt["id"], _episode_label(name, nxt), chosen, time.monotonic()) if chosen else None
             if chosen:
                 log.info("next up: %s (%s)", self._next_up[1], chosen.filename or chosen.name)
+                np = self.state.now_playing
+                if np and np.player == "tvplayer" and np.video_id == video and self.cfg.binge:
+                    self._preload_task = asyncio.create_task(self._preload_next(np, nxt["id"], chosen, meta))
         except asyncio.CancelledError:
             raise
         except Exception as e:
             log.info("getting the next episode ready: %s", type(e).__name__)
+
+    async def _preload_next(self, np: NowPlaying, video: str, s: streams.Stream, meta: dict):
+        """Binge mode in TV Agent Player: the next episode opened in the background (its header, seek index and first
+        seconds) PRELOAD_BEFORE the end of this one, so it starts at once (0.1 s measured against ~1.3 s)."""
+        try:
+            while True:
+                await asyncio.sleep(10)
+                now = self.tvplayer.now()
+                if self.state.now_playing is not np or now is None:
+                    return
+                if now[1] and now[0] >= now[1] - PRELOAD_BEFORE:
+                    break
+            link = await streams.resolve(self.http, s) or s.url
+            plan = self.track_plan(meta)
+            await self.tvplayer.preload(link, item=video, headers=s.headers or None, audio=plan.audio,
+                                        subs=plan.subtitles)
+            self._preloaded = (video, s.url, link)
+            log.info("next episode %s preloaded in the player", video)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.info("preloading the next episode: %s", type(e).__name__)
+
+    async def _player_subs(self, plan: languages.TrackPlan, addon_subs: asyncio.Task | None, label: str):
+        """TV Agent Player chose the file's own audio and subtitles by the plan before its first frame. What's left:
+        subtitles from your addons when the first of your languages that the file or an addon has isn't in the file."""
+        if plan.subtitles is None or addon_subs is None:
+            return
+        try:
+            item = self.tvplayer.item
+            if "tracks" not in self.tvplayer.last and await self.tvplayer.wait_for(
+                    lambda m: m.get("t") == "tracks" and m.get("item") == item, 30) is None:
+                return
+            info = await self.tvplayer.tracks()
+            inside = [t for t in info["subtitles"] if not t.get("isforced") and "(external)" not in t.get("name", "")]
+            have = next((i for i, lang in enumerate(plan.subtitles) if any(languages.matches(t, lang) for t in inside)),
+                        len(plan.subtitles))
+            wanted = plan.subtitles[:have]           # only languages you put before the file's own first one
+            if not wanted:
+                return
+            offered = subtitles.choose(await asyncio.wait_for(asyncio.shield(addon_subs), 15), wanted)
+            if not offered:
+                if have == len(plan.subtitles):
+                    await self.notify("No subtitles found")
+                return
+            lang, sub = offered[0]
+            await self.tvplayer.add_subtitle(tvplayer.PID, sub.url, lang=lang,
+                                             label=f"{languages.name(lang)} ({sub.addon})")
+            log.info("added %s subtitles from %s for %s", lang, sub.addon, label)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:      # slow or failing addons, a file that won't parse: the file's own subtitles only
+            log.info("addon subtitles for %s: %s", label, type(e).__name__)
+
+    async def _stop_kodi_when(self, kodi_open: asyncio.Task):
+        """Kodi stopped once the check started with the search says it plays (TV Agent Player has the screen)."""
+        try:
+            if (kodi := await kodi_open) is not None:
+                await self.kodi.stop(kodi)
+        except Exception as e:
+            log.info("stopping Kodi: %s", type(e).__name__)
+
+    async def _try_another(self, np: NowPlaying, error: dict):
+        """TV Agent Player couldn't play a file soon after it opened (a dead link, something it can't read): the next
+        copy from your addons takes over where it was, up to twice."""
+        fb, self._fallback = self._fallback, None
+        if not fb or fb[0] is not np or self.state.now_playing is not np or not fb[1] or time.monotonic() - fb[3] > 120:
+            await self.notify("Couldn't play this file")
+            return
+        alts, what = fb[1], fb[2]
+        imdb, kind, name, video, label, meta = what
+        log.info("%s didn't play (%s): trying %s", video, error.get("code"), alts[0].filename or alts[0].name)
+        await self.notify("That file didn't play: trying another copy")
+        out = await self.play(imdb, kind, name, video, label, meta, np.stopped_at or 0, prepared=alts[0], jump=True)
+        if out.ok and len(alts) > 1 and (now := self.state.now_playing) is not np:
+            self._fallback = (now, alts[1:], what, time.monotonic())
 
     async def _ended(self, np: NowPlaying, how: str, last: int | None, duration: int):
         """Playback stopped: at the very end of an episode the next one starts (binge mode, unless a sleep timer
@@ -1038,8 +1235,8 @@ class Agent:
                                   "there's no other copy")
                 return
             at = 0
-            if np.player == "kodi" and (pid := await self._kodi_player()) is not None:
-                at = (await self.kodi.position(pid))[0]
+            if np.player in ("kodi", "tvplayer") and (pid := await self._player_id()) is not None:
+                at = (await self._ctl(pid).position(pid))[0]
             elif (st := await self._just_status()) is not None:
                 at = st[1]
             log.info("%s is %s, not %s: switching to %s at %s", chosen.filename, verdict.actual, video,
@@ -1097,12 +1294,12 @@ class Agent:
         await self.notify(out.say)
         return True
 
-    async def _note_position(self, pid: int):
-        """Where Kodi is, read just before stopping it: the progress write and a "continue" right after use it."""
+    async def _note_position(self, pid: int | str):
+        """Where the player is, read just before stopping it: the progress write and a "continue" right after use it."""
         np = self.state.now_playing
-        if np and np.player == "kodi" and self._progress and not self._progress.done():   # our file is on
+        if np and np.player in ("kodi", "tvplayer") and self._progress and not self._progress.done():   # our file is on
             try:
-                np.stopped_at = (await self.kodi.position(pid))[0]
+                np.stopped_at = (await self._ctl(pid).position(pid))[0]
                 np.stopped_mono = time.monotonic()
             except Exception as e:
                 log.info("position before stopping: %s", type(e).__name__)
@@ -1135,9 +1332,9 @@ class Agent:
         await asyncio.sleep(seconds)
         self._user_stopped = True
         try:
-            if (pid := await self._kodi_player()) is not None:
+            if (pid := await self._player_id()) is not None:
                 await self._note_position(pid)
-                await self.kodi.stop(pid)
+                await self._ctl(pid).stop(pid)
             elif await self._just_status() is not None:
                 await self.tv(media.dispatch, "stop")
         except Exception as e:                  # the TV goes off (or Home) all the same
@@ -1150,10 +1347,11 @@ class Agent:
     # ---- subtitles and audio on demand ----
 
     async def _tracks(self, a: Tracks) -> Outcome:
-        pid = await self._kodi_player()
+        pid = await self._player_id()
+        ctl = self._ctl(pid)
         if a.subtitles == "toggle":           # "subtitles": off if they're on, else on
             if pid is not None:
-                on = bool((await self.kodi.tracks(pid)).get("subtitleenabled"))
+                on = bool((await ctl.tracks(pid)).get("subtitleenabled"))
             else:
                 on = await self._just_status() is not None and await self.tv(justplayer.captions_on)
             a = a.model_copy(update={"subtitles": "off" if on else "on"})
@@ -1163,8 +1361,8 @@ class Agent:
                 lang = a.subtitles if a.subtitles not in ("on", "off") else (self.cfg.subtitle_languages or ["eng"])[0]
                 await self.tv(justplayer.captions, on, languages.android_locale(lang) if on else None)
                 return Outcome(True, "Subtitles on (from the next start)" if on else "Subtitles off")
-            return Outcome(False, "Subtitles and audio language can be changed in Kodi")
-        info = await self.kodi.tracks(pid)
+            return Outcome(False, "Subtitles and audio language can be changed in TV Agent Player and Kodi")
+        info = await ctl.tracks(pid)
         said = []
         if a.audio:
             tracks = info.get("audiostreams") or []
@@ -1174,17 +1372,17 @@ class Agent:
                 track = languages.pick_audio(tracks, a.audio)
             if track is None:
                 return Outcome(False, f"No {languages.KODI_NAMES.get(a.audio, a.audio)} audio in this file")
-            await self.kodi.set_audio(pid, track["index"])
+            await ctl.set_audio(pid, track["index"])
             said.append(f"{languages.name(track.get('language')) or 'original'} audio")
         if a.subtitles == "off":
-            await self.kodi.set_subtitle(pid, None)
+            await ctl.set_subtitle(pid, None)
             said.append("subtitles off")
         elif a.subtitles:
             langs = self.cfg.subtitle_languages if a.subtitles == "on" else [a.subtitles]
             inside = [t for t in info.get("subtitles") or [] if not t.get("isforced")]
             sub = languages.pick_subtitle(inside, langs)
             if sub:
-                await self.kodi.set_subtitle(pid, sub["index"])
+                await ctl.set_subtitle(pid, sub["index"])
                 said.append(f"{languages.name(sub.get('language'))} subtitles")
             else:
                 np = self.state.now_playing
@@ -1196,26 +1394,28 @@ class Agent:
                 if not offered:
                     return Outcome(False, "No subtitles in that language")
                 lang, best = offered[0]
-                await self.kodi.add_subtitle(pid, best.url)
+                await ctl.add_subtitle(pid, best.url, **({"lang": lang, "label": f"{languages.name(lang)} ({best.addon})"}
+                                                         if pid == tvplayer.PID else {}))
                 said.append(f"{languages.name(lang)} subtitles from {best.addon}")
         text = ", ".join(said)
         return Outcome(True, text[:1].upper() + text[1:] if text else "OK")
 
     async def _replay(self, a: Replay) -> Outcome:
-        pid = await self._kodi_player()
+        pid = await self._player_id()
         if pid is None:
             return await self._transport(Transport(op="back", seconds=a.seconds))
-        was_on = bool((await self.kodi.tracks(pid)).get("subtitleenabled"))
-        await self.kodi.seek_by(pid, -a.seconds)
+        ctl = self._ctl(pid)
+        was_on = bool((await ctl.tracks(pid)).get("subtitleenabled"))
+        await ctl.seek_by(pid, -a.seconds)
         if not was_on and (await self._tracks(Tracks(subtitles="on"))).ok:
             asyncio.create_task(self._subtitles_off_later(pid, a.seconds + 8))
         return Outcome(True, f"Back {a.seconds} s" + ("" if was_on else " with subtitles for a moment"))
 
-    async def _subtitles_off_later(self, pid: int, seconds: float):
+    async def _subtitles_off_later(self, pid: int | str, seconds: float):
         await asyncio.sleep(seconds)
         try:
-            if await self._kodi_player() == pid:
-                await self.kodi.set_subtitle(pid, None)
+            if await self._player_id() == pid:
+                await self._ctl(pid).set_subtitle(pid, None)
         except Exception:
             pass
 
@@ -1325,8 +1525,8 @@ class Agent:
         return next((v for v in top if v["id"] == got), None)
 
     async def _continue_watching(self, a: ContinueWatching) -> Outcome:
-        if not a.title and (pid := await self._kodi_player()) is not None:
-            await self.kodi.play(pid, True)      # "carry on with the show" while Kodi has it open: just resume
+        if not a.title and (pid := await self._player_id()) is not None:
+            await self._ctl(pid).play(pid, True)  # "carry on with the show" while it's open: just resume
             return Outcome(True, "Resume")
         if not a.title and await self._just_status():
             await self.tv(media.dispatch, "resume")
@@ -1592,9 +1792,9 @@ class Agent:
                     pass
             return Outcome(True, f"{label}: {how}{when}")
         np = self.state.now_playing
-        pid = await self._kodi_player()
+        pid = await self._player_id()
         if pid is not None:
-            pos, total, _ = await self.kodi.position(pid)
+            pos, total, _ = await self._ctl(pid).position(pid)
             if np:
                 label = np.name + (f" · S{np.video_id.split(':')[1]}E{np.video_id.split(':')[2]}"
                                    if np.kind == "series" and np.video_id.count(":") == 2 else "")
@@ -1615,7 +1815,11 @@ class Agent:
         self._stop_following()                       # what was followed isn't what plays now
         self.state.now_playing = None                # nor its progress, binge or restore after a restart
         NOW_PLAYING_FILE.unlink(missing_ok=True)
-        if self.cfg.player == "kodi":
+        if self.cfg.player == "tvplayer":
+            if not await self.tvplayer.ready(self.adb):
+                return Outcome(False, "TV Agent Player didn't open: is it installed and paired (tv-agent tv pair)?")
+            await self.tvplayer.open(url, item="link", title="Link from the panel")
+        elif self.cfg.player == "kodi":
             await self.kodi.start()
             await self.kodi.open(url)
         else:
@@ -1649,10 +1853,10 @@ class Agent:
 
     async def _skip_when_it_comes(self, what: str) -> Outcome:
         """The intro or recap of what just started, skipped as it comes (it may be minutes in, or already past)."""
-        pid, np = await self._kodi_player(), self.state.now_playing
-        if pid is None or np is None or np.player != "kodi":
-            return Outcome(False, "Skipping works in Kodi, for what the agent started")
-        pos, total, _ = await self.kodi.position(pid)
+        pid, np = await self._player_id(), self.state.now_playing
+        if pid is None or np is None or np.player not in ("kodi", "tvplayer"):
+            return Outcome(False, SKIPS_WHERE)
+        pos, total, _ = await self._ctl(pid).position(pid)
         found = [seg for seg in await self.segments(np, total) if seg.kind == what]
         if not found:
             return Outcome(False, f"No {what} timestamps for this episode")
@@ -1665,8 +1869,9 @@ class Agent:
         loop = asyncio.get_running_loop()
         until = loop.time() + wait_s
         while loop.time() < until:
-            if (pid := await self._kodi_player()) is not None and (await self.kodi.position(pid))[1] > 0:
-                await asyncio.sleep(1.5)        # past Kodi's own jump to where you stopped
+            if (pid := await self._player_id()) is not None and (await self._ctl(pid).position(pid))[1] > 0:
+                if pid != tvplayer.PID:
+                    await asyncio.sleep(1.5)    # past Kodi's own jump to where you stopped
                 return
             if await self._just_status() is not None:
                 return
@@ -1778,11 +1983,12 @@ class Agent:
         return self._segments[key]
 
     async def _skip(self, a: Skip) -> Outcome:
-        pid = await self._kodi_player()
+        pid = await self._player_id()
         np = self.state.now_playing
-        if pid is None or np is None or np.player != "kodi":
-            return Outcome(False, "Skipping works in Kodi, for what the agent started")
-        pos, total, _ = await self.kodi.position(pid)
+        if pid is None or np is None or np.player not in ("kodi", "tvplayer"):
+            return Outcome(False, SKIPS_WHERE)
+        ctl = self._ctl(pid)
+        pos, total, _ = await ctl.position(pid)
         what = "intro" if a.what == "credits" and total and pos < total / 4 else a.what   # "the opening credits"
         found = await self.segments(np, total)
         if what == "credits":
@@ -1792,14 +1998,14 @@ class Agent:
                 return await self._next_episode(NextEpisode(offset=1))
             self._user_stopped = True
             await self._note_position(pid)
-            await self.kodi.stop(pid)
+            await ctl.stop(pid)
             await self.tv(apps.home)
             return Outcome(True, "Credits skipped")
         if seg := skips.around(found, what, pos):
-            await self.kodi.seek_to(pid, seg.end_ms)
+            await ctl.seek_to(pid, seg.end_ms)
             log.info("skip: %s %s %s-%s (%s)", np.video_id, what, _clock(seg.start_ms), _clock(seg.end_ms), seg.source)
             return Outcome(True, f"Skipped the {what}")
-        if await self._skip_chapter(what):
+        if pid != tvplayer.PID and await self._skip_chapter(what):
             return Outcome(True, f"Skipped the {what} (chapter)")
         if a.what == "credits":
             return Outcome(False, "The credits haven't started")
@@ -1828,7 +2034,7 @@ class Agent:
 
     async def _auto_skip(self, a: AutoSkip) -> Outcome:
         set_value(self.cfg, "auto_skip", a.on)
-        if a.on and (np := self.state.now_playing) and np.kind == "series" and np.player == "kodi":
+        if a.on and (np := self.state.now_playing) and np.kind == "series" and np.player in ("kodi", "tvplayer"):
             self._start_skip_watch(np)
         return Outcome(True, "Auto skip on: intros and recaps go by themselves when their timestamps are sure"
                        if a.on else "Auto skip off")
@@ -1843,21 +2049,21 @@ class Agent:
         that part too, sure or not, because it was asked for ("play The Bear and skip the intro")."""
         try:
             await sleep(4)                               # the file is open and moving
-            if (pid := await self._kodi_player()) is None:
+            if (pid := await self._player_id()) is None:
                 return
-            _, total, _ = await self.kodi.position(pid)
+            _, total, _ = await self._ctl(pid).position(pid)
             auto = ("intro", "recap") if self.cfg.auto_skip else ()
             todo = sorted((s for s in await self.segments(np, total)
                            if (s.sure and s.kind in auto) or s.kind == also), key=lambda s: s.start_ms)
             for seg in todo:
                 while True:
-                    if self.state.now_playing is not np or (pid := await self._kodi_player()) is None:
+                    if self.state.now_playing is not np or (pid := await self._player_id()) is None:
                         return
-                    pos, _, speed = await self.kodi.position(pid)
+                    pos, _, speed = await self._ctl(pid).position(pid)
                     if pos >= seg.end_ms - 3_000:
                         break                            # past it already (resumed later on, or skipped by hand)
                     if pos >= seg.start_ms:
-                        await self.kodi.seek_to(pid, seg.end_ms)
+                        await self._ctl(pid).seek_to(pid, seg.end_ms)
                         await self.notify(f"Skipped the {seg.kind}")
                         log.info("auto skip: %s %s %s-%s", np.video_id, seg.kind, _clock(seg.start_ms),
                                  _clock(seg.end_ms))
@@ -2010,12 +2216,16 @@ class Agent:
         return None
 
     async def _transport(self, a: Transport) -> Outcome:
+        if self.tvplayer.now() is not None:
+            # TV Agent Player has a file open, so it's on screen (it closes when another app comes to the front):
+            # no need to ask the TV which app is in front (~1 s)
+            return await self._controlled(a, tvplayer.PID)
         front, pid = await asyncio.gather(self.front_app(), self._kodi_player())
-        other = front not in (None, "home", KODI, justplayer.PACKAGE)     # another app is on screen: it gets the keys
+        other = front not in (None, "home", KODI, justplayer.PACKAGE, tvplayer.PACKAGE)   # another app gets the keys
         if other:
             log.info("%s for %s, the app in front", a.op, front)
             if a.op == "seek_to":
-                return Outcome(False, "Jumping to a time works in Kodi and Just Player only")
+                return Outcome(False, "Jumping to a time works in TV Agent Player, Kodi and Just Player only")
             await self.tv(media.dispatch, a.op)
             return Outcome(True, "Play/pause" if a.op == "toggle" else a.op.capitalize())
         if pid is not None and a.op in ("seek_to", "forward", "back") and (
@@ -2029,31 +2239,11 @@ class Agent:
             if (out := await self._jump_by_reopening(pid, target)) is not None:
                 return out
         if pid is not None:
-            if a.op in ("pause", "resume", "toggle"):
-                await self.kodi.play(pid, "toggle" if a.op == "toggle" else a.op == "resume")
-            elif a.op == "stop":
-                self._user_stopped = True
-                await self._note_position(pid)
-                await self.kodi.stop(pid)
-                await self.tv(apps.home)         # not Kodi's own menus
-            elif a.op in ("forward", "back"):
-                step = a.seconds or (30 if a.op == "forward" else 10)
-                await self.kodi.seek_by(pid, step if a.op == "forward" else -step)
-            elif a.op == "seek_to" and a.percent is not None:
-                await self.kodi.seek_percent(pid, a.percent)
-            elif a.op == "seek_to":
-                await self.kodi.seek_to(pid, (a.seconds or 0) * 1000)
-            elif a.op in ("next", "previous"):
-                return await self._next_episode(NextEpisode(offset=1 if a.op == "next" else -1))
-            else:
-                await self.kodi.seek_to(pid, 0)
-            if a.op == "seek_to":
-                return Outcome(True, f"To {a.percent}%" if a.percent is not None else f"To {_clock((a.seconds or 0) * 1000)}")
-            return Outcome(True, "Play/pause" if a.op == "toggle" else a.op.replace("_", " ").capitalize())
+            return await self._controlled(a, pid)
         if (st := await self._just_status()) is not None:
             return await self._just_transport(a, st)
         if a.op == "seek_to":
-            return Outcome(False, "Jumping to a time works in Kodi and Just Player only")
+            return Outcome(False, "Jumping to a time works in TV Agent Player, Kodi and Just Player only")
         if a.op == "resume":
             sessions = [x for x in await self.tv(media.sessions) if x[1] and x[2] in ("PAUSED", "PLAYING")]
             if any(pkg == KODI for pkg, _, _ in sessions):
@@ -2065,6 +2255,31 @@ class Agent:
                 return await self._continue_watching(ContinueWatching(title=None))
         await self.tv(media.dispatch, a.op)
         return Outcome(True, "Play/pause" if a.op == "toggle" else a.op.capitalize())
+
+    async def _controlled(self, a: Transport, pid: int | str) -> Outcome:
+        """Transport in a player the agent drives (TV Agent Player or Kodi): exact, in place."""
+        ctl = self._ctl(pid)
+        if a.op in ("pause", "resume", "toggle"):
+            await ctl.play(pid, "toggle" if a.op == "toggle" else a.op == "resume")
+        elif a.op == "stop":
+            self._user_stopped = True
+            await self._note_position(pid)
+            await ctl.stop(pid)
+            await self.tv(apps.home)         # not Kodi's own menus, nor whatever was behind the player
+        elif a.op in ("forward", "back"):
+            step = a.seconds or (30 if a.op == "forward" else 10)
+            await ctl.seek_by(pid, step if a.op == "forward" else -step)
+        elif a.op == "seek_to" and a.percent is not None:
+            await ctl.seek_percent(pid, a.percent)
+        elif a.op == "seek_to":
+            await ctl.seek_to(pid, (a.seconds or 0) * 1000)
+        elif a.op in ("next", "previous"):
+            return await self._next_episode(NextEpisode(offset=1 if a.op == "next" else -1))
+        else:
+            await ctl.seek_to(pid, 0)
+        if a.op == "seek_to":
+            return Outcome(True, f"To {a.percent}%" if a.percent is not None else f"To {_clock((a.seconds or 0) * 1000)}")
+        return Outcome(True, "Play/pause" if a.op == "toggle" else a.op.replace("_", " ").capitalize())
 
     async def _just_transport(self, a: Transport, st: tuple[str, int, float]) -> Outcome:
         """Just Player: media keys for pause/resume/stop and short skips (+15 s / -5 s a press); a longer jump

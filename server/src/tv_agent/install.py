@@ -1,19 +1,24 @@
 """Installing tv-agent on a computer and its app on the TV: user services, the TV app, and pairing.
 
     tv-agent setup services [--enable]   write ~/.config/systemd/user/{llama-d1,tv-agent}.service for this install
-    tv-agent tv install <apk>            install the TV app, grant the microphone, allow it to start, pair it
-    tv-agent tv pair                     tell the TV app where this agent is and the token it must send
+    tv-agent tv install <apk>            install the TV app (grant the microphone, allow it to start) or TV Agent
+                                         Player (allow it to start, compile it ahead of time), and pair it
+    tv-agent tv pair                     tell the TV app, and TV Agent Player if it's installed, where this agent is
+                                         and the token each must send
 """
 import glob
 import os
+import zipfile
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .config import Config, lan_address
+from . import clients
+from .config import Config, lan_address, new_token, read_secret, save_secret
 from .tv.adb import Adb
+from .tv.tvplayer import PACKAGE as PLAYER
 
 APP = "com.boujuan.tvagent"
 UNIT_DIR = Path.home() / ".config/systemd/user"
@@ -112,13 +117,51 @@ def pair(cfg: Config, adb: Adb) -> str:
     return url
 
 
+def is_player_apk(apk: Path) -> bool:
+    """Whether an APK is TV Agent Player rather than the TV app: its package name is in its manifest (binary XML keeps
+    its strings in UTF-16)."""
+    with zipfile.ZipFile(apk) as z:
+        return PLAYER.encode("utf-16-le") in z.read("AndroidManifest.xml")
+
+
+def installed(adb: Adb, package: str) -> bool:
+    return "package:" in adb.run(["pm", "path", package])
+
+
+def pair_player(cfg: Config, adb: Adb) -> str:
+    """TV Agent Player's pairing (its PairReceiver, which only ADB may send to): this agent's address and player_port,
+    the player's own token (made the first time), and the certificate it must find there (the phones' listeners'
+    one, clients.py). The running agent reads the token at each connection: no restart."""
+    token = read_secret("player_token")
+    if not token:
+        token = new_token()
+        save_secret("player_token", token)
+    cfg.secrets["player_token"] = token
+    host = lan_address(cfg)
+    out = adb.run(["am", "broadcast", "-n", f"{PLAYER}/.PairReceiver", "--es", "host", host,
+                   "--ei", "port", str(cfg.player_port), "--es", "token", token, "--es", "cert", clients.certificate()])
+    if "result=-1" not in out.replace(" ", ""):
+        raise SystemExit(f"TV Agent Player didn't take the settings ({out.strip()[-80:]}); is it installed?")
+    return f"{host}:{cfg.player_port}"
+
+
 def install_app(cfg: Config, adb: Adb, apk: Path) -> str:
+    """Installs the TV app or TV Agent Player (whichever the APK is) and pairs it; returns where it talks to."""
+    player = is_player_apk(apk)
     remote = "/data/local/tmp/tv-agent.apk"
     adb.push(apk, remote)
     out = adb.run(["pm", "install", "-r", remote], timeout=120)
     adb.run(["rm", "-f", remote])
     if "Success" not in out:
         raise SystemExit(f"pm install failed: {out.strip()}")
+    if player:
+        # TCL's TclAppBoot blocks sideloaded apps from starting without this.
+        adb.run(["appops", "set", PLAYER, "AUTO_START", "allow"])
+        adb.run(["appops", "write-settings"])
+        # Compiled ahead of time now: this TV installs a sideloaded APK as `verify` (interpreted), ignoring the profile
+        # inside it, and a file's header is read ~0.2 s faster compiled (tv-agent-player's DESIGN.md). ~6 s, once.
+        adb.run(["cmd", "package", "compile", "-m", "speed", "-f", PLAYER], timeout=180, quiet_s=180)
+        return pair_player(cfg, adb)
     adb.run(["pm", "grant", APP, "android.permission.RECORD_AUDIO"])
     # TCL's TclAppBoot blocks sideloaded apps from starting without this (its on-screen messages need it).
     adb.run(["appops", "set", APP, "AUTO_START", "allow"])

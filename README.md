@@ -4,7 +4,8 @@ Voice control for an Android / Google TV, decided on your own computer. Press th
 you want: "play The Bear season 3 episode 2", "go to the middle", "lofi hip hop on YouTube", "volume twenty". A
 computer on the same network turns the speech into text, decides what you meant with fixed rules and Liquid AI's
 **d1-3B** decision model, and drives the TV over ADB: apps, deep links, playback, volume, and films and series from
-your **Stremio** account and addons played straight into Just Player or Kodi, without opening Stremio.
+your **Stremio** account and addons played straight into TV Agent Player, Kodi or Just Player, without opening
+Stremio.
 
 ```
 Remote mic button ─► TV app ("Listening…", streams the mic while you speak)
@@ -14,7 +15,7 @@ This computer: tv-agent daemon
    speech-to-text   Parakeet TDT 0.6B v2 (CPU, ~0.1-0.2 s)
    decide           clean-up → fixed phrases → pattern rules → d1-3B (GPU, ~0.9 s, ~4% of commands) → one typed action
    do it            ADB: apps, deep links, media keys, volume, numbered lists on screen
-                    Stremio account + Cinemeta/AIOMetadata + your addons → best cached debrid link → Kodi (or Just Player)
+                    Stremio account + Cinemeta/AIOMetadata + your addons → best cached debrid link → TV Agent Player (or Kodi, Just Player)
    afterwards       the player's position and watched marks → your Stremio library; binge mode, sleep timer
 ```
 

@@ -256,7 +256,7 @@ async def _say(text: str, dry_run: bool) -> int:
 
 
 def _tv(what: str, rest: list[str]) -> int:
-    from .install import install_app, pair
+    from .install import PLAYER, install_app, installed, pair, pair_player
     from .tv.adb import Adb
     cfg = config.load()
     adb = Adb(cfg)
@@ -278,6 +278,8 @@ def _tv(what: str, rest: list[str]) -> int:
             print(f"installed and paired with {url}")
         elif what == "pair":
             print(f"the TV app now talks to {pair(cfg, adb)}")
+            if installed(adb, PLAYER):
+                print(f"TV Agent Player now talks to {pair_player(cfg, adb)}")
         return 0
     finally:
         adb.close()
@@ -350,7 +352,8 @@ def main(argv=None):
     s.add_argument("--enable", action="store_true", help="services: also enable and start them")
     tv = sub.add_parser("tv", help="the TV over ADB: find it, run a command, install and pair its app")
     tv.add_argument("what", choices=["host", "shell", "install", "pair"])
-    tv.add_argument("args", nargs=argparse.REMAINDER, help="shell: the command and its arguments; install: the APK")
+    tv.add_argument("args", nargs=argparse.REMAINDER,
+                    help="shell: the command and its arguments; install: the APK (the TV app or TV Agent Player)")
     st = sub.add_parser("streams", help="list the streams your addons offer for a title (names only, no links)")
     st.add_argument("title")
     st.add_argument("--season", type=int)

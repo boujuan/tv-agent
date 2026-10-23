@@ -7,6 +7,23 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 ## server — unreleased
 
 ### Added
+- **TV Agent Player** (`player = "tvplayer"`; [boujuan/tv-agent-player](https://github.com/boujuan/tv-agent-player)),
+  a Media3 player of its own on the TV, driven over a TLS connection it opens to the agent (`player_port` 8770, the
+  phones' certificate, its own `player_token`; `tv/tvplayer.py`). It's brought up during the stream lookup, loads
+  each title in place, plays with your track rule applied before the first frame, jumps exactly in place (Dolby
+  Vision too), reports state, position, tracks and the position it closed at instead of being polled, and draws
+  add-on subtitles without rebuffering. In binge mode the next episode is opened in the background 2.5 minutes
+  before the end and starts at once. A file that fails soon after opening gives way to the next copy where it was.
+  While you speak, its own volume is lowered (no volume bar). Transport, skips, jumps to a scene, "replay",
+  subtitle and audio changes, the phone app's now-playing and track lists, `/v1/state` and the sleep timer work with
+  it as with Kodi; with it on screen, transport skips asking the TV which app is in front (~1 s).
+- `tv-agent tv install` takes TV Agent Player's APK too (allowed to start, compiled ahead of time, paired);
+  `tv-agent tv pair` pairs it as well when it's installed. `GET /v1/tv/packages` lists it.
+
+### Fixed
+- `tv-agent tv install` timed out pushing any APK to this TV: its adbd announces 1 MB writes but never acknowledges
+  one that big. Pushes now go in writes of at most 64 KB (a 1.1 MB APK in well under a second). A command allowed to
+  print nothing for a while (the player's compile, ~6 s) isn't taken for a dead connection.
 - Kodi updates for the TV (`kodi_versions.py`): `GET /v1/kodi` (installed, the newest build for the TV's ABI on
   Kodi's mirrors: 22.0 RC 1 now, backups), `POST /v1/kodi/update` (the panel only). An update backs up Kodi's
   settings, libraries and add-ons on the TV first (`/sdcard/tv-agent/kodi-<version>.tar`, ~18 MB) and installs the
@@ -25,6 +42,7 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 ## panel — unreleased
 
 ### Added
+- Settings › Playback › Player: **TV Agent Player** (and the tray menu, the overview, About).
 - Settings › Updates has Kodi too: the version on the TV, the newest one (Kodi 22 Piers, a release candidate with
   fixes for seeking on MediaTek decoders like this TV's) and "Update Kodi", with its progress. Needs the agent from
   this version.
