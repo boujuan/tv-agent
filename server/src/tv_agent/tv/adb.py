@@ -18,6 +18,9 @@ from ..config import Config
 log = logging.getLogger(__name__)
 
 
+PUSH_MAXDATA = 64 * 1024     # see Adb.push
+
+
 class TvUnreachable(RuntimeError):
     pass
 
@@ -81,22 +84,25 @@ class Adb:
                 pass
         self._dev = None
 
-    def run(self, argv: list[str], timeout: float = 10.0) -> str:
-        """Run one command on the TV and return its output. Reconnects once if the connection went stale."""
-        out = self._shell(quote(argv), timeout, True)
+    def run(self, argv: list[str], timeout: float = 10.0, quiet_s: float | None = None) -> str:
+        """Run one command on the TV and return its output. Reconnects once if the connection went stale. quiet_s:
+        how long the command may print nothing (a compile: seconds), where 5 s of silence otherwise means a dead
+        connection."""
+        out = self._shell(quote(argv), timeout, True, quiet_s)
         return out if isinstance(out, str) else out.decode(errors="replace")
 
     def run_bytes(self, argv: list[str], timeout: float = 15.0) -> bytes:
         """Like run, for binary output (a screenshot)."""
         return self._shell(quote(argv), timeout, False)
 
-    def _shell(self, cmd: str, timeout: float, decode: bool):
+    def _shell(self, cmd: str, timeout: float, decode: bool, quiet_s: float | None = None):
         with self._lock:
             for attempt in (1, 2):
                 try:
                     if self._dev is None or not self._dev.available:
                         self._connect()
-                    out = self._dev.shell(cmd, timeout_s=timeout, read_timeout_s=timeout, decode=decode)
+                    out = self._dev.shell(cmd, transport_timeout_s=quiet_s, timeout_s=timeout, read_timeout_s=timeout,
+                                          decode=decode)
                     self._used = time.monotonic()
                     return out
                 except TvUnreachable:
@@ -114,10 +120,13 @@ class Adb:
             self.close()
 
     def push(self, local, remote: str, timeout: float = 120.0):
-        """Copy a (small) file to the TV."""
+        """Copy a file to the TV (an APK). In writes of at most PUSH_MAXDATA: this TV's adbd announces 1 MB, but never
+        acknowledges a write that big, and adb_shell sizes its writes by that announcement, so any file over ~64 KB
+        stalled (found 2026-10-23: `tv-agent tv install` timed out)."""
         with self._lock:
             if self._dev is None or not self._dev.available:
                 self._connect()
+            self._dev._maxdata = min(self._dev._maxdata, PUSH_MAXDATA)
             self._dev.push(str(local), remote, read_timeout_s=timeout)
 
     def keepalive(self):

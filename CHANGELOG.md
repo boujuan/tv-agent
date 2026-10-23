@@ -19,6 +19,11 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   it as with Kodi; with it on screen, transport skips asking the TV which app is in front (~1 s).
 - `tv-agent tv install` takes TV Agent Player's APK too (allowed to start, compiled ahead of time, paired);
   `tv-agent tv pair` pairs it as well when it's installed. `GET /v1/tv/packages` lists it.
+
+### Fixed
+- `tv-agent tv install` timed out pushing any APK to this TV: its adbd announces 1 MB writes but never acknowledges
+  one that big. Pushes now go in writes of at most 64 KB (a 1.1 MB APK in well under a second). A command allowed to
+  print nothing for a while (the player's compile, ~6 s) isn't taken for a dead connection.
 - Kodi updates for the TV (`kodi_versions.py`): `GET /v1/kodi` (installed, the newest build for the TV's ABI on
   Kodi's mirrors: 22.0 RC 1 now, backups), `POST /v1/kodi/update` (the panel only). An update backs up Kodi's
   settings, libraries and add-ons on the TV first (`/sdcard/tv-agent/kodi-<version>.tar`, ~18 MB) and installs the

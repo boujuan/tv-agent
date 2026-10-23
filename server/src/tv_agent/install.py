@@ -160,7 +160,7 @@ def install_app(cfg: Config, adb: Adb, apk: Path) -> str:
         adb.run(["appops", "write-settings"])
         # Compiled ahead of time now: this TV installs a sideloaded APK as `verify` (interpreted), ignoring the profile
         # inside it, and a file's header is read ~0.2 s faster compiled (tv-agent-player's DESIGN.md). ~6 s, once.
-        adb.run(["cmd", "package", "compile", "-m", "speed", "-f", PLAYER], timeout=180)
+        adb.run(["cmd", "package", "compile", "-m", "speed", "-f", PLAYER], timeout=180, quiet_s=180)
         return pair_player(cfg, adb)
     adb.run(["pm", "grant", APP, "android.permission.RECORD_AUDIO"])
     # TCL's TclAppBoot blocks sideloaded apps from starting without this (its on-screen messages need it).
