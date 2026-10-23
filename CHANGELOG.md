@@ -33,11 +33,13 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   as the phone app has it: your names (find, add, remove), then Twitch favourites and your library's titles, the
   library switch at the top and the total against the hosted model's 200. Works with the voice agent stopped too
   (written to config.toml).
+- Decisions: the "How a command is decided" diagram folds to its header (▲: the editors get the whole height) or
+  takes the whole height (▼: the editors are hidden); click it again for both. Remembered.
+
+### Fixed
 - The mouse wheel scrolls the page instead of changing the number box or list under the pointer; only one clicked
   into first takes it. Scrolling through Settings had changed the TV app's port (8765 → 8761) and Save wrote it, so
   the TV couldn't reach the agent.
-- Decisions: the "How a command is decided" diagram folds to its header (▲: the editors get the whole height) or
-  takes the whole height (▼: the editors are hidden); click it again for both. Remembered.
 
 ## server 0.4.0 — 2026-10-23
 
