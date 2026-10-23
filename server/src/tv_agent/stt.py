@@ -58,6 +58,11 @@ HOSTED = {"assemblyai/universal-3-6-pro": "AssemblyAI Universal-3.6 Pro",
           "microsoft/mai-transcribe-2": "MAI-Transcribe 2",
           "nvidia/parakeet-tdt-0.6b-v3": "Parakeet TDT 0.6B v3 (hosted)",
           "openai/whisper-large-v3-turbo": "Whisper large v3 turbo"}
+# Which of them use the language hint (it changed their answer on Spanish commands) and the vocabulary (measured
+# 2026-10-23; the others ignore what they don't use: Grok, GPT transcribe, GPT-4o mini, MAI, hosted Parakeet)
+USES_LANGUAGE = {"assemblyai/universal-3-6-pro", "mistralai/voxtral-mini-transcribe-3-0", "deepgram/nova-3",
+                 "mistralai/voxtral-small-transcribe-3-0", "elevenlabs/scribe-v2", "openai/whisper-large-v3-turbo"}
+USES_VOCABULARY = {"assemblyai/universal-3-6-pro"}
 TRANSCRIBE_URL = "https://openrouter.ai/api/v1/audio/transcriptions"
 VOCABULARY_MAX = 200                                     # names sent per request (more makes it hear them in noise)
 NON_LATIN = re.compile(r"[^\W\d_a-zA-Z\u00C0-\u024F]")   # a letter outside Latin scripts: "Пауса", "Ютуб"

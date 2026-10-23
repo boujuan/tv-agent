@@ -17,6 +17,13 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 - Decisions › Speech to text: the hosted model's language hint (your native language by default) and its
   vocabulary, the names it should hear as written (one per line, plus your library's titles and Twitch favourites
   if ticked), live at once.
+- The hosted models are marked: * uses the language hint, ** the hint and the vocabulary (measured: the hint changed
+  the answers of AssemblyAI, Voxtral, Deepgram, ElevenLabs and Whisper; only AssemblyAI takes a vocabulary).
+
+### Fixed
+- Decisions › Speech to text loaded this laptop's model without asking whenever a choice other than Hosted was
+  picked, so choosing Hosted again kept offering to unload it. Now it asks both ways: unload when Hosted doesn't use
+  it, load (now, or when first needed) when a choice does.
 
 ## android 0.7.0 — 2026-10-23
 
@@ -76,6 +83,8 @@ whole recording instead).
 - "local-first" speech-to-text also asks the hosted model when this laptop's model writes in another script
   ("Пауса", "Ютуб"): Parakeet guesses the language every time and can't be limited.
 - Stremio is also "estremio", "streamio".
+- `POST /v1/pipeline` with `stt_loaded` leaves the local model as asked when `stt_where` changes in the same request
+  (it was loaded anyway for any choice but "hosted").
 - Rules: a "title" over 12 words is a description, for the LLM.
 
 ### Fixed

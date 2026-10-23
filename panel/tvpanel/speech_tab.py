@@ -44,13 +44,15 @@ class SpeechToText(QWidget):
         self.hosted = QComboBox()
         self.hosted.setEditable(True)                   # any OpenRouter transcription model id
         for model, name in agent_stt.HOSTED.items():
-            self.hosted.addItem(name, model)
+            mark = " **" if model in agent_stt.USES_VOCABULARY else " *" if model in agent_stt.USES_LANGUAGE else ""
+            self.hosted.addItem(name + mark, model)
             self.hosted.setItemData(self.hosted.count() - 1, model, 3)      # tooltip: the id
         self.hosted.activated.connect(lambda _i: self.hosted_changed())
         self.hosted.lineEdit().editingFinished.connect(self.hosted_changed)
         form.addRow("Hosted model", self.hosted)
         self.hosted_check = dim("", wrap=False)
         form.addRow("", self.hosted_check)
+        form.addRow("", dim("* uses the language hint · ** the language hint and the vocabulary", wrap=False))
         self.key = KeyLine(panel)
         form.addRow("", self.key)
         self.language = QComboBox()
@@ -127,7 +129,7 @@ class SpeechToText(QWidget):
         if not self.vocabulary.hasFocus():
             self.vocabulary.setPlainText("\n".join(res.get("stt_vocabulary") or []))
         self.vocab_library.setChecked(bool(res.get("stt_vocabulary_library")))
-        assembly = res.get("stt_hosted_model", "").startswith("assemblyai/")
+        assembly = res.get("stt_hosted_model", "") in agent_stt.USES_VOCABULARY
         self.vocab_state.setText(f"{res.get('stt_vocabulary_count', 0)} names sent with each command"
                                  if assembly else "Used by AssemblyAI only: the chosen hosted model doesn't take a list")
         if self._checked != hosted:
@@ -160,22 +162,32 @@ class SpeechToText(QWidget):
         if where != "local" and not keys.get("openrouter"):
             QMessageBox.information(self, "TV Agent", "A hosted model needs the OpenRouter key: Settings › API keys. "
                                     "Until then this laptop's model is used.")
-        if where == "hosted" and self.state.get("stt_loaded"):
+        loaded = bool(self.state.get("stt_loaded"))
+        if where == "hosted" and loaded:
             box = QMessageBox(QMessageBox.Icon.Question, "TV Agent",
-                              "The local speech model is loaded in the voice agent (about 1 GB of memory). Unload it? "
-                              "Choosing this laptop again loads it in a few seconds.", parent=self)
+                              "This laptop's speech model is loaded in the voice agent (about 1 GB of memory) and "
+                              "isn't used by this choice. Unload it?", parent=self)
             unload = box.addButton("Unload it", QMessageBox.ButtonRole.AcceptRole)
             box.addButton("Keep it loaded", QMessageBox.ButtonRole.RejectRole)
             box.exec()
-            if box.clickedButton() is unload:
-                change["stt_loaded"] = False
-        elif where != "hosted" and not self.state.get("stt_loaded"):
+            change["stt_loaded"] = box.clickedButton() is not unload
+        elif where != "hosted" and not loaded:
             if not agent_stt.installed(self.local.currentData()):
-                QMessageBox.information(self, "TV Agent", "The local model isn't downloaded yet: use Download next to "
-                                        "it.")
+                QMessageBox.information(self, "TV Agent", "This choice uses this laptop's speech model, which isn't "
+                                        "downloaded yet: use Download next to it.")
+                change["stt_loaded"] = False
             else:
-                self.local_state.setText("Loading the local speech model…")
-                change["stt_loaded"] = True
+                role = "as the backup when the hosted one fails" if where == "hosted-first" else "for every command"
+                box = QMessageBox(QMessageBox.Icon.Question, "TV Agent",
+                                  f"This choice uses this laptop's speech model {role}, and it isn't loaded. Load it "
+                                  "now (about 1 GB of memory, a few seconds)? Otherwise it loads the first time it's "
+                                  "needed, and that command waits for it.", parent=self)
+                load = box.addButton("Load it", QMessageBox.ButtonRole.AcceptRole)
+                box.addButton("Not now", QMessageBox.ButtonRole.RejectRole)
+                box.exec()
+                change["stt_loaded"] = box.clickedButton() is load
+                if change["stt_loaded"]:
+                    self.local_state.setText("Loading the local speech model…")
         self.decisions.set_pipeline(change)
 
     def local_changed(self):

@@ -783,8 +783,8 @@ def local_app(svc: Service) -> FastAPI:
             llm.model, llm.reasoning, llm.private = svc.cfg.llm_model, svc.cfg.llm_reasoning, svc.cfg.llm_private
         if "stt_model" in new or body.get("stt_loaded") is False:
             svc.unload_stt()                      # ~1 GB of memory back; the new one loads next (unless hosted only)
-        if svc.stt is None and (body.get("stt_loaded") is True or (
-                ("stt_model" in new or "stt_where" in new) and svc.cfg.stt_where != "hosted")):
+        if svc.stt is None and (body.get("stt_loaded") is True or ("stt_loaded" not in body and (
+                ("stt_model" in new or "stt_where" in new) and svc.cfg.stt_where != "hosted"))):
             await svc.local_stt()
         if new:
             log.info("decision steps: %s", ", ".join(f"{k} = {v}" for k, v in new.items()))
