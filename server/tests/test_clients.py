@@ -74,23 +74,48 @@ def test_a_pairing_code_works_once_and_typos_are_forgiven(paths):
     assert e.value.status == 410
 
 
-def test_a_pairing_closes_after_five_wrong_codes_or_five_minutes(paths, monkeypatch):
+def test_wrong_codes_shut_out_their_address_not_the_phone_and_a_pairing_expires(paths, monkeypatch):
     clients = C.Clients()
     p = clients.start_pairing()
     wrong = "ZZZZZZZZ" if p.code != "ZZZZZZZZ" else "YYYYYYYY"
     for left in (4, 3, 2, 1):
         with pytest.raises(C.PairingError, match=f"{left} tries left"):
-            clients.pair(wrong, "x")
-    with pytest.raises(C.PairingError, match="closed"):
-        clients.pair(wrong, "x")
-    with pytest.raises(C.PairingError) as e:
-        clients.pair(p.code, "x")           # the right code, too late
-    assert e.value.status == 410
+            clients.pair(wrong, "x", "10.0.0.9")
+    with pytest.raises(C.PairingError, match="no more tries from here"):
+        clients.pair(wrong, "x", "10.0.0.9")
+    with pytest.raises(C.PairingError, match="from here"):
+        clients.pair(p.code, "x", "10.0.0.9")            # even the right code, from that address
+    device, _ = clients.pair(p.code, "Pixel", "192.168.1.77")   # the phone still pairs
+    assert device.name == "Pixel"
     p = clients.start_pairing()
     monkeypatch.setattr(C.time, "time", lambda: p.expires + 1)
     with pytest.raises(C.PairingError) as e:
         clients.pair(p.code, "x")
-    assert e.value.status == 410 and not clients.devices
+    assert e.value.status == 410 and len(clients.devices) == 1
+
+
+def test_many_addresses_guessing_close_the_pairing(paths):
+    clients = C.Clients()
+    p = clients.start_pairing()
+    wrong = "ZZZZZZZZ" if p.code != "ZZZZZZZZ" else "YYYYYYYY"
+    for n in range(C.PAIRING_TRIES_ALL - 1):
+        with pytest.raises(C.PairingError):
+            clients.pair(wrong, "x", f"10.0.{n // 4}.{n % 4}")
+    with pytest.raises(C.PairingError, match="closed now"):
+        clients.pair(wrong, "x", "10.9.9.9")
+    with pytest.raises(C.PairingError) as e:
+        clients.pair(p.code, "x", "192.168.1.77")
+    assert e.value.status == 410
+
+
+def test_tries_without_a_pairing_open_use_up_nothing(paths):
+    clients = C.Clients()
+    for _ in range(3 * C.PAIR_PER_MINUTE):
+        with pytest.raises(C.PairingError) as e:
+            clients.pair("00000000", "x", "192.168.1.77")
+        assert e.value.status == 410                       # not 429: nothing to guess, nothing counted
+    p = clients.start_pairing()
+    assert clients.pair(p.code, "Pixel", "192.168.1.77")[0].name == "Pixel"
 
 
 def test_pairing_answers_ten_tries_a_minute(paths):
@@ -376,3 +401,43 @@ def test_activity_for_the_phone_pages_back_in_time(paths, monkeypatch):
     t = page["entries"][0]["t"]
     assert call(gate, "POST", "/v1/activity/mark", token, json={"t": t, "wrong": True}).json()["entry"]["wrong"]
     assert call(gate, "POST", "/v1/activity/mark", token, json={"t": 1.0}).status_code == 404
+
+
+def test_junk_on_the_phone_audio_port_is_unauthorized(paths):
+    svc = service(paths)
+    svc._busy = asyncio.Lock()
+    for junk in ([1], "token", 7):
+        assert _stream(svc, junk, "192.168.1.77", phone=True) == [{"error": "unauthorized"}]
+
+
+def test_phones_cant_point_the_agent_at_files_or_change_its_privacy(paths):
+    svc = service(paths)
+    token = paired(svc)
+    app = C.gateway(svc, server.local_app(svc))
+    for body in ({"d1_model": "/etc/passwd.gguf"}, {"stt_model": "/tmp"}, {"llm_private": False}):
+        r = call(app, "POST", "/v1/pipeline", token, json=body)
+        assert r.status_code == 403 and "only from this laptop" in r.text
+
+
+def test_a_phones_list_leaves_the_one_on_the_tv_alone(paths):
+    import time as _time
+    from tv_agent.agent import ListItem, Shown
+    svc = service(paths)
+    token = paired(svc)
+    on_tv = Shown("For “algo de miedo”", [ListItem("tt9", "movie", "Scream", "Scream (1996)", "")], _time.monotonic())
+    played = []
+
+    async def recent():
+        return [ListItem("tt1", "series", "The Bear", "The Bear · S3E2", "", video="tt1:3:2")]
+
+    async def play_item(it):
+        played.append(it.imdb)
+        return types.SimpleNamespace(ok=True, say="Playing The Bear")
+    svc.agent._shown, svc.agent._recent_items, svc.agent.play_item = on_tv, recent, play_item
+    svc.record = lambda *a, **k: None
+    gate = C.gateway(svc, server.local_app(svc))
+    r = call(gate, "GET", "/v1/lists?list=recent", token)
+    assert r.status_code == 200 and r.json()["items"][0]["name"] == "The Bear"
+    assert svc.agent._shown is on_tv                     # "number 1" on the remote still picks the suggestion
+    r = call(gate, "POST", "/v1/lists/pick", token, json={"list": "recent", "imdb": "tt1", "video": "tt1:3:2"})
+    assert r.json()["ok"] and played == ["tt1"] and svc.agent._shown is on_tv

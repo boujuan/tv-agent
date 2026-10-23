@@ -203,11 +203,14 @@ def routes(svc) -> APIRouter:
 
     # ---- lists ----
 
+    phone_lists: dict[str, Shown] = {}       # the lists phones show: apart from the one on the TV ("number 2")
+
     async def show(name: str) -> Shown:
-        """The list as voice would show it, kept as the one "number 2" picks from (agent._pick)."""
+        """The list as voice would show it, for the phone. It doesn't replace the list on the TV, which "number 2"
+        and the remote's keys pick from."""
         title, items = LISTS[name]
-        svc.agent._shown = Shown(title, await getattr(svc.agent, items)(), time.monotonic())
-        return svc.agent._shown
+        phone_lists[name] = Shown(title, await getattr(svc.agent, items)(), time.monotonic())
+        return phone_lists[name]
 
     @r.get("/v1/lists")
     async def lists(request: Request):
@@ -229,15 +232,18 @@ def routes(svc) -> APIRouter:
         name, imdb, video = body.get("list"), str(body.get("imdb", "")), body.get("video")
         if name not in LISTS:
             raise HTTPException(422, f"list: one of {', '.join(LISTS)}")
-        shown = svc.agent._shown
-        if not shown or shown.title != LISTS[name][0] or time.monotonic() - shown.at > LIST_TTL - 30:
+        shown = phone_lists.get(name)
+        if not shown or time.monotonic() - shown.at > LIST_TTL - 30:
             shown = await show(name)
         number = next((n for n, i in enumerate(shown.items, 1) if i.imdb == imdb and (video is None or i.video == video)),
                       None)
         if number is None:
             raise HTTPException(404, "Not in that list any more")
-        d = Decision(A.Pick(number=number), "remote", 1.0, "list")
-        out = await svc.execute(d, shown.items[number - 1].label, "phone")
+        item = shown.items[number - 1]
+        t = time.perf_counter()
+        out = await svc.agent.play_item(item)
+        svc.record("phone", item.label, Decision(A.Pick(number=number), "remote", 1.0, "list"), out.ok, out.say,
+                   (time.perf_counter() - t) * 1000)
         return {"ok": out.ok, "say": out.say}
 
     # ---- activity ----

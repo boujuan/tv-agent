@@ -24,6 +24,9 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   phones (server — unreleased, below).
 
 ### Fixed
+- A dialog opened from a finished background task (pairing a phone, Run checks, Diagnose) held back every other
+  result until it closed: the pairing dialog never saw the phone pair or the code expire. Each result now arrives
+  as its own event.
 - Decisions › Speech to text loaded this laptop's model without asking whenever a choice other than Hosted was
   picked, so choosing Hosted again kept offering to unload it. Now it asks both ways: unload when Hosted doesn't use
   it, load (now, or when first needed) when a choice does.
@@ -99,6 +102,13 @@ whole recording instead).
 - Stremio is also "estremio", "streamio".
 - `POST /v1/pipeline` with `stt_loaded` leaves the local model as asked when `stt_where` changes in the same request
   (it was loaded anyway for any choice but "hosted").
+- Paired phones, found in review before release:
+  - a phone opening a list replaced the list on the TV, so "number 2" or the remote's keys then picked from the
+    phone's list; phones now keep their own;
+  - pairing tries are limited per address, and only while a pairing is open: anyone on the network could keep the
+    phone out with junk tries, and five wrong codes closed it for everyone (now: five per address, 50 in all);
+  - a phone can't set `d1_model`, `stt_model` or `llm_private` (paths on this laptop, and the privacy choice);
+  - junk on the phones' audio port is answered "unauthorized" instead of logging an error.
 - Rules: a "title" over 12 words is a description, for the LLM.
 
 ### Fixed

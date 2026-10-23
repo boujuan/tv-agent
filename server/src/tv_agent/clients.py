@@ -29,7 +29,7 @@ import socket
 import ssl
 import time
 from collections import deque
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -44,8 +44,9 @@ DEVICE = "tv_agent.device"      # in a request's scope: the paired phone the pho
 ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"     # Crockford base32: no I, L, O or U
 CODE_LEN = 8
 PAIRING_S = 300
-PAIRING_TRIES = 5
-PAIR_PER_MINUTE = 10            # tries /v1/pair answers in a minute, whatever the code
+PAIRING_TRIES = 5               # wrong codes from one address before that address is out of this pairing
+PAIRING_TRIES_ALL = 50          # wrong codes from everyone before the pairing closes (many addresses guessing)
+PAIR_PER_MINUTE = 10            # tries /v1/pair answers in a minute from one address, while a pairing is open
 MAX_DEVICES = 20
 MAX_BODY = 400_000              # audio: 12 s of 16 kHz PCM16, as for the TV
 MAX_JSON = 64_000
@@ -86,7 +87,8 @@ class Device:
 class Pairing:
     code: str
     expires: float                  # time.time()
-    tries: int = 0
+    tries: int = 0                  # wrong codes, from anyone
+    wrong: dict = field(default_factory=dict)      # wrong codes by address: one address can't close it for the phone
 
 
 class PairingError(Exception):
@@ -121,7 +123,7 @@ class Clients:
         self.pairing: Pairing | None = None
         self.paired: Device | None = None       # the phone the last pairing let in (the panel's dialog closes on it)
         self.fingerprint = ""                   # the listeners' certificate's SHA-256, once they're up (serve())
-        self._tries: deque[float] = deque()
+        self._tries: dict[str, deque[float]] = {}     # tries in the last minute, by address
         self._written = 0.0
 
     def _load(self) -> list[Device]:
@@ -163,20 +165,28 @@ class Clients:
     def pair(self, code: str, name: str, ip: str = "") -> tuple[Device, str]:
         """The phone's code checked: a new device and its token (shown this once), else PairingError."""
         now = time.time()
-        while self._tries and now - self._tries[0] > 60:
-            self._tries.popleft()
-        if len(self._tries) >= PAIR_PER_MINUTE:
-            raise PairingError(429, "Too many tries: wait a minute")
-        self._tries.append(now)
         p = self.open_pairing()
-        if p is None:
+        if p is None:                       # nothing to guess: not counted, so no one can use up a phone's tries
             raise PairingError(410, "No pairing open: start one in the panel (Settings › Phones › Pair a phone)")
+        for addr in [a for a, q in self._tries.items() if not q or now - q[-1] > 60]:
+            del self._tries[addr]
+        tries = self._tries.setdefault(ip, deque())
+        while tries and now - tries[0] > 60:
+            tries.popleft()
+        if len(tries) >= PAIR_PER_MINUTE:
+            raise PairingError(429, "Too many tries: wait a minute")
+        tries.append(now)
+        if p.wrong.get(ip, 0) >= PAIRING_TRIES:
+            raise PairingError(403, "Too many wrong codes from here: start another pairing in the panel")
         if not hmac.compare_digest(normalize_code(code).encode(), p.code.encode()):
             p.tries += 1
-            if p.tries >= PAIRING_TRIES:
+            p.wrong[ip] = p.wrong.get(ip, 0) + 1
+            if p.tries >= PAIRING_TRIES_ALL:
                 self.pairing = None
                 raise PairingError(403, "Wrong code, and that pairing is closed now: start another in the panel")
-            raise PairingError(403, f"Wrong code ({PAIRING_TRIES - p.tries} tries left)")
+            left = PAIRING_TRIES - p.wrong[ip]
+            raise PairingError(403, f"Wrong code ({left} tries left)" if left else
+                               "Wrong code, and no more tries from here: start another pairing in the panel")
         if len(self.devices) >= MAX_DEVICES:
             raise PairingError(409, f"{MAX_DEVICES} phones are paired already: revoke one in the panel first")
         token = "tvp_" + secrets.token_urlsafe(32)

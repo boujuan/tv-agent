@@ -1386,6 +1386,7 @@ def test_suggestions_are_real_titles_that_fit_and_play_from_the_list(monkeypatch
     me = types.SimpleNamespace(llm=Llm(), library=Library(), http=None, _shown=None, addons=addons, _show_on_tv=show,
                                _play_found=play_found)
     me._recommended = lambda *a: Agent._recommended(me, *a)
+    me.play_item = lambda it: Agent.play_item(me, it)
     out = asyncio.run(Agent._recommend(me, A.Recommend(query="something like dark")))
     # not the 130-minute film (over the 100 asked), not the series you're watching, not one the search doesn't know
     assert out.ok and [i.name for i in me._shown.items] == ["1899", "Coherence"]

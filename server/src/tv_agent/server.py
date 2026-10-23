@@ -423,7 +423,7 @@ async def stream_client(svc: "Service", reader: asyncio.StreamReader, writer: as
         if not phone and peer not in allowed:
             return
         hello = json.loads(await asyncio.wait_for(reader.readline(), 3) or b"{}")
-        given = str(hello.get("token") or "")
+        given = str(hello.get("token") or "") if isinstance(hello, dict) else ""       # junk: unauthorized
         if phone:
             ok = svc.clients.verify(given, peer) is not None
         else:
@@ -711,6 +711,11 @@ def local_app(svc: Service) -> FastAPI:
         """The Decisions tab's steps: order, on/off, which d1, the LLM's model. Saved and used at once."""
         svc.check(request, lan=False)
         body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(422, "a JSON object of settings")
+        if request.scope.get(clients_mod.DEVICE) and (local := {"d1_model", "stt_model", "llm_private"} & set(body)):
+            # file paths on this laptop, and the privacy choice: the panel's, not a phone's
+            raise HTTPException(403, f"{', '.join(sorted(local))}: only from this laptop's panel")
         new = {}
         if "steps" in body:
             steps = [str(x) for x in body["steps"]]

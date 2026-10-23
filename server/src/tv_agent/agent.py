@@ -1493,7 +1493,10 @@ class Agent:
             return Outcome(False, "No list on screen")
         if a.number > len(shown.items):
             return Outcome(False, f"The list goes up to {len(shown.items)}")
-        it = shown.items[a.number - 1]
+        return await self.play_item(shown.items[a.number - 1])
+
+    async def play_item(self, it: ListItem) -> Outcome:
+        """One item of a list (on the TV, or on a phone): where you were, a series' first episode, or the film."""
         if it.video is None and (item := await self.library.get(it.imdb)) and library_mod.in_continue_watching(item):
             return await self._continue_item(item)
         if it.video is None and it.kind == "series":        # a recommended series: where you were, or episode 1

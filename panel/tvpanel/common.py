@@ -304,18 +304,23 @@ class Async:
         self.pending.append((self.pool.submit(fn, *args), callback))
 
     def _poll(self):
-        keep = []
-        for fut, cb in self.pending:
-            if not fut.done():
-                keep.append((fut, cb))
-                continue
-            if cb:
-                err = fut.exception()
-                try:
-                    cb(None if err else fut.result(), err)
-                except Exception:
-                    traceback.print_exc()
+        keep, done = [], []
+        for item in self.pending:
+            (done if item[0].done() else keep).append(item)
         self.pending = keep
+        for fut, cb in done:
+            # each as its own event, not inside this timer's handler: a callback that opens a dialog (exec) would
+            # otherwise hold back every other result until it closes (Qt doesn't re-enter a running timer)
+            if cb:
+                QTimer.singleShot(0, lambda fut=fut, cb=cb: self._deliver(fut, cb))
+
+    @staticmethod
+    def _deliver(fut, cb):
+        err = fut.exception()
+        try:
+            cb(None if err else fut.result(), err)
+        except Exception:
+            traceback.print_exc()
 
 
 # ---------------------------------------------------------------- formatting and widgets
