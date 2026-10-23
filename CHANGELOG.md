@@ -101,6 +101,13 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   into first takes it. Scrolling through Settings had changed the TV app's port (8765 → 8761) and Save wrote it, so
   the TV couldn't reach the agent.
 
+## android 0.8.1 — 2026-10-24
+
+### Fixed
+- Back closes the pill without reaching the app underneath. The pill closed as Back went down, and the
+  release went on to the app below, which took it as its own Back: TV Agent Player closed, Stremio went back a
+  screen.
+
 ## server 0.4.0 — 2026-10-23
 
 ### Added

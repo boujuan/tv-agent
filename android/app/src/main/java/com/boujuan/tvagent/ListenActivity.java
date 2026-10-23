@@ -99,11 +99,24 @@ public class ListenActivity extends Activity {
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
-            running = false;
-            finish();
+            event.startTracking();
             return true;
         }
         return super.onKeyDown(keyCode, event);
+    }
+
+    // Closed when Back is let go, not pressed: closed on the press, the release went on to the app underneath,
+    // which took it as its own Back (TV Agent Player closed, Stremio went back a screen).
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            if (event.isTracking() && !event.isCanceled()) {
+                running = false;
+                finish();
+            }
+            return true;
+        }
+        return super.onKeyUp(keyCode, event);
     }
 
     @Override
