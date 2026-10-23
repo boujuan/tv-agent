@@ -73,6 +73,7 @@ class Config:
     native_language: str = "spa"
     twitch_favorites: list[str] = field(default_factory=list)
     binge: bool = True                      # at the end of an episode the next one starts (also by voice)
+    check_episodes: bool = True             # a file's own subtitles say it's the episode asked for (episode_check.py)
     auto_skip: bool = False                 # intros and recaps skipped by themselves when the timestamps are sure
     # How a command is decided (the panel's Decisions tab changes these live): the steps in order, the ones
     # switched off, and which d1 answers (local, Liquid's hosted one with `tv-agent setup liquid`, or either first)

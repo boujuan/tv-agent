@@ -13,6 +13,7 @@ import httpx
 from rapidfuzz import fuzz
 
 from . import __version__, activity, languages, skips, twitch, youtube
+from . import episode_check
 from .actions import (Action, AutoSkip, Binge, ContinueWatching, FindScene, Help, Home, Info, LibraryEdit, NextEpisode,
                       OpenApp,
                       OpenInStremio, Pick, PlayTitle, Recommend, Replay, Sequence, ShowList, Skip, Timer, Tracks,
@@ -179,6 +180,9 @@ class Agent:
         self._again: tuple[NowPlaying, float, object] | None = None    # the last Kodi start: (session, when, redo)
         self._reopen: tuple[NowPlaying, object] | None = None    # that start again at a time: (session, fn(ms))
         self._picture_task: asyncio.Task | None = None
+        self.checks = episode_check.Checks()     # which files are which episode (episode_check.py)
+        self._episode_cues: dict[tuple[str, str], list[tuple[int, str]]] = {}   # (video, lang): subtitles by id
+        self._verify_task: asyncio.Task | None = None
         self._duck: asyncio.Task | None = None
         self._ducked: tuple[str, int] | None = None   # ("kodi" or "tv", the volume before listening)
 
@@ -284,9 +288,19 @@ class Agent:
     async def streams_for(self, kind: str, video_id: str, meta: dict | None = None) -> list[streams.Stream]:
         meta = meta or {}
         found = await self.fetch_streams(kind, video_id)
+        if kind == "series":                    # files numbered as a neighbour that are this episode (episode_check)
+            for filename, size, named in self.checks.playing_as(video_id)[:4]:
+                try:
+                    found += [s for s in await self.fetch_streams(kind, named) if s.filename == filename]
+                except Exception as e:
+                    log.info("streams of %s (named %s): %s", video_id, named, type(e).__name__)
         plan = self.track_plan(meta)
-        return streams.rank(found, self.cfg.max_height, self.cfg.max_mbps, _runtime_min(meta),
-                            plan.subtitles is None, plan.audio)
+        ranked = streams.rank(found, self.cfg.max_height, self.cfg.max_mbps, _runtime_min(meta),
+                              plan.subtitles is None, plan.audio)
+        for s in ranked:
+            if not s.why_dropped and (v := self.checks.get(s.filename, s.size, video_id)) and v.ok is False:
+                s.why_dropped = f"it's {v.actual or 'another episode'} under this number"
+        return ranked
 
     async def apply_tracks(self, plan: languages.TrackPlan, wait_s: float = 20.0,
                            addon_subs: asyncio.Task | None = None, settle_s: float = 2.5) -> str:
@@ -521,6 +535,8 @@ class Agent:
             return Outcome(False, f"No playable stream for {label}")
         t_streams = time.perf_counter()
         chosen, link, checking = found[0], found[0].url, None
+        verifying = (self._verify(found[0], video, meta) if kind == "series" and self.cfg.check_episodes
+                     and not self.dry_run else None)
         if self.cfg.probe_streams:      # runs while Kodi gets ready; also finds where the link leads
             checking = asyncio.create_task(self._first_playable(found[:3]))
         # A file in your debrid library, or one checked while the last episode played, is opened even if the
@@ -558,6 +574,10 @@ class Agent:
                                                     video_hash=chosen.video_hash)
                 if self.cfg.probe_streams:
                     self._duration = asyncio.create_task(self._probe_duration(self.state.now_playing))
+                if kind == "series" and self.cfg.check_episodes:
+                    self._verify_task = asyncio.create_task(self._switch_if_wrong(
+                        self.state.now_playing, chosen, verifying if chosen is found[0] else None,
+                        (imdb, kind, name, video, label, meta)))
                 self._started(imdb, name, kind, video, meta)
         else:
             await self.tv(lambda adb: adb.run(["am", "force-stop", justplayer.PACKAGE]))
@@ -575,6 +595,8 @@ class Agent:
                 await self._home_unless_playing()
                 return Outcome(False, f"The links for {label} didn't answer")
             t_check = time.perf_counter()
+            if verifying is not None and verifying.done() and chosen is found[0]:
+                chosen, link, verifying = self._known_right(verifying, chosen, link, found, video, meta)
             async with self._starting:
                 if (pid := await self._kodi_player()) is not None:
                     await self._note_position(pid)      # a replay of this episode starts where it is
@@ -594,6 +616,10 @@ class Agent:
                 self._reopen = (self.state.now_playing,
                                 lambda ms: self.play(imdb, kind, name, video, label, meta, ms, prepared=chosen, jump=True))
                 self._picture_task = asyncio.create_task(self._watch_picture(self.state.now_playing))
+                if kind == "series" and self.cfg.check_episodes and not self.dry_run:
+                    self._verify_task = asyncio.create_task(self._switch_if_wrong(
+                        self.state.now_playing, chosen, verifying if chosen is found[0] else None,
+                        (imdb, kind, name, video, label, meta)))
                 again = None if self._again and self._again[0].video_id == video and \
                     time.monotonic() - self._again[1] < STUCK_WITHIN * 2 else \
                     (lambda: self.play(imdb, kind, name, video, label, meta, resume_ms, prepared=chosen))
@@ -622,7 +648,7 @@ class Agent:
             resume_ms = old.stopped_at
         self._stop_following()
         self._user_stopped, self._after_this = False, None
-        for task in (self._prefetch, self._tracks_task, self._skip_task, self._picture_task):
+        for task in (self._prefetch, self._tracks_task, self._skip_task, self._picture_task, self._verify_task):
             if task and not task.done() and task is not asyncio.current_task():
                 task.cancel()
         return resume_ms
@@ -846,7 +872,11 @@ class Agent:
             top = found[:3]
             ok = (await asyncio.gather(*(streams.playable(self.http, s) for s in top)) if self.cfg.probe_streams
                   else [True] * len(top))
-            chosen = next((s for s, good in zip(top, ok) if good), None)
+            chosen = None
+            for s, good in zip(top, ok):            # the first that answers and is that episode
+                if good and (not self.cfg.check_episodes or (await self._verify(s, nxt["id"], meta)).ok is not False):
+                    chosen = s
+                    break
             self._next_up = (nxt["id"], _episode_label(name, nxt), chosen, time.monotonic()) if chosen else None
             if chosen:
                 log.info("next up: %s (%s)", self._next_up[1], chosen.filename or chosen.name)
@@ -928,6 +958,98 @@ class Agent:
             return None
         out = await self._reopen[1](max(0, target_ms))
         return Outcome(out.ok, f"To {_clock(max(0, target_ms))}" if out.ok else out.say)
+
+    async def episode_subs(self, video: str, lang: str = "eng") -> list[tuple[int, str]]:
+        """An episode's subtitles from your subtitle addons, asked by its id (not by a file): kept in memory for
+        the check that a file is this episode and for jumps to a moment."""
+        key = (video, lang)
+        if key not in self._episode_cues:
+            kind = "series" if re.match(r"^tt\d+:\d+:\d+$", video) else "movie"
+            asking = [asyncio.create_task(subtitles.fetch(self.http, [addon], kind, video, None, timeout=6))
+                      for addon in await self.addons()]
+            cues: list[tuple[int, str]] = []
+            try:
+                for answer in asyncio.as_completed(asking):     # the first addon with a whole file is enough
+                    for _, sub in (subtitles.choose(await answer, [lang]) or [])[:2]:
+                        try:
+                            cues = subtitles.cues(await subtitles.download(self.http, sub.url))
+                        except (httpx.HTTPError, OSError, ValueError) as e:
+                            log.info("subtitles of %s from %s: %s", video, sub.addon, type(e).__name__)
+                            continue
+                        if len(cues) >= 50:
+                            break
+                    if len(cues) >= 50:
+                        break
+            finally:
+                for task in asking:
+                    task.cancel()
+            if len(self._episode_cues) >= 60:
+                self._episode_cues.pop(next(iter(self._episode_cues)))
+            self._episode_cues[key] = cues
+        return self._episode_cues[key]
+
+    def _verify(self, s: streams.Stream, video: str, meta: dict) -> asyncio.Task:
+        """Whether this file is the episode (episode_check.py): known already, or checked now in the background."""
+        async def run() -> episode_check.Verdict:
+            if known := self.checks.get(s.filename, s.size, video):
+                return known
+            ids = [v["id"] for v in cinemeta.episodes(meta)]
+            try:
+                link = await streams.resolve(self.http, s) or s.url      # once: each read would follow the addon's
+                verdict = await asyncio.wait_for(episode_check.check(link, video, self.episode_subs, ids), 45)
+            except (asyncio.TimeoutError, OSError, ValueError, httpx.HTTPError) as e:
+                log.info("checking %s is %s: %s", s.filename, video, type(e).__name__)
+                return episode_check.Verdict(video, None, checked=time.time())
+            log.info("%s is %s: %s (%.2f%s)", s.filename or s.name, video,
+                     {True: "yes", False: f"no, {verdict.actual or 'another episode'}", None: "can't tell"}[verdict.ok],
+                     verdict.share, f", subtitles {verdict.shift:+.1f} s" if verdict.shift is not None else "")
+            if verdict.ok is not None:
+                self.checks.keep(s.filename, s.size, verdict)
+            return verdict
+        return asyncio.create_task(run())
+
+    def _known_right(self, verifying: asyncio.Task, chosen: streams.Stream, link: str, found: list, video: str,
+                     meta: dict) -> tuple[streams.Stream, str, asyncio.Task | None]:
+        """Before opening: a pick already found to be another episode gives way to the next one (checked in turn
+        once it plays)."""
+        verdict = verifying.result() if not verifying.cancelled() and not verifying.exception() else None
+        if not verdict or verdict.ok is not False:
+            return chosen, link, verifying
+        alt = next((s for s in found[1:] if s.filename != chosen.filename and
+                    not ((v := self.checks.get(s.filename, s.size, video)) and v.ok is False)), None)
+        if alt is None:
+            return chosen, link, verifying
+        log.info("not opening %s: it's %s; %s instead", chosen.filename, verdict.actual or "another episode",
+                 alt.filename or alt.name)
+        return alt, alt.url, self._verify(alt, video, meta)
+
+    async def _switch_if_wrong(self, np: NowPlaying, chosen: streams.Stream, verifying: asyncio.Task | None,
+                               what: tuple):
+        """Once this file is known not to be the episode asked for, a right one takes over at the same moment."""
+        imdb, kind, name, video, label, meta = what
+        try:
+            verdict = await (verifying or self._verify(chosen, video, meta))
+            if verdict.ok is not False or self.state.now_playing is not np:
+                return
+            alt = next((s for s in await self.streams_for(kind, video, meta) if not s.why_dropped and
+                        s.filename != chosen.filename and not (self.cfg.player == "just" and s.headers)), None)
+            if alt is None:
+                await self.notify(f"This file is {verdict.actual or 'another episode'} under this number, and "
+                                  "there's no other copy")
+                return
+            at = 0
+            if np.player == "kodi" and (pid := await self._kodi_player()) is not None:
+                at = (await self.kodi.position(pid))[0]
+            elif (st := await self._just_status()) is not None:
+                at = st[1]
+            log.info("%s is %s, not %s: switching to %s at %s", chosen.filename, verdict.actual, video,
+                     alt.filename or alt.name, _clock(at))
+            await self.notify(f"That file was another episode under this number: switching to {label}")
+            await self.play(imdb, kind, name, video, label, meta, at, prepared=alt, jump=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.info("checking the episode: %s", type(e).__name__)
 
     async def _free_kodi(self, pid: int):
         """What Kodi plays is stopped, and its player gone, before another file opens. Opened over a playing file,
@@ -1298,13 +1420,22 @@ class Agent:
             return Outcome(False, "Nothing of yours is playing to search")
         if self.llm is None:
             return Outcome(False, "Finding a moment needs the LLM (Settings › API keys: OpenRouter)")
-        stream = streams.Stream("", np.url, "", "", np.filename, 0, size=np.size, video_hash=np.video_hash)
+        # The episode's subtitles kept from checking the file (episode_check.py), with how far their times are from
+        # this file's; else what the addons have for it now.
+        shift = (v.shift or 0.0) if (v := self.checks.get(np.filename, np.size, np.video_id)) and v.ok else 0.0
+        found: list[tuple[int, str]] = []
         try:
-            subs = await subtitles.fetch(self.http, await self.addons(), np.kind, np.video_id, stream)
+            found = await self.episode_subs(np.video_id)
         except Exception as e:
             log.info("subtitles for the scene search: %s", type(e).__name__)
-            subs = []
-        found: list[tuple[int, str]] = []
+        subs = []
+        if len(found) < 20:
+            shift = 0.0
+            stream = streams.Stream("", np.url, "", "", np.filename, 0, size=np.size, video_hash=np.video_hash)
+            try:
+                subs = await subtitles.fetch(self.http, await self.addons(), np.kind, np.video_id, stream)
+            except Exception as e:
+                log.info("subtitles for the scene search: %s", type(e).__name__)
         for _, sub in (subtitles.choose(subs, ["eng", "spa", *self.cfg.subtitle_languages]) or
                        [("", s) for s in subs])[:3]:
             try:
@@ -1326,7 +1457,9 @@ class Agent:
             return Outcome(False, "Couldn't search for that moment right now")
         if secs is None:
             return Outcome(False, f"Couldn't find “{a.what}”")
-        log.info("moment %r of %s at %d s (%r)", a.what, title, secs, line)
+        log.info("moment %r of %s at %d s (%r)%s", a.what, title, secs, line,
+                 f", {shift:+.1f} s in the subtitles" if shift else "")
+        secs = max(0, round(secs - shift))
         out = await self._transport(Transport(op="seek_to", seconds=max(0, secs - 2)))
         return Outcome(out.ok, f"To {_clock(secs * 1000)}: “{line}”" if out.ok and line else out.say)
 

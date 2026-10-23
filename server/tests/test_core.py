@@ -1576,12 +1576,25 @@ def test_the_scene_search_jumps_to_where_the_llm_found_the_moment(monkeypatch):
     async def transport(a):
         jumped.append(a)
         return Outcome(True, "To 0:28")
+    from tv_agent.episode_check import Verdict
+
+    async def no_subs(video, lang="eng"):
+        return []                               # nothing kept from a check: the addons are asked as before
     np = NowPlaying("tt1", "series", "tt1:6:25", "The Simpsons")
     me = types.SimpleNamespace(state=types.SimpleNamespace(now_playing=np), llm=Llm(), http=None, addons=addons,
-                               cfg=types.SimpleNamespace(subtitle_languages=["eng"]), _transport=transport)
+                               cfg=types.SimpleNamespace(subtitle_languages=["eng"]), _transport=transport,
+                               checks=types.SimpleNamespace(get=lambda *a: None), episode_subs=no_subs)
     out = asyncio.run(Agent._find_scene(me, A.FindScene(what="Mr. Burns gets shot")))
     assert out.ok and jumped == [A.Transport(op="seek_to", seconds=28)]      # a moment before it
     assert seen == {"title": "The Simpsons S6E25", "wanted": "Mr. Burns gets shot", "first": "0:01 line 1"}
+
+    async def kept(video, lang="eng"):          # the episode's subtitles from checking the file, 3 s later than it
+        return S.cues(lines)
+    me.episode_subs = kept
+    me.checks = types.SimpleNamespace(get=lambda *a: Verdict("tt1:6:25", True, shift=3.0))
+    jumped.clear()
+    asyncio.run(Agent._find_scene(me, A.FindScene(what="Mr. Burns gets shot")))
+    assert jumped == [A.Transport(op="seek_to", seconds=25)]
     me.state.now_playing = None
     assert asyncio.run(Agent._find_scene(me, A.FindScene(what="x"))).say == "Nothing of yours is playing to search"
 

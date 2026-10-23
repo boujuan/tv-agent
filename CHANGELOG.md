@@ -7,6 +7,16 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 ## server — unreleased
 
 ### Added
+- Each episode's file is checked to be that episode (`episode_check.py`): streaming rips follow the service's
+  numbering, so Netflix's rips of Community season 2, which skip the pulled "Advanced Dungeons & Dragons", are one
+  ahead from "S02E14" on. 25 s of the file's own subtitles are compared with the episode's from your subtitle addons
+  (asked by episode id) and, if they differ, with its neighbours'. It runs while the start gets ready (6-8 s the
+  first time, nothing after: files are remembered in `episode-checks.json`); a file found to be another episode
+  gives way to a right one at the same moment ("That file was another episode under this number…"), and is offered
+  where it belongs instead (Netflix's "S02E14" for aired 15, keeping 4K Dolby Vision). The next episode is checked
+  while the current one plays. `check_episodes = false` turns it off.
+- Jumps to a moment use the episode's subtitles kept from that check, corrected by how far their times are from
+  the file's.
 - Updates from GitHub (`updates.py`): `GET /v1/updates` compares the latest release of the agent, the panel, the TV
   app and the phone app with what runs; `POST /v1/updates/tv` downloads the TV app's release, checks it against
   GitHub's SHA-256 and installs it over ADB (Android refuses one signed with another key). `updates` in config.toml:
