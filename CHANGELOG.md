@@ -116,6 +116,8 @@ whole recording instead).
 
 ### Fixed
 - A film's runtime given as "1h 39min" was read as 39 minutes (the length used when Kodi doesn't report one).
+- Stopping or restarting the agent after a phone had been connected took over 10 s, so systemd killed it: a phone
+  that had gone to sleep never answered the closing of its connection. Open connections now get 2 s.
 
 ## server 0.2.0 — 2026-10-22
 

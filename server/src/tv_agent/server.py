@@ -68,6 +68,9 @@ from .stt import model_dir as stt_model_dir
 log = logging.getLogger("tv_agent")
 MAX_BODY = 400_000          # 12 s of 16 kHz PCM16
 SOURCES = ("tv", "laptop", "text", "mcp", "phone")
+# Seconds a stop waits for open connections. A phone that went to sleep never answers the TLS close, and Python
+# waits 30 s for it, past systemd's 10 s: the stop timed out and the agent was killed (found 2026-10-23)
+SHUTDOWN_GRACE = 2
 
 
 def describe(a: A.Action) -> str:
@@ -957,9 +960,9 @@ async def serve(cfg: Config):
     local = local_app(svc)
     servers = [
         uvicorn.Server(uvicorn.Config(lan_app(svc), host=lan_host, port=cfg.lan_port, access_log=False,
-                                      log_level="warning")),
+                                      log_level="warning", timeout_graceful_shutdown=SHUTDOWN_GRACE)),
         uvicorn.Server(uvicorn.Config(local, host="127.0.0.1", port=cfg.local_port, access_log=False,
-                                      log_level="warning")),
+                                      log_level="warning", timeout_graceful_shutdown=SHUTDOWN_GRACE)),
     ]
     serving = [s.serve() for s in servers] + [stream.serve_forever()]
     if cfg.phones:
@@ -1004,7 +1007,9 @@ async def phone_listeners(svc: Service, local: FastAPI) -> list:
                 api.close()
             continue
         server = uvicorn.Server(uvicorn.Config(app, access_log=False, log_level="warning", lifespan="off",
-                                               ssl_certfile=str(config_mod.TLS_CERT), ssl_keyfile=str(config_mod.TLS_KEY)))
+                                               ssl_certfile=str(config_mod.TLS_CERT),
+                                               ssl_keyfile=str(config_mod.TLS_KEY),
+                                               timeout_graceful_shutdown=SHUTDOWN_GRACE))
         stream = await asyncio.start_server(lambda r, w: stream_client(svc, r, w, phone=True), sock=audio, ssl=ctx,
                                             ssl_handshake_timeout=5)
         out += [server.serve(sockets=[api]), stream.serve_forever()]
