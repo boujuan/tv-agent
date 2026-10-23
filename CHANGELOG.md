@@ -24,6 +24,14 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   computer away from home too (needs the player from its 0.1.0).
 
 ### Fixed
+- The agent follows this computer's address on the TV's network. It listened only on the address it started with,
+  so when the laptop moved from Ethernet to Wi-Fi the TV app's microphone and TV Agent Player could no longer reach
+  it, and nothing said so. The LAN address is looked at every 5 s; when it changes, the TV app's, the player's and
+  the phones' listeners move to the new one, the TV app and TV Agent Player are paired again over ADB (once the TV
+  answers), and the TV shows "Voice agent now at …". The agent also pairs them at its start when they were last told
+  another address (`paired.json`, no tokens; written by `tv-agent tv pair` too). `lan_host`, `tv_hosts` and
+  `phone_hosts` edited in `config.toml` are picked up the same way. A listener that can't be bound (its port taken)
+  is retried every minute instead of stopping the agent.
 - `tv-agent tv install` timed out pushing any APK to this TV: its adbd announces 1 MB writes but never acknowledges
   one that big. Pushes now go in writes of at most 64 KB (a 1.1 MB APK in well under a second). A command allowed to
   print nothing for a while (the player's compile, ~6 s) isn't taken for a dead connection.

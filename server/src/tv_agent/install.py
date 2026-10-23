@@ -5,8 +5,12 @@
                                          Player (allow it to start, compile it ahead of time), and pair it
     tv-agent tv pair                     tell the TV app, and TV Agent Player if it's installed, where this agent is
                                          and the token each must send
+
+What each app was told, but the tokens, is kept in paired.json: the running agent pairs them again by itself when
+that isn't where it is any more (pair_again).
 """
 import glob
+import json
 import os
 import zipfile
 import shutil
@@ -16,13 +20,14 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from . import clients
-from .config import Config, lan_address, new_token, read_secret, save_secret
+from .config import CONFIG_DIR, Config, lan_address, new_token, read_secret, save_secret
 from .tv.adb import Adb
 from .tv.tvplayer import PACKAGE as PLAYER
 from .tv.tvplayer import addresses as tvplayer_addresses
 
 APP = "com.boujuan.tvagent"
 UNIT_DIR = Path.home() / ".config/systemd/user"
+PAIRED_FILE = CONFIG_DIR / "paired.json"        # what each TV app was last told (no tokens): pair_again compares
 
 
 def llama_server(cfg: Config) -> Path:
@@ -81,7 +86,7 @@ After=llama-d1.service network-online.target
 
 [Service]
 ExecStart={tv_agent_command()} serve
-# Away from the TV's network the address doesn't exist and the bind fails: retry slowly instead of spinning.
+# With no route to the TV at all (no network yet) the start fails: retry slowly instead of spinning.
 Restart=on-failure
 RestartSec=30
 
@@ -105,17 +110,23 @@ WantedBy=default.target
     return written
 
 
+def app_pairing(cfg: Config) -> dict:
+    """What the TV app is told, but the token: this agent's LAN address and its ports."""
+    return {"url": f"http://{lan_address(cfg)}:{cfg.lan_port}", "stream_port": cfg.stream_port}
+
+
 def pair(cfg: Config, adb: Adb) -> str:
     """Send the agent's address, token and audio-stream port to the TV app (a broadcast only ADB may send)."""
     token = cfg.secret("agent_token")
     if not token:
         raise SystemExit("no agent token yet: run `tv-agent setup token`")
-    url = f"http://{lan_address(cfg)}:{cfg.lan_port}"
-    out = adb.run(["am", "broadcast", "-n", f"{APP}/.ConfigReceiver", "--es", "url", url, "--es", "token", token,
-                   "--ei", "stream_port", str(cfg.stream_port)])
+    told = app_pairing(cfg)
+    out = adb.run(["am", "broadcast", "-n", f"{APP}/.ConfigReceiver", "--es", "url", told["url"], "--es", "token",
+                   token, "--ei", "stream_port", str(told["stream_port"])])
     if "result=-1" not in out.replace(" ", ""):
         raise SystemExit(f"the TV app didn't take the settings ({out.strip()[-80:]}); is it installed?")
-    return url
+    remember("app", told)
+    return told["url"]
 
 
 def is_player_apk(apk: Path) -> bool:
@@ -129,23 +140,67 @@ def installed(adb: Adb, package: str) -> bool:
     return "package:" in adb.run(["pm", "path", package])
 
 
+def player_pairing(cfg: Config) -> dict:
+    """What TV Agent Player is told, but its token: this agent's addresses in the order to try (the LAN's, then
+    Tailscale's: tvplayer.addresses), player_port, and the certificate it must find there (the phones' listeners' one,
+    clients.py)."""
+    return {"hosts": tvplayer_addresses(cfg), "port": cfg.player_port, "cert": clients.certificate()}
+
+
 def pair_player(cfg: Config, adb: Adb) -> str:
-    """TV Agent Player's pairing (its PairReceiver, which only ADB may send to): this agent's addresses in the order
-    to try (the LAN's, then Tailscale's: tvplayer.addresses) and player_port, the player's own token (made the first
-    time), and the certificate it must find there (the phones' listeners' one, clients.py). The running agent reads
-    the token at each connection: no restart."""
+    """TV Agent Player's pairing (its PairReceiver, which only ADB may send to): player_pairing() and the player's own
+    token (made the first time). The running agent reads the token at each connection: no restart."""
     token = read_secret("player_token")
     if not token:
         token = new_token()
         save_secret("player_token", token)
     cfg.secrets["player_token"] = token
-    hosts = tvplayer_addresses(cfg)
+    told = player_pairing(cfg)
+    hosts = told["hosts"]
     out = adb.run(["am", "broadcast", "-n", f"{PLAYER}/.PairReceiver", "--es", "hosts", ",".join(hosts),
-                   "--es", "host", hosts[0], "--ei", "port", str(cfg.player_port), "--es", "token", token,
-                   "--es", "cert", clients.certificate()])
+                   "--es", "host", hosts[0], "--ei", "port", str(told["port"]), "--es", "token", token,
+                   "--es", "cert", told["cert"]])
     if "result=-1" not in out.replace(" ", ""):
         raise SystemExit(f"TV Agent Player didn't take the settings ({out.strip()[-80:]}); is it installed?")
-    return ", ".join(f"{h}:{cfg.player_port}" for h in hosts)
+    remember("player", told)
+    return ", ".join(f"{h}:{told['port']}" for h in hosts)
+
+
+def paired() -> dict:
+    """What each app ("app", "player") was last told, as paired.json has it."""
+    try:
+        data = json.loads(PAIRED_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def remember(app: str, told: dict):
+    """Kept for pair_again; not kept (a full disk) only means the next start pairs that app again."""
+    try:
+        PAIRED_FILE.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        tmp = PAIRED_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(paired() | {app: told}, indent=1))
+        os.replace(tmp, PAIRED_FILE)
+    except OSError:
+        pass
+
+
+def pair_again(cfg: Config, adb: Adb) -> list[str]:
+    """The running agent's (server.Listeners): each TV app whose last pairing isn't where this agent is now, paired
+    again. An app that isn't installed is remembered as needing nothing for these settings, so the TV isn't asked
+    about it again until they change. The names of those paired; TvUnreachable, or SystemExit from pair()."""
+    last, out = paired(), []
+    for app, name, package, now, send in (("app", "the TV app", APP, app_pairing(cfg), pair),
+                                          ("player", "TV Agent Player", PLAYER, player_pairing(cfg), pair_player)):
+        if last.get(app) == now:
+            continue
+        if not installed(adb, package):
+            remember(app, now)
+            continue
+        send(cfg, adb)
+        out.append(name)
+    return out
 
 
 def install_app(cfg: Config, adb: Adb, apk: Path) -> str:

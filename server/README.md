@@ -211,6 +211,12 @@ zero-data-retention ones only); Liquid gets what you said and the options (its t
 both cloud steps on, the local d1 server (llama-d1) can be stopped: the Decisions tab offers it.
 
 `config.toml` needs at least `tv_hosts` (the TV's address, e.g. Ethernet then Wi-Fi; mDNS is tried otherwise).
+The agent follows this computer's address on the TV's network while it runs: when it changes (Ethernet unplugged,
+Wi-Fi taking over, a new DHCP lease) its listeners move there within about 5 seconds and the TV app and TV Agent
+Player are paired again over ADB (the TV shows it; a TV in standby is paired once it answers). `lan_host`,
+`tv_hosts` and `phone_hosts` edited in `config.toml` are used the same way, without a restart. A phone paired with
+the old address needs the new one in the phone app (Agents › Addresses…), or a `phone_hosts` address that doesn't
+change, such as Tailscale's.
 Every setting: [config.example.toml](config.example.toml). Secrets: `~/.config/tv-agent/secrets.toml` (mode 600;
 the daemon refuses to start otherwise). For services across logouts: `loginctl enable-linger`.
 
@@ -224,7 +230,7 @@ the daemon refuses to start otherwise). For services across logouts: `loginctl e
 | See the streams it would choose from, best first | `tv-agent streams "the bear" --season 3 --episode 2` (resolution, quality, HDR, languages, bitrate, cached; never links) |
 | Check after changing the rules | `tv-agent eval`, `tv-agent eval --file eval/commands.jsonl --split test`, `uv run pytest` |
 | Run a command on the TV | `tv-agent tv shell dumpsys media_session` |
-| Re-pair the TV app (new token or address) | `tv-agent tv pair` |
+| Re-pair the TV app (new token; a new address is paired by itself) | `tv-agent tv pair` |
 | Let Claude Code drive the TV | `claude mcp add --scope user tv-agent -- $PWD/.venv/bin/tv-agent-mcp` (12 tools, no shell) |
 | Use it from my phone | The [TV Agent phone app](https://github.com/boujuan/tv-agent-phone); pair it in the panel's Settings › Phones |
 | Stop it for a while | `systemctl --user stop tv-agent llama-d1` (the mic button then says "Agent offline") |
@@ -280,7 +286,8 @@ Tailscale address), for the [TV Agent phone app](https://github.com/boujuan/tv-a
 
 ## Security
 
-- **LAN listener** on one address only (`lan_host`, or the one the route to the TV uses; never `0.0.0.0`).
+- **LAN listener** on one address only (`lan_host`, or the one the route to the TV uses, followed while the
+  agent runs; never `0.0.0.0`).
   Requests must come from the TV's address **and** carry the token (constant-time compare); bodies over 400 KB are
   refused; one utterance at a time. The local API (127.0.0.1) needs the token too.
 - **The token** reaches the TV app by pairing (`tv-agent tv pair`, an ADB broadcast only the shell may send); it

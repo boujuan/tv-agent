@@ -18,6 +18,9 @@ Paired phones (the TV Agent phone app, clients.py): HTTPS on phone_port (8768) w
 for a phone's own token, and the stream above over TLS on phone_stream_port (8769) with that token instead of the
 agent's; pairing from the panel. The TV's listeners and checks are the same with or without them.
 
+These, and TV Agent Player's (player_port 8770), follow this computer's addresses while it runs (Listeners): moved
+to the new LAN address when it changes, and the TV's apps told.
+
 Localhost (127.0.0.1:8766), for the panel, the CLI and the MCP server, same token:
     POST /v1/text {"text"}      decide and do it            POST /v1/audio  PCM16 from the laptop's mic
     POST /v1/decide {"text"}    decide only, with the path it took (the panel's diagram)
@@ -28,6 +31,7 @@ Localhost (127.0.0.1:8766), for the panel, the CLI and the MCP server, same toke
     POST /v1/pipeline {…}       change them: saved in config.toml and live at once
 """
 import asyncio
+import contextlib
 import hmac
 import json
 import logging
@@ -47,6 +51,7 @@ from . import __version__
 from . import actions as A
 from . import activity
 from . import clients as clients_mod
+from . import install
 from . import remote
 from . import updates as updates_mod
 from . import kodi_versions
@@ -960,96 +965,243 @@ async def serve(cfg: Config):
     if cfg.stt_vocabulary_library:          # the first command's vocabulary has your titles too, not only the apps
         svc._library_names_at = time.monotonic()
         asyncio.create_task(svc._refresh_library_names())
-    lan_host = lan_address(cfg)
-    players = await player_listeners(svc)               # before restore(): a player that's open reconnects to it
+    local = local_app(svc)
+    listeners = Listeners(svc, local)
+    await listeners.load_certificate()
+    await listeners.update(only=("player",))        # before restore(): a player that's open reconnects to it
     try:
         await svc.agent.restore()
         asyncio.create_task(svc.agent.warm())
     except Exception as e:
         log.warning("couldn't pick up the last session: %s", type(e).__name__)
-    stream = await asyncio.start_server(lambda r, w: stream_client(svc, r, w), lan_host, cfg.stream_port)
-    local = local_app(svc)
-    servers = [
-        uvicorn.Server(uvicorn.Config(lan_app(svc), host=lan_host, port=cfg.lan_port, access_log=False,
-                                      log_level="warning", timeout_graceful_shutdown=SHUTDOWN_GRACE)),
-        uvicorn.Server(uvicorn.Config(local, host="127.0.0.1", port=cfg.local_port, access_log=False,
-                                      log_level="warning", timeout_graceful_shutdown=SHUTDOWN_GRACE)),
-    ]
-    serving = [s.serve() for s in servers] + [stream.serve_forever()] + [p.serve_forever() for p in players]
-    if cfg.phones:
-        serving += await phone_listeners(svc, local)
+    await listeners.update()
+    # The only server that takes SIGTERM and SIGINT (Listener)
+    local_api = uvicorn.Server(uvicorn.Config(local, host="127.0.0.1", port=cfg.local_port, access_log=False,
+                                              log_level="warning", timeout_graceful_shutdown=SHUTDOWN_GRACE))
 
     async def keepalive():
         while True:
             await asyncio.sleep(50)
             await asyncio.to_thread(svc.agent.adb.keepalive)
 
-    log.info("listening on %s:%d and :%d (TV) and 127.0.0.1:%d (local)", lan_host, cfg.lan_port, cfg.stream_port,
-             cfg.local_port)
-    ka = asyncio.create_task(keepalive())
-    up = asyncio.create_task(updates_mod.loop(svc))
+    log.info("listening for the panel on 127.0.0.1:%d", cfg.local_port)
+    tasks = [asyncio.create_task(keepalive()), asyncio.create_task(updates_mod.loop(svc)),
+             asyncio.create_task(listeners.watch())]
     try:
-        await asyncio.gather(*serving)
+        await local_api.serve()
     finally:
-        ka.cancel()
-        up.cancel()
+        for t in tasks:
+            t.cancel()
         await svc.agent.close()
 
 
-async def player_listeners(svc: Service) -> list[asyncio.Server]:
-    """TV Agent Player's connection (tv/tvplayer.py) at player_port on each of tvplayer.addresses() (the LAN address,
-    then Tailscale's), TLS with the phones' certificate, which the player pins. Listening whatever the player setting,
-    so switching to it needs no restart; a player without the token is turned away. An address that can't be had is
-    skipped with a warning."""
-    port = svc.cfg.player_port
-    try:
-        await asyncio.to_thread(clients_mod.certificate)
-        ctx = clients_mod.tls_context()
-    except (OSError, ValueError, ImportError) as e:
-        log.warning("TV Agent Player: no certificate (%s), so no listener", e)
-        return []
-    out = []
-    for host in await asyncio.to_thread(tvplayer.addresses, svc.cfg):
-        try:
-            out.append(await svc.agent.tvplayer.serve(host, port, ctx))
-            log.info("TV Agent Player: %s:%d (TLS)", host, port)
-        except OSError as e:
-            log.warning("TV Agent Player: not listening on %s:%d (%s)", host, port, e)
-    return out
+CHECK_EVERY = 5             # seconds between looks at the LAN address (a route lookup: nothing is sent)
+RETRY_EVERY = 60            # seconds before a listener that couldn't be had, or a TV that didn't answer, is tried again
+ADDRESS_SETTINGS = ("lan_host", "tv_hosts", "phone_hosts")     # read again when config.toml changes
+# What listens on this computer's addresses: its name in the log, and the setting with its port
+LISTENERS = {"tv": ("the TV app", "lan_port"), "tv_stream": ("the TV app's audio", "stream_port"),
+             "player": ("TV Agent Player (TLS)", "player_port"), "phones": ("phones (HTTPS)", "phone_port"),
+             "phone_stream": ("phones' audio (TLS)", "phone_stream_port")}
 
 
-async def phone_listeners(svc: Service, local: FastAPI) -> list:
-    """The paired phones' HTTPS API and TLS audio stream on the LAN address and phone_hosts (clients.py). An address
-    that can't be had (Tailscale down, the port taken) is skipped with a warning: the TV's listeners don't depend
-    on these."""
-    cfg = svc.cfg
-    try:
-        fingerprint = await asyncio.to_thread(clients_mod.certificate)
-        ctx = clients_mod.tls_context()
-    except (OSError, ValueError, ImportError) as e:
-        log.error("phones: no certificate (%s), so no phone listener", e)
-        return []
-    app = clients_mod.gateway(svc, local)
-    out = []
-    for host in clients_mod.addresses(cfg):
-        api = audio = None
+class Listener(uvicorn.Server):
+    """A uvicorn server on one of this computer's addresses, stopped when that address goes (Listeners). It leaves
+    SIGTERM and SIGINT to the local API's server: a uvicorn server that stops puts back the handlers it found, and
+    stopped out of order that would undo the handlers of those started after it (the agent's stop would no longer
+    be graceful)."""
+
+    @contextlib.contextmanager
+    def capture_signals(self):
+        yield
+
+    def run(self, sock) -> "Listener":
+        """Serving on sock (a bound listening socket), in the background."""
+        self.task = asyncio.create_task(self.serve(sockets=[sock]))
+        self.task.add_done_callback(_ended)
+        return self
+
+
+def _ended(task: asyncio.Task):
+    if not task.cancelled() and task.exception() is not None:
+        log.error("a listener stopped: %s", task.exception())
+
+
+class Listeners:
+    """Everything that listens on this computer's addresses, kept where it should be while the agent runs: the TV
+    app's HTTP and audio stream on the LAN address (lan_address()), TV Agent Player's on tvplayer.addresses(), the
+    phones' on clients.addresses().
+
+    The LAN address is looked at every CHECK_EVERY seconds. When it changes (Ethernet unplugged and Wi-Fi taking over,
+    another DHCP lease), the listeners move to the new one and the TV's apps are paired again over ADB, without a
+    restart, and the TV says so (found 2026-10-23: the agent kept listening on an address that was gone, unnoticed).
+    The same happens at the start when the apps were last told another address (install.pair_again), and when
+    lan_host, tv_hosts or phone_hosts change in config.toml. With no route to the TV at all (no network), everything
+    stays where it is. Connections already open on an address that's left end by themselves.
+
+    Phones pin the certificate, not an address, so they keep working on the new address once they have it (the
+    phone app's Agents screen, or phone_hosts such as a Tailscale address that doesn't change)."""
+
+    def __init__(self, svc: Service, local: FastAPI):
+        self.svc, self.cfg = svc, svc.cfg
+        self.apps = {"tv": lan_app(svc), "phones": clients_mod.gateway(svc, local)}
+        self.lan = lan_address(svc.cfg)                 # SystemExit without tv_hosts or lan_host
+        self.bound: dict[tuple[str, str], Listener | asyncio.Server] = {}     # (listener, address) -> its server
+        self.missing: set[tuple[str, str]] = set()      # wanted, but couldn't be had (said once)
+        self.tls = None
+        self.fingerprint = ""
+        self.pair_due = True                # whether the TV's apps may need telling where the agent is
+        self.dirty = False                  # addresses changed since the listeners were last brought up to date
+        self._retry_at = 0.0
+        self._config_mtime = self._mtime()
+
+    async def load_certificate(self):
+        """The phones' certificate, which TV Agent Player pins too (made the first time)."""
         try:
-            api = clients_mod.listen_socket(host, cfg.phone_port)
-            audio = clients_mod.listen_socket(host, cfg.phone_stream_port)
-        except OSError as e:
-            log.warning("phones: not listening on %s (%s)", host, e)
-            if api:
-                api.close()
-            continue
-        server = uvicorn.Server(uvicorn.Config(app, access_log=False, log_level="warning", lifespan="off",
+            self.fingerprint = await asyncio.to_thread(clients_mod.certificate)
+            self.tls = clients_mod.tls_context()
+        except (OSError, ValueError, ImportError) as e:
+            log.error("no certificate (%s): no listener for TV Agent Player or the phones", e)
+            return
+        if self.cfg.phones:
+            log.info("phones: %d paired; certificate SHA-256 %s…", len(self.svc.clients.devices), self.fingerprint[:16])
+
+    def wanted(self) -> list[tuple[str, str]]:
+        """(listener, address) for each that should be up now."""
+        cfg, out = self.cfg, [("tv", self.lan), ("tv_stream", self.lan)]
+        if self.tls is not None:
+            out += [("player", h) for h in tvplayer.addresses(cfg)]
+            if cfg.phones:
+                out += [(what, h) for h in clients_mod.addresses(cfg) for what in ("phones", "phone_stream")]
+        return list(dict.fromkeys(out))
+
+    async def update(self, only: tuple[str, ...] = tuple(LISTENERS)):
+        """Stop the listeners that aren't wanted any more, start the wanted ones that aren't up (`only` those)."""
+        try:
+            wanted = await asyncio.to_thread(self.wanted)    # tvplayer.addresses asks the tailscale CLI
+        except SystemExit:                                   # the route to the TV went meanwhile
+            self.dirty = True
+            return
+        for key in [k for k in self.bound if k not in wanted]:
+            self._stop(key)
+        missing = set()
+        for key in wanted:
+            if key in self.bound or key[0] not in only:
+                continue
+            what, host = key
+            where = clients_mod.host_port(host, getattr(self.cfg, LISTENERS[what][1]))
+            try:
+                self.bound[key] = await self._start(what, host)
+            except OSError as e:
+                missing.add(key)
+                (log.debug if key in self.missing else log.warning)("not listening for %s on %s (%s)",
+                                                                     LISTENERS[what][0], where, e)
+                continue
+            log.info("listening for %s on %s", LISTENERS[what][0], where)
+        self.missing = missing
+
+    async def _start(self, what: str, host: str) -> Listener | asyncio.Server:
+        """One listener on host; OSError when it can't be had (the address gone, the port taken)."""
+        cfg, svc, sock = self.cfg, self.svc, clients_mod.listen_socket
+        uvi = dict(access_log=False, log_level="warning", timeout_graceful_shutdown=SHUTDOWN_GRACE)
+        match what:
+            case "tv":
+                return Listener(uvicorn.Config(self.apps["tv"], **uvi)).run(sock(host, cfg.lan_port))
+            case "tv_stream":
+                return await asyncio.start_server(lambda r, w: stream_client(svc, r, w),
+                                                  sock=sock(host, cfg.stream_port))
+            case "player":
+                return await svc.agent.tvplayer.serve(host, cfg.player_port, self.tls)
+            case "phones":
+                listening = sock(host, cfg.phone_port)
+                svc.clients.fingerprint = self.fingerprint      # pairing from the panel can start
+                return Listener(uvicorn.Config(self.apps["phones"], lifespan="off",
                                                ssl_certfile=str(config_mod.TLS_CERT),
-                                               ssl_keyfile=str(config_mod.TLS_KEY),
-                                               timeout_graceful_shutdown=SHUTDOWN_GRACE))
-        stream = await asyncio.start_server(lambda r, w: stream_client(svc, r, w, phone=True), sock=audio, ssl=ctx,
-                                            ssl_handshake_timeout=5)
-        out += [server.serve(sockets=[api]), stream.serve_forever()]
-        log.info("phones: %s (HTTPS) and :%d (TLS)", clients_mod.host_port(host, cfg.phone_port), cfg.phone_stream_port)
-    if out:
-        svc.clients.fingerprint = fingerprint
-        log.info("phones: %d paired; certificate SHA-256 %s…", len(svc.clients.devices), fingerprint[:16])
-    return out
+                                               ssl_keyfile=str(config_mod.TLS_KEY), **uvi)).run(listening)
+            case "phone_stream":
+                return await asyncio.start_server(lambda r, w: stream_client(svc, r, w, phone=True),
+                                                  sock=sock(host, cfg.phone_stream_port), ssl=self.tls,
+                                                  ssl_handshake_timeout=5)
+        raise ValueError(what)
+
+    def _stop(self, key: tuple[str, str]):
+        server = self.bound.pop(key)
+        if isinstance(server, Listener):
+            server.should_exit = True           # it closes within SHUTDOWN_GRACE
+        else:
+            server.close()                      # no new connections; open ones end by themselves
+        what, host = key
+        log.info("no longer listening for %s on %s", LISTENERS[what][0],
+                 clients_mod.host_port(host, getattr(self.cfg, LISTENERS[what][1])))
+
+    async def watch(self):
+        while True:
+            await asyncio.sleep(CHECK_EVERY)
+            try:
+                await self.check()
+            except Exception:
+                log.exception("following this computer's addresses")
+
+    async def check(self):
+        """One look: config.toml's addresses, then the LAN address; the listeners and the pairing brought up to date
+        when either changed, or tried again when the last try didn't work."""
+        if self._reread_config():
+            self.dirty = True
+        try:
+            lan = lan_address(self.cfg)
+        except SystemExit:
+            return                              # no route to the TV now: everything stays where it is until there is
+        if lan != self.lan:
+            log.warning("this computer's address on the TV's network is %s now (was %s): listening there and "
+                        "pairing the TV's apps again", lan, self.lan)
+            self.lan, self.dirty = lan, True
+        if self.dirty:
+            self.dirty, self.pair_due = False, True
+        elif not ((self.missing or self.pair_due) and time.monotonic() >= self._retry_at):
+            return
+        self._retry_at = time.monotonic() + RETRY_EVERY
+        await self.update()
+        if self.pair_due:
+            await self.pair()
+
+    async def pair(self):
+        """The TV's apps told where the agent is now, those whose last pairing says otherwise (install.pair_again,
+        on the panel's ADB connection: a voice command isn't held up by a TV that doesn't answer); said on the TV.
+        A TV that doesn't answer (off) is asked again after RETRY_EVERY."""
+        try:
+            told = await asyncio.to_thread(install.pair_again, self.cfg, self.svc.panel_adb)
+        except (TvUnreachable, OSError) as e:
+            log.info("pairing the TV's apps again: %s; trying again in %d s", e, RETRY_EVERY)
+            return
+        except SystemExit as e:                 # an app refused the settings: asking again won't change that
+            log.warning("pairing the TV's apps again: %s", e)
+            told = []
+        self.pair_due = False
+        if told:
+            log.info("%s paired again with %s", " and ".join(told), self.lan)
+            await self.svc.agent.notify(f"Voice agent now at {self.lan}: {' and '.join(told)} paired again")
+
+    @staticmethod
+    def _mtime() -> float:
+        try:
+            return config_mod.CONFIG_FILE.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def _reread_config(self) -> bool:
+        """ADDRESS_SETTINGS as config.toml has them, when the file has changed; whether any of them did."""
+        mtime = self._mtime()
+        if mtime == self._config_mtime:
+            return False
+        self._config_mtime = mtime
+        try:
+            fresh = config_mod.load()
+        except (SystemExit, ValueError, OSError) as e:     # a half-saved edit, say: the addresses stay as they are
+            log.warning("config.toml not read again: %s", e)
+            return False
+        changed = False
+        for key in ADDRESS_SETTINGS:
+            if getattr(fresh, key) != getattr(self.cfg, key):
+                log.info("%s = %s (config.toml)", key, json.dumps(getattr(fresh, key)))
+                setattr(self.cfg, key, getattr(fresh, key))
+                changed = True
+        return changed

@@ -295,9 +295,11 @@ def test_the_phones_audio_stream_takes_a_phones_token_only(paths):
     assert asyncio.run(busy()) == {"error": "busy"}      # past the token: one command at a time, as for the TV
 
 
-def test_the_phone_listener_speaks_tls_with_the_pinned_certificate(paths):
+def test_the_phone_listener_speaks_tls_with_the_pinned_certificate(paths, monkeypatch):
     """The real listener: uvicorn over TLS on a free port, the certificate's digest what the phone pins."""
     import socket
+    from tv_agent.tv import tvplayer
+    monkeypatch.setattr(tvplayer, "tailscale_address", lambda: None)
     svc = service(paths)
     ports = []
     for _ in range(2):
@@ -309,8 +311,9 @@ def test_the_phone_listener_speaks_tls_with_the_pinned_certificate(paths):
     p = svc.clients.start_pairing()
 
     async def go():
-        serving = await server.phone_listeners(svc, server.local_app(svc))
-        tasks = [asyncio.ensure_future(c) for c in serving]
+        listeners = server.Listeners(svc, server.local_app(svc))
+        await listeners.load_certificate()
+        await listeners.update(only=("phones", "phone_stream"))
         try:
             ctx = ssl.create_default_context()
             ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE      # pinned instead, as the phone does
@@ -326,9 +329,9 @@ def test_the_phone_listener_speaks_tls_with_the_pinned_certificate(paths):
                 r = await http.post(f"https://127.0.0.1:{ports[0]}/v1/pair", json={"code": p.code, "name": "TLS"})
             return der, r
         finally:
-            for t in tasks:
-                t.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+            for key in list(listeners.bound):
+                listeners._stop(key)
+            await asyncio.sleep(0.2)
 
     der, r = asyncio.run(go())
     import hashlib

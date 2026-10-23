@@ -2,7 +2,8 @@
 # written by `tv-agent setup token|stremio|kodi|liquid|openrouter`, never here.
 
 tv_hosts = ["192.168.1.41", "192.168.1.40"]   # Ethernet, Wi-Fi; also the only addresses the LAN listener accepts
-lan_host = "192.168.1.51"                     # this laptop on bond0; never 0.0.0.0 (tailscale0 is up too)
+lan_host = "192.168.1.51"                     # this laptop on bond0; never 0.0.0.0 (tailscale0 is up too).
+                                              # Empty: the route to the TV's, followed while the agent runs
 lan_port = 8765
 local_port = 8766
 stream_port = 8767         # the TV app's live audio
