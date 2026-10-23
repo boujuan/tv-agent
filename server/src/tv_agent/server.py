@@ -48,6 +48,7 @@ from . import actions as A
 from . import activity
 from . import clients as clients_mod
 from . import remote
+from . import updates as updates_mod
 from .agent import Agent
 from . import config as config_mod
 from .config import Config, lan_address
@@ -181,6 +182,7 @@ class Service:
         self.token = cfg.secret("agent_token") or ""
         self.clients = clients_mod.Clients()
         self._busy = asyncio.Lock()
+        self.updates = updates_mod.Updates(self)
         self._running: asyncio.Task | None = None
         self._rules_mtime = self._mtime()
 
@@ -426,9 +428,10 @@ async def stream_client(svc: "Service", reader: asyncio.StreamReader, writer: as
         if not phone and peer not in allowed:
             return
         hello = json.loads(await asyncio.wait_for(reader.readline(), 3) or b"{}")
-        given = str(hello.get("token") or "") if isinstance(hello, dict) else ""       # junk: unauthorized
+        hello = hello if isinstance(hello, dict) else {}            # junk: unauthorized
+        given = str(hello.get("token") or "")
         if phone:
-            ok = svc.clients.verify(given, peer) is not None
+            ok = svc.clients.verify(given, peer, str(hello.get("app_version") or "")) is not None
         else:
             ok = bool(svc.token) and hmac.compare_digest(given.encode(), svc.token.encode())
         if not ok:
@@ -939,6 +942,7 @@ def local_app(svc: Service) -> FastAPI:
 
     app.include_router(remote.routes(svc))
     app.include_router(clients_mod.routes(svc))
+    app.include_router(updates_mod.routes(svc))
     return app
 
 
@@ -977,10 +981,12 @@ async def serve(cfg: Config):
     log.info("listening on %s:%d and :%d (TV) and 127.0.0.1:%d (local)", lan_host, cfg.lan_port, cfg.stream_port,
              cfg.local_port)
     ka = asyncio.create_task(keepalive())
+    up = asyncio.create_task(updates_mod.loop(svc))
     try:
         await asyncio.gather(*serving)
     finally:
         ka.cancel()
+        up.cancel()
         await svc.agent.close()
 
 

@@ -28,6 +28,7 @@ D1_WHERE = ("local-first", "hosted-first", "local", "hosted")
 # What the hosted speech model should hear by name: the apps, the way they're said
 STT_VOCABULARY = ("Stremio", "TizenTube", "YouTube", "YouTube Music", "Kodi", "Twitch", "Movistar Plus", "Prime Video",
                   "RTVE Play", "TDTChannels")
+UPDATES = ("auto", "notify", "off")                               # updates.py
 LEGACY = ("hosted_d1", "llm_fallback", "llm_first")              # before decide_steps, decide_off and d1_where
 
 
@@ -83,6 +84,9 @@ class Config:
     llm_reasoning: str = "none"             # reasoning effort ("none": off where the model allows); "" sends none
     llm_private: bool = False               # only providers that keep no data
     log_transcripts: bool = True
+    # New releases on GitHub (updates.py): "notify" checks every few hours (the panel and the phones show them),
+    # "auto" also installs the TV app's by itself, "off" never asks GitHub
+    updates: str = "notify"
     secrets: dict[str, str] = field(default_factory=dict, repr=False)
 
     def secret(self, name: str) -> str | None:
@@ -127,6 +131,8 @@ def load() -> Config:
     cfg.decide_steps = [s for s in cfg.decide_steps if s in STEPS] + [s for s in STEPS if s not in cfg.decide_steps]
     if cfg.stt_where not in ("local", "hosted", "local-first", "hosted-first"):
         raise SystemExit(f"{CONFIG_FILE}: stt_where must be local, hosted, local-first or hosted-first")
+    if cfg.updates not in UPDATES:
+        raise SystemExit(f"{CONFIG_FILE}: updates must be {', '.join(UPDATES)}")
     if cfg.stt_language not in ("native", "") and not re.fullmatch(r"[a-z]{2}", cfg.stt_language):
         raise SystemExit(f"{CONFIG_FILE}: stt_language must be \"native\", \"\" or a two-letter code such as \"es\"")
     if not isinstance(cfg.stt_vocabulary, list) or not all(isinstance(x, str) for x in cfg.stt_vocabulary):

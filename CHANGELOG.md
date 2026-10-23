@@ -6,8 +6,27 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 
 ## server — unreleased
 
+### Added
+- Updates from GitHub (`updates.py`): `GET /v1/updates` compares the latest release of the agent, the panel, the TV
+  app and the phone app with what runs; `POST /v1/updates/tv` downloads the TV app's release, checks it against
+  GitHub's SHA-256 and installs it over ADB (Android refuses one signed with another key). `updates` in config.toml:
+  "notify" (default) checks every 6 hours, "auto" also installs the TV app's release when it isn't listening, "off"
+  never asks GitHub. Both repositories are public, so no login is needed.
+- Each phone's app version (its `X-App-Version` header, or `app_version` in its audio stream's first line), kept with
+  the phone and shown to the panel.
+
 ### Fixed
 - `tv-agent tv install --help` (or an APK path that doesn't exist) printed a traceback instead of the usage.
+
+## panel — unreleased
+
+### Added
+- Settings › Updates: the latest releases against this computer, the TV app and the phones; Check now; install by
+  themselves, check and tell, or don't check (`updates`). "Update the TV app" installs its release over ADB through
+  the agent; "Update this computer" moves this checkout to a newer release tag (a fast-forward of a clean `main`,
+  `uv sync`, the agent restarted), never over uncommitted or unpushed work. Checked soon after the panel starts and
+  every 6 hours; news shows in the status bar and as a notification.
+- Settings › Phones shows each phone's app version, and when a newer one is out. Needs the agent from this version.
 
 ## android 0.8.0 — 2026-10-23
 

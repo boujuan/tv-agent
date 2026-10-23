@@ -248,6 +248,7 @@ Localhost (127.0.0.1:8766), for the panel, the CLI and the MCP server, same toke
 | `GET /v1/lists?list=recent\|new\|movies`; `POST /v1/lists/pick` `{"list", "imdb", "video"}` | the numbered lists voice shows on the TV, returned instead; play one (it's also what "number 2" picks from) |
 | `GET /v1/activity?limit=&before=`; `POST /v1/activity/mark` `{"t", "wrong", "heard"}`; `GET /v1/recording?name=` | the history, newest first, a page at a time; mark one wrong; a kept recording (WAV) |
 | `GET/POST /v1/settings` | the Settings tab's playback and language settings (`remote.SETTINGS`), checked, saved and live |
+| `GET /v1/updates`; `POST /v1/updates/check`; `POST /v1/updates/tv` | the latest GitHub release of the agent, panel, TV app and phone app against what runs (`updates.py`; checked every 6 h unless `updates = "off"`); install the TV app's release over ADB (localhost only; only with GitHub's SHA-256 for it) |
 | `GET /v1/clients`; `POST /v1/clients/pairing`, `GET` it, `/pairing/cancel`; `POST /v1/clients/revoke\|rename` `{"id"}` | paired phones (localhost only): list, pair (a one-time code and the QR code's link), revoke |
 
 Phones, paired from the panel (Settings › Phones), on this computer's LAN address (and `phone_hosts`, e.g. a
@@ -256,7 +257,7 @@ Tailscale address), for the [TV Agent phone app](https://github.com/boujuan/tv-a
 | | |
 |---|---|
 | `POST /v1/pair` `{"code", "name"}` (port 8768, HTTPS) | the panel's one-time code → this phone's own token, the agent's name and version, the stream port |
-| the endpoints above, with that token (port 8768, HTTPS) | all but the stream link, the rules editor (`POST /v1/rules`, reset, reload, eval) and the client list; `GET /v1/clients/me` and `POST /v1/clients/me/forget` instead |
+| the endpoints above, with that token (port 8768, HTTPS) | all but the stream link, the rules editor (`POST /v1/rules`, reset, reload, eval) and the client list; `GET /v1/clients/me` and `POST /v1/clients/me/forget` instead, and `GET /v1/updates` but not `POST /v1/updates/tv`. A phone's `X-App-Version` header (or `app_version` in its stream's first line) is kept as its app version for the panel |
 | port 8769, TLS | the TV app's audio stream protocol (`server.py`), with the phone's token in the first line |
 
 ## Security

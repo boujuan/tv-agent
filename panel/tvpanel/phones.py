@@ -27,6 +27,17 @@ def ago(t: float | None) -> str:
     return time.strftime("%d %b", time.localtime(t))
 
 
+def newer(latest: str | None, current: str | None) -> bool:
+    """"0.10.0" after "0.9.1" (numbers, not text); False when either isn't a version."""
+    def parts(v):
+        try:
+            return tuple(int(x) for x in (v or "").removeprefix("v").split("."))
+        except ValueError:
+            return None
+    a, b = parts(latest), parts(current)
+    return bool(a and b) and a > b
+
+
 def grouped(fingerprint: str) -> str:
     """The certificate's fingerprint as the phone shows it to compare: its first 16 hex digits, in fours."""
     f = fingerprint[:16].upper()
@@ -72,7 +83,15 @@ class Phones(QWidget):
         self.refresh()
 
     def refresh(self):
-        self.panel.bg.run(lambda: api("/v1/clients", timeout=5), self.show_phones)
+        def run():
+            res = api("/v1/clients", timeout=5)
+            try:                                    # the phone app's latest release, to say who's behind
+                res["latest_app"] = ((api("/v1/updates", timeout=5).get("components") or {}).get("phone") or {}) \
+                    .get("latest")
+            except Exception:
+                pass
+            return res
+        self.panel.bg.run(run, self.show_phones)
 
     def show_phones(self, res, err=None):
         while self.rows.count():
@@ -103,8 +122,14 @@ class Phones(QWidget):
             h = QHBoxLayout(row)
             h.setContentsMargins(0, 2, 0, 2)
             seen = ago(d.get("last_seen")) + (f" from {d['last_ip']}" if d.get("last_ip") else "")
-            h.addWidget(QLabel(f"📱 <b>{html.escape(d['name'])}</b> <span style='color:gray'>· paired "
-                               f"{ago(d['paired'])} · last seen {html.escape(seen)}</span>"), 1)
+            version = d.get("app_version")
+            app = (f"app {html.escape(version)}" if version else "app version not reported yet")
+            if version and newer(res.get("latest_app"), version):
+                app += f" <span style='color:{AMBER}'>· {html.escape(res['latest_app'])} is out</span>"
+            label = QLabel(f"📱 <b>{html.escape(d['name'])}</b> <span style='color:gray'>· {app} · paired "
+                           f"{ago(d['paired'])} · last seen {html.escape(seen)}</span>")
+            label.setWordWrap(True)
+            h.addWidget(label, 1)
             rename = QPushButton("Rename…")
             rename.clicked.connect(lambda _=False, d=d: self.rename(d))
             revoke = QPushButton("Revoke")

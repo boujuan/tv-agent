@@ -144,6 +144,10 @@ class Panel(QMainWindow):
             t.start(interval)
         self.refresh_units()
         QTimer.singleShot(500, self.refresh_state)
+        updates = QTimer(self)                  # new releases (Settings › Updates): soon after start, then every 6 h
+        updates.timeout.connect(lambda: self.settings.updates.check(quiet=True))
+        updates.start(6 * 3600 * 1000)
+        QTimer.singleShot(20000, lambda: self.settings.updates.check(quiet=True))
 
     # ---- beside the tabs: save, revert, checks, files, about ----
 

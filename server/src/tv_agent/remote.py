@@ -12,7 +12,7 @@ shortcuts, the lists to pick from, the activity history and its recordings, and 
     POST /v1/lists/pick {"list", "imdb", "video"}   play one of them
     GET  /v1/activity?limit=&before=    the history, newest first     POST /v1/activity/mark {"t", "wrong", "heard"}
     GET  /v1/recording?name=            a kept recording (WAV)
-    GET  /v1/settings, POST /v1/settings {…}   the panel Settings tab's playback and language settings, live
+    GET  /v1/settings, POST /v1/settings {…}   the panel Settings tab's playback, language and update settings, live
 
 Answers never carry the stream link (it has the debrid key) or a secret; track names are scrubbed of links.
 """
@@ -52,7 +52,7 @@ EPISODE = re.compile(r"^tt\d+:(\d+):(\d+)$")
 LANG = re.compile(r"^[a-z]{3}$")
 # The Settings tab's playback and language settings: each applies to the next command (agent.py reads cfg as it goes).
 SETTINGS = ("player", "max_height", "max_mbps", "probe_streams", "binge", "auto_skip", "audio_language",
-            "subtitle_languages", "native_language", "twitch_favorites", "log_transcripts")
+            "subtitle_languages", "native_language", "twitch_favorites", "log_transcripts", "updates")
 AUDIO = ("eng", "spa", "fre", "ita", "ger", "por", "jpn", "kor", "chi")
 SUBTITLES = ("eng", "spa", "chs", "cht", "chi", "fre", "ita", "ger", "por", "jpn", "kor")
 
@@ -68,6 +68,8 @@ def setting(key: str, value):
         case "max_mbps" if number and 0 <= value <= 1000:
             return float(value)
         case "probe_streams" | "binge" | "auto_skip" | "log_transcripts" if isinstance(value, bool):
+            return value
+        case "updates" if value in config_mod.UPDATES:
             return value
         case "audio_language" | "native_language" if isinstance(value, str) and LANG.match(value):
             return value

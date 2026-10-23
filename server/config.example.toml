@@ -27,6 +27,7 @@ native_language = "spa"
 
 twitch_favorites = []      # e.g. ["ibai", "auronplay"]: matched first, since speech-to-text spells names freely
 log_transcripts = true     # what you said, in `journalctl --user -u tv-agent`
+updates = "notify"         # GitHub releases: "notify" checks every 6 h, "auto" also installs the TV app's, "off"
 
 stt_model = "parakeet-v2"  # speech: "parakeet-v2" (English) or "parakeet-v3" (25 languages; `tv-agent setup stt`)
 stt_where = "local"        # "local" (this laptop), "hosted" (OpenRouter, the recording when you pause), or

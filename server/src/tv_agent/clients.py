@@ -65,7 +65,9 @@ PHONE_ROUTES = {
     ("POST", "/v1/lists/pick"), ("GET", "/v1/activity"), ("POST", "/v1/activity/mark"), ("GET", "/v1/recording"),
     ("GET", "/v1/settings"), ("POST", "/v1/settings"),
     ("GET", "/v1/clients/me"), ("POST", "/v1/clients/me/forget"),
+    ("GET", "/v1/updates"), ("POST", "/v1/updates/check"),
 }
+APP_VERSION = re.compile(r"[0-9A-Za-z.+-]{1,32}")      # what a phone says its app is (X-App-Version)
 
 
 @dataclass
@@ -76,11 +78,12 @@ class Device:
     paired: float
     last_seen: float = 0.0
     last_ip: str = ""
+    app_version: str = ""           # the phone app's, as it last said (X-App-Version, or its audio stream's hello)
 
     def public(self) -> dict:
         """What the panel and the phone see of it (never the token's hash)."""
         return {"id": self.id, "name": self.name, "paired": self.paired, "last_seen": self.last_seen or None,
-                "last_ip": self.last_ip}
+                "last_ip": self.last_ip, "app_version": self.app_version or None}
 
 
 @dataclass
@@ -198,9 +201,9 @@ class Clients:
 
     # ---- paired phones ----
 
-    def verify(self, token: str, ip: str = "") -> Device | None:
+    def verify(self, token: str, ip: str = "", app_version: str = "") -> Device | None:
         """The phone this token belongs to, or None. Every hash is compared (in constant time), so how long it takes
-        doesn't tell which one matched."""
+        doesn't tell which one matched. The app's version it sends is kept (when it looks like one)."""
         if not token:
             return None
         h = digest(token).encode()
@@ -211,6 +214,8 @@ class Clients:
         if found:
             now, moved = time.time(), bool(ip) and ip != found.last_ip
             found.last_seen, found.last_ip = now, ip or found.last_ip
+            if APP_VERSION.fullmatch(app_version) and app_version != found.app_version:
+                found.app_version, moved = app_version, True
             if moved or now - self._written > SEEN_EVERY:
                 try:
                     self._save()
@@ -360,7 +365,7 @@ def gateway(svc, inner):
         if (method, path) not in PHONE_ROUTES:
             return await _reply(send, 404, {"detail": "Not Found"})
         token = headers.get("authorization", "").removeprefix("Bearer ").strip()
-        device = clients.verify(token, ip)
+        device = clients.verify(token, ip, headers.get("x-app-version", ""))
         if device is None:
             return await _reply(send, 401, {"detail": "Not paired (or revoked): pair this phone again"})
         if length > (MAX_BODY if path == "/v1/audio" else MAX_JSON):

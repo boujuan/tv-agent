@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
 
 from .common import AMBER, GREEN, RED, TV_AGENT, Say, agent_config, api, card, dim, load_cfg, set_autostart
 from .phones import Phones
+from .updates import UpdatesCard
 
 AUDIO = [("English", "eng"), ("Spanish", "spa"), ("French", "fre"), ("Italian", "ita"), ("German", "ger"),
          ("Portuguese", "por"), ("Japanese", "jpn"), ("Korean", "kor"), ("Chinese", "chi")]
@@ -198,6 +199,8 @@ class Settings(QScrollArea):
         f3.addRow("TV addresses", self.hosts)
         outer.addWidget(other)
 
+        self.updates = UpdatesCard(self, panel)     # its mode is saved with the rest; its buttons act at once
+        outer.addWidget(self.updates)
         self.phones = Phones(panel)                 # its own API calls, applied at once (not the window's Save)
         outer.addWidget(self.phones)
 
@@ -258,7 +261,7 @@ class Settings(QScrollArea):
             f4.addWidget(box)
         outer.addWidget(me)
         outer.addStretch()
-        for w in (self.player, self.height_, self.audio, self.native):
+        for w in (self.player, self.height_, self.audio, self.native, self.updates.mode):
             w.currentIndexChanged.connect(self.mark_dirty)
         for w in (self.no_limit, self.probe, self.binge, self.auto_skip, self.log):
             w.toggled.connect(self.mark_dirty)
@@ -276,6 +279,7 @@ class Settings(QScrollArea):
         if not self.dirty:
             self.load()           # binge mode and auto skip can change by voice meanwhile
         self.check_players()
+        self.updates.check()
 
     def mark_dirty(self, *_):
         if not self._loading and not self.dirty:
@@ -381,6 +385,7 @@ class Settings(QScrollArea):
         self.hosts.setText(", ".join(cfg.tv_hosts))
         self.binge.setChecked(cfg.binge)
         self.auto_skip.setChecked(cfg.auto_skip)
+        self._select(self.updates.mode, cfg.updates)
         for key, w in self.adv.items():
             value = getattr(cfg, key)
             if isinstance(w, QSpinBox):
@@ -408,6 +413,7 @@ class Settings(QScrollArea):
             "tv_hosts": split(self.hosts.text()) or agent_config.Config().tv_hosts,
             "binge": self.binge.isChecked(),
             "auto_skip": self.auto_skip.isChecked(),
+            "updates": self.updates.mode.currentData(),
             **{k: (w.value() if isinstance(w, QSpinBox) else w.text().strip()) for k, w in self.adv.items()},
         }
 

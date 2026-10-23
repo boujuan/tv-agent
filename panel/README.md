@@ -62,8 +62,12 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
   Twitch favourites, history on/off, TV addresses, and advanced addresses, ports, the Kodi login and pairing the TV
   app again (Save restarts the agent; what's playing carries on); and the panel's own behaviour: close to tray, open hidden in the
   tray, details on hover, notifications, start at login. Panel settings live in `~/.config/tv-agent/panel.conf`.
+  **Updates:** the latest GitHub releases against this computer, the TV app and the phones; install them by
+  themselves, check and tell, or don't check. The TV app's release is installed over ADB by the agent; this computer
+  moves to a newer release tag (git fast-forward of a clean `main`, then `uv sync` and a restart of the agent), never
+  over uncommitted or unpushed work; each phone updates itself.
   **Phones:** the phones paired with the agent ([TV Agent phone app](https://github.com/boujuan/tv-agent-phone)),
-  when each was last seen and from where, rename and revoke (at once); **Pair a phone…** shows a QR code and a
+  their app version (and whether a newer one is out), when each was last seen and from where, rename and revoke (at once); **Pair a phone…** shows a QR code and a
   one-time code (5 minutes) with the certificate fingerprint the app shows when the code is typed in.
 
 ## Files
@@ -75,6 +79,7 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
 | `tvpanel/overview.py`, `activity_tab.py`, `commands_tab.py`, `decisions.py`, `settings_tab.py` | The five tabs |
 | `tvpanel/tv_card.py`, `speech_tab.py`, `about.py` | Overview's TV card; Decisions › Speech to text; About |
 | `tvpanel/phones.py` | Settings › Phones: paired phones, pairing with a QR code |
+| `tvpanel/updates.py` | Settings › Updates: GitHub releases, updating the TV app and this checkout |
 | `tvpanel/mic.py` | The computer's microphone (`pw-record`, end-of-speech detection) |
 | `tvpanel/common.py` | systemd, the agent's API, small widgets, preferences |
 | `tv-agent-panel.desktop.in`, `install.sh`, `tv-agent.svg` | Desktop entry template, installer, icon |
