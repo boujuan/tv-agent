@@ -709,9 +709,9 @@ def test_auto_skip_jumps_a_sure_intro_as_it_comes_and_leaves_the_rest():
         async def notify(text):
             pass
         np = NowPlaying("tt1", "series", "tt1:2:3", "X")
-        me = types.SimpleNamespace(state=types.SimpleNamespace(now_playing=np), _kodi_player=player, segments=segs,
-                                   kodi=types.SimpleNamespace(position=position, seek_to=seek_to), notify=notify,
-                                   cfg=types.SimpleNamespace(auto_skip=auto))
+        kodi = types.SimpleNamespace(position=position, seek_to=seek_to)
+        me = types.SimpleNamespace(state=types.SimpleNamespace(now_playing=np), _player_id=player, segments=segs,
+                                   _ctl=lambda pid: kodi, notify=notify, cfg=types.SimpleNamespace(auto_skip=auto))
         asyncio.run(Agent._skip_watch(me, np, sleep=sleep, also=also))
         return seeks
 
@@ -1143,7 +1143,8 @@ def test_subtitles_switch_over_from_what_kodi_shows():
     async def set_subtitle(pid, index):
         set_to.append(index)
 
-    a = types.SimpleNamespace(_kodi_player=player, kodi=types.SimpleNamespace(tracks=tracks, set_subtitle=set_subtitle))
+    kodi = types.SimpleNamespace(tracks=tracks, set_subtitle=set_subtitle)
+    a = types.SimpleNamespace(_player_id=player, _ctl=lambda pid: kodi)
     out = asyncio.run(Agent._tracks(a, A.Tracks(subtitles="toggle")))
     assert set_to == [None] and out.say == "Subtitles off"
 
@@ -1475,7 +1476,7 @@ def test_play_and_pause_go_to_the_app_in_front_not_to_kodi_behind_it():
     async def started():
         raise AssertionError("Kodi was brought up over the app in front")
     me = types.SimpleNamespace(tv=tv, _kodi_player=no_kodi, kodi=types.SimpleNamespace(start=started),
-                               state=types.SimpleNamespace(now_playing=None))
+                               state=types.SimpleNamespace(now_playing=None), tvplayer=types.SimpleNamespace(now=lambda: None))
     me.front_app = lambda: Agent.front_app(me)
     assert asyncio.run(me.front_app()) == "io.gh.reisxd.tizentube.cobalt"      # under the TV app's pill
     out = asyncio.run(Agent._transport(me, A.Transport(op="resume")))
@@ -1745,6 +1746,7 @@ def test_jumps_in_dolby_vision_or_behind_another_screen_reopen_the_file():
             return types.SimpleNamespace(ok=True, say="Playing")
         a.front_app, a._kodi_player = front_app, player
         a.kodi = types.SimpleNamespace(seek_to=seek_to, seek_by=seek_by, position=position)
+        a.tvplayer = types.SimpleNamespace(now=lambda: None)
         a.state = types.SimpleNamespace(now_playing=np)
         a._reopen = (np, reopen)
         out = await Agent._transport(a, op)

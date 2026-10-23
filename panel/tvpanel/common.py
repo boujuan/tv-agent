@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QComboBox,
                                QMessageBox, QSizePolicy, QVBoxLayout, QWidget)
 
 APP_ID = "tv-agent-panel"
+PLAYER_NAMES = {"tvplayer": "TV Agent Player", "kodi": "Kodi", "just": "Just Player"}   # config's `player`
 ICON = PANEL / "tv-agent.svg"
 TV_AGENT = Path(shutil.which("tv-agent") or REPO / "server" / ".venv" / "bin" / "tv-agent")
 GREEN, AMBER, RED, GREY, BLUE, PURPLE = "#2fb170", "#e0a030", "#e05555", "#8a8f98", "#4c8dff", "#9b6cf5"

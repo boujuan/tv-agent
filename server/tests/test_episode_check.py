@@ -54,6 +54,7 @@ def test_what_is_found_is_kept_and_a_file_can_stand_in_for_its_real_episode(tmp_
 
 def agent_with(tmp_path, by_video: dict):
     a = Agent.__new__(Agent)
+    a.tvplayer = types.SimpleNamespace(now=lambda: None)        # TV Agent Player not open
     a.checks = E.Checks(tmp_path / "checks.json")
     a.cfg = types.SimpleNamespace(max_height=2160, max_mbps=0, player="kodi")
     a.track_plan = lambda meta: types.SimpleNamespace(subtitles=None, audio="eng")

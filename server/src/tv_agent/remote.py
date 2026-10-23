@@ -33,7 +33,7 @@ from .decide.router import Decision
 from .languages import name as language_name
 from .redact import scrub
 from .stremio import cinemeta
-from .tv import media
+from .tv import media, tvplayer
 from .tv import status as tv_status
 from .tv.adb import TvUnreachable
 
@@ -62,7 +62,7 @@ def setting(key: str, value):
     """A setting's value checked (and made the type config.toml keeps), or HTTPException 422."""
     number = isinstance(value, (int, float)) and not isinstance(value, bool)
     match key:
-        case "player" if value in ("kodi", "just"):
+        case "player" if value in config_mod.PLAYERS:
             return value
         case "max_height" if number and int(value) == value and 240 <= value <= 4320:
             return int(value)
@@ -118,13 +118,14 @@ def routes(svc) -> APIRouter:
         np = agent.state.now_playing
         out: dict = {"now_playing": None, "player": None, "tracks": None, "segments": []}
         total_ms = 0
-        if (pid := await agent._kodi_player()) is not None:
-            pos, total_ms, speed = await agent.kodi.position(pid)
-            out["player"] = {"app": "kodi", "position_s": pos // 1000, "duration_s": total_ms // 1000,
-                             "playing": speed != 0}
+        if (pid := await agent._player_id()) is not None:
+            ctl = agent._ctl(pid)
+            pos, total_ms, speed = await ctl.position(pid)
+            out["player"] = {"app": "tvplayer" if pid == tvplayer.PID else "kodi", "position_s": pos // 1000,
+                             "duration_s": total_ms // 1000, "playing": speed != 0}
             try:
-                out["tracks"] = tracks_json(await agent.kodi.tracks(pid) or {})
-            except (httpx.HTTPError, ValueError):
+                out["tracks"] = tracks_json(await ctl.tracks(pid) or {})
+            except (httpx.HTTPError, ValueError, tvplayer.PlayerError):
                 pass
         elif (st := await agent._just_status()) is not None:
             out["player"] = {"app": "just", "position_s": st[1] // 1000,
@@ -145,7 +146,7 @@ def routes(svc) -> APIRouter:
         except (httpx.HTTPError, ValueError, AssertionError):
             pass
         out["now_playing"] = item
-        if pid is not None and np.player == "kodi" and total_ms:
+        if pid is not None and np.player in ("kodi", "tvplayer") and total_ms:
             try:
                 out["segments"] = [{"what": s.kind, "start_s": s.start_ms // 1000, "end_s": s.end_ms // 1000}
                                    for s in await agent.segments(np, total_ms)]
@@ -155,19 +156,22 @@ def routes(svc) -> APIRouter:
 
     @r.post("/v1/now-playing/track")
     async def track(request: Request):
-        """One of Kodi's tracks by its index (the phone's track lists); "subtitle": null hides subtitles."""
+        """One of the player's tracks by its index (the phone's track lists); "subtitle": null hides subtitles."""
         svc.check(request, lan=False)
         body = await body_of(request)
-        pid = await svc.agent._kodi_player()
+        pid = await svc.agent._player_id()
         if pid is None:
-            raise HTTPException(409, "Choosing a track works in Kodi")
+            raise HTTPException(409, "Choosing a track works in TV Agent Player and Kodi")
+        ctl = svc.agent._ctl(pid)
         try:
             if "audio" in body:
-                await svc.agent.kodi.set_audio(pid, int(body["audio"]))
+                await ctl.set_audio(pid, int(body["audio"]))
             if "subtitle" in body:
-                await svc.agent.kodi.set_subtitle(pid, None if body["subtitle"] is None else int(body["subtitle"]))
+                await ctl.set_subtitle(pid, None if body["subtitle"] is None else int(body["subtitle"]))
         except (TypeError, ValueError):
             raise HTTPException(422, "audio / subtitle: a track's index") from None
+        except tvplayer.PlayerError as e:
+            raise HTTPException(409, str(e)) from None
         return {"ok": True}
 
     # ---- the remote ----
@@ -296,7 +300,7 @@ def routes(svc) -> APIRouter:
 
     def settings() -> dict:
         return {"settings": {k: getattr(svc.cfg, k) for k in SETTINGS},
-                "choices": {"player": ["kodi", "just"], "max_height": [2160, 1440, 1080, 720],
+                "choices": {"player": list(config_mod.PLAYERS), "max_height": [2160, 1440, 1080, 720],
                             "audio": [{"code": c, "label": language_name(c)} for c in AUDIO],
                             "subtitles": [{"code": c, "label": language_name(c) + {"chs": " (Simplified)",
                                            "cht": " (Traditional)"}.get(c, "")} for c in SUBTITLES]}}

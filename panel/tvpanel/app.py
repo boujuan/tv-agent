@@ -19,8 +19,9 @@ from PySide6.QtWidgets import (QApplication, QDialog, QDialogButtonBox, QHBoxLay
 from .about import About
 from .activity_tab import Activity
 from .commands_tab import Commands
-from .common import (APP_ID, ICON, REPO, SERVICES, STYLE, Async, Prefs, WheelGuard, agent_config, api, clock,
-                     episode_of, gpu_of, gpu_totals, human, pill, run_doctor, run_eval, unit_info, GREEN, AMBER, RED)
+from .common import (APP_ID, ICON, PLAYER_NAMES, REPO, SERVICES, STYLE, Async, Prefs, WheelGuard, agent_config, api,
+                     clock, episode_of, gpu_of, gpu_totals, human, pill, run_doctor, run_eval, unit_info, GREEN, AMBER,
+                     RED)
 from .decisions import Decisions
 from .mic import Mic
 from .overview import Overview
@@ -43,7 +44,7 @@ class Tray(QSystemTrayIcon):
         players = menu.addMenu("Films and series play in")
         group = QActionGroup(players)
         self.player_acts = {}
-        for key, label in (("just", "Just Player"), ("kodi", "Kodi")):
+        for key, label in PLAYER_NAMES.items():
             a = QAction(label, players, checkable=True)
             a.triggered.connect(lambda _=False, key=key: panel.settings.save({"player": key}))
             group.addAction(a)
@@ -422,12 +423,12 @@ class Panel(QMainWindow):
                 o.tv.setText("Voice agent starting or not answering yet…")
                 o.playing.setText("")
                 return
-            player = {"just": "Just Player", "kodi": "Kodi"}.get(st.get("configured_player"), "?")
+            player = PLAYER_NAMES.get(st.get("configured_player"), "?")
             o.tv.setText(f"TV at {st.get('tv') or '–'} · plays films and series in {player}")
             np, pl = st.get("now_playing"), st.get("player")
             if np and pl:
                 where = clock(pl["position_s"]) + (f" / {clock(pl['duration_s'])}" if pl.get("duration_s") else "")
-                app = {"just": "Just Player", "kodi": "Kodi"}.get(pl.get("app"), "")
+                app = PLAYER_NAMES.get(pl.get("app"), "")
                 o.playing.setText(f"{pill('Playing' if pl.get('playing') else 'Paused', GREEN if pl.get('playing') else AMBER)}"
                                   f"&nbsp; <b>{np.get('name')}{episode_of(np.get('video_id', ''))}</b> "
                                   f"<span style='color:gray'>· {where} · {app}</span>")

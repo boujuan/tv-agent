@@ -66,12 +66,13 @@ def status(adb: Adb) -> dict:
     return out
 
 
-PACKAGES = {"tvagent": APP, "kodi": "org.xbmc.kodi", "just": "com.brouken.player"}
+PACKAGES = {"tvagent": APP, "tvplayer": "com.boujuan.tvagent.player", "kodi": "org.xbmc.kodi",
+            "just": "com.brouken.player"}
 
 
 def packages(adb: Adb) -> dict:
-    """The TV app and the two players: installed, version, enabled; the TV app's APK SHA-256 too (to match a
-    GitHub release's)."""
+    """The TV app and the players: installed, version, enabled; the TV app's APK SHA-256 too (to match a GitHub
+    release's)."""
     script = "; echo @@; ".join(f"dumpsys package {pkg} | grep -m3 -E 'versionName|versionCode|User 0:'"
                                 for pkg in PACKAGES.values())
     script += f"; echo @@; sha256sum $(pm path {APP} | head -1 | cut -d: -f2) 2>/dev/null"

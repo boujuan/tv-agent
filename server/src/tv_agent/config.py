@@ -1,7 +1,8 @@
 """Settings (~/.config/tv-agent/config.toml) and secrets (secrets.toml next to it, mode 0600).
 
-The secrets file holds the agent token the TV app sends, the Stremio auth key (full account access), the Kodi
-web password and, when set, the Liquid and OpenRouter API keys of the cloud fallbacks. The daemon refuses to start if the folder or that file can be read by other accounts.
+The secrets file holds the agent token the TV app sends, the player token TV Agent Player sends, the Stremio auth
+key (full account access), the Kodi web password and, when set, the Liquid and OpenRouter API keys of the cloud
+fallbacks. The daemon refuses to start if the folder or that file can be read by other accounts.
 """
 import json
 import os
@@ -21,7 +22,9 @@ CLIENTS_FILE = CONFIG_DIR / "clients.json"       # paired phones: names and thei
 TLS_CERT = CONFIG_DIR / "phone-tls.crt"          # the phones' listeners' certificate, pinned by the phone app
 TLS_KEY = CONFIG_DIR / "phone-tls.key"
 
-SECRET_NAMES = ("agent_token", "stremio_auth_key", "kodi_password", "liquid_api_key", "openrouter_api_key")
+SECRET_NAMES = ("agent_token", "player_token", "stremio_auth_key", "kodi_password", "liquid_api_key",
+                "openrouter_api_key")
+PLAYERS = ("tvplayer", "kodi", "just")
 OPTIONAL_SECRETS = ("liquid_api_key", "openrouter_api_key")     # only for the cloud steps
 STEPS = ("phrases", "patterns", "llm", "d1")                     # the decision steps (decide/router.py)
 D1_WHERE = ("local-first", "hosted-first", "local", "hosted")
@@ -45,6 +48,7 @@ class Config:
     phone_port: int = 8768
     phone_stream_port: int = 8769
     phone_hosts: list[str] = field(default_factory=list)   # more addresses for them besides lan_host (e.g. Tailscale)
+    player_port: int = 8770                 # TV Agent Player's connection (LAN, TLS with the phones' certificate)
     d1_url: str = "http://127.0.0.1:8091"
     d1_model: Path = DATA_DIR / "models/d1-3B/d1-3B-Q4_K_M.gguf"
     llama_server: str = ""                  # llama.cpp's llama-server; empty: on PATH or under ~/.local/opt
@@ -64,7 +68,9 @@ class Config:
     max_height: int = 2160                  # preferred maximum resolution (lines)
     max_mbps: float = 60.0                  # stay under what the TV's network link carries; 0: no limit
     probe_streams: bool = True              # turn off while the TV uses Mullvad (debrid one-IP rules)
-    player: str = "kodi"                    # "kodi" (full remote control) or "just" (Just Player)
+    # "tvplayer" (TV Agent Player: Media3, driven over its own connection), "kodi" (full remote control) or "just"
+    # (Just Player)
+    player: str = "kodi"
     # Tracks Kodi switches to after a start (ISO 639-2 codes, as Kodi reports them). Titles made in a country
     # that speaks native_language play in it with subtitles off; everything else gets audio_language (when the
     # file has it, else the original) with the first available subtitle_languages track on.
@@ -125,8 +131,8 @@ def load() -> Config:
         cfg.decide_steps = ["phrases", "patterns", "d1", "llm"]
     if legacy.get("hosted_d1") is False and "d1_where" not in data:
         cfg.d1_where = "local"
-    if cfg.player not in ("kodi", "just"):
-        raise SystemExit(f"{CONFIG_FILE}: player must be \"kodi\" or \"just\"")
+    if cfg.player not in PLAYERS:
+        raise SystemExit(f"{CONFIG_FILE}: player must be \"tvplayer\", \"kodi\" or \"just\"")
     if not set(cfg.decide_steps) | set(cfg.decide_off) <= set(STEPS):
         raise SystemExit(f"{CONFIG_FILE}: decide_steps and decide_off take {', '.join(STEPS)}")
     cfg.decide_steps = [s for s in cfg.decide_steps if s in STEPS] + [s for s in STEPS if s not in cfg.decide_steps]
@@ -159,6 +165,15 @@ def lan_address(cfg: Config) -> str:
             continue
     raise SystemExit(f"{CONFIG_FILE}: set tv_hosts (the TV's address) or lan_host (this computer's address on "
                      "the TV's network)")
+
+
+def read_secret(name: str) -> str | None:
+    """One secret as the file has it now (one set since this process started too: a new pairing)."""
+    assert name in SECRET_NAMES, name
+    try:
+        return tomllib.loads(SECRETS_FILE.read_text()).get(name) or None
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
 
 
 def save_secret(name: str, value: str | None):

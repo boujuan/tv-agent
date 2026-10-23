@@ -64,6 +64,7 @@ from .listen_stream import StreamSession
 from . import stt as stt_mod
 from .stt import Stt
 from .tv import status as tv_status
+from .tv import tvplayer
 from .tv.adb import Adb, TvUnreachable
 from .stt import model_dir as stt_model_dir
 
@@ -619,9 +620,10 @@ def local_app(svc: Service) -> FastAPI:
         svc.check(request, lan=False)
         np = svc.agent.state.now_playing
         player = None
-        if (pid := await svc.agent._kodi_player()) is not None:
-            pos, total, speed = await svc.agent.kodi.position(pid)
-            player = {"app": "kodi", "position_s": pos // 1000, "duration_s": total // 1000, "playing": speed != 0}
+        if (pid := await svc.agent._player_id()) is not None:
+            pos, total, speed = await svc.agent._ctl(pid).position(pid)
+            player = {"app": "tvplayer" if pid == tvplayer.PID else "kodi", "position_s": pos // 1000,
+                      "duration_s": total // 1000, "playing": speed != 0}
         elif (st := await svc.agent._just_status()) is not None:
             player = {"app": "just", "position_s": st[1] // 1000, "duration_s": np.runtime_ms // 1000,
                       "playing": st[0] == "PLAYING"}
@@ -958,12 +960,13 @@ async def serve(cfg: Config):
     if cfg.stt_vocabulary_library:          # the first command's vocabulary has your titles too, not only the apps
         svc._library_names_at = time.monotonic()
         asyncio.create_task(svc._refresh_library_names())
+    lan_host = lan_address(cfg)
+    players = await player_listener(svc, lan_host)       # before restore(): a player that's open reconnects to it
     try:
         await svc.agent.restore()
         asyncio.create_task(svc.agent.warm())
     except Exception as e:
         log.warning("couldn't pick up the last session: %s", type(e).__name__)
-    lan_host = lan_address(cfg)
     stream = await asyncio.start_server(lambda r, w: stream_client(svc, r, w), lan_host, cfg.stream_port)
     local = local_app(svc)
     servers = [
@@ -972,7 +975,7 @@ async def serve(cfg: Config):
         uvicorn.Server(uvicorn.Config(local, host="127.0.0.1", port=cfg.local_port, access_log=False,
                                       log_level="warning", timeout_graceful_shutdown=SHUTDOWN_GRACE)),
     ]
-    serving = [s.serve() for s in servers] + [stream.serve_forever()]
+    serving = [s.serve() for s in servers] + [stream.serve_forever()] + ([players.serve_forever()] if players else [])
     if cfg.phones:
         serving += await phone_listeners(svc, local)
 
@@ -991,6 +994,20 @@ async def serve(cfg: Config):
         ka.cancel()
         up.cancel()
         await svc.agent.close()
+
+
+async def player_listener(svc: Service, host: str) -> asyncio.Server | None:
+    """TV Agent Player's connection (tv/tvplayer.py) on the LAN address at player_port, TLS with the phones'
+    certificate, which the player pins. Listening whatever the player setting, so switching to it needs no restart;
+    a player without the token is turned away."""
+    try:
+        await asyncio.to_thread(clients_mod.certificate)
+        server = await svc.agent.tvplayer.serve(host, svc.cfg.player_port, clients_mod.tls_context())
+    except (OSError, ValueError, ImportError) as e:
+        log.warning("TV Agent Player: not listening on %s:%d (%s)", host, svc.cfg.player_port, e)
+        return None
+    log.info("TV Agent Player: %s:%d (TLS)", host, svc.cfg.player_port)
+    return server
 
 
 async def phone_listeners(svc: Service, local: FastAPI) -> list:

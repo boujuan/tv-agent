@@ -13,7 +13,8 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
                                QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMessageBox, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
-from .common import AMBER, GREEN, RED, TV_AGENT, Say, agent_config, api, card, dim, load_cfg, set_autostart
+from .common import (AMBER, GREEN, PLAYER_NAMES, RED, TV_AGENT, Say, agent_config, api, card, dim, load_cfg,
+                     set_autostart)
 from .phones import Phones
 from .updates import UpdatesCard
 
@@ -105,8 +106,9 @@ class Settings(QScrollArea):
         f1.setContentsMargins(16, 14, 16, 14)
         f1.addRow(QLabel("<b>Playback</b>"))
         self.player = QComboBox()
-        self.player.addItem("Just Player · simple screen, media-key control", "just")
+        self.player.addItem("TV Agent Player · fastest; exact jumps, tracks by name, add-on subtitles", "tvplayer")
         self.player.addItem("Kodi · full control (exact seeks, per-file languages)", "kodi")
+        self.player.addItem("Just Player · simple screen, media-key control", "just")
         self.height_ = QComboBox()
         for label, v in (("4K (2160p)", 2160), ("1440p", 1440), ("1080p", 1080), ("720p", 720)):
             self.height_.addItem(label, v)
@@ -292,7 +294,7 @@ class Settings(QScrollArea):
             self.panel.dirty_changed()
 
     def check_players(self):
-        """Kodi and Just Player on the TV: installed, version, not disabled."""
+        """The players on the TV: installed, version, not disabled."""
         def done(res, err):
             self.packages = res if res and not err and "error" not in res else {}
             self.show_players(err or (res or {}).get("error"))
@@ -301,7 +303,7 @@ class Settings(QScrollArea):
     def show_players(self, err=None):
         key = self.player.currentData()
         p = self.packages.get(key)
-        name = {"kodi": "Kodi", "just": "Just Player"}.get(key, key)
+        name = PLAYER_NAMES.get(key, key)
         if not p:
             self.player_state.setText(f"<span style='color:gray'>{name} on the TV: "
                                       + ("can't check (the voice agent or the TV isn't answering)" if err else
