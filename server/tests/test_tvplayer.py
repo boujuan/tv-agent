@@ -176,6 +176,7 @@ def test_tracks_in_kodis_shape_with_forced_subtitles_not_counted_as_on():
 class FakeTvPlayer:
     """TvPlayer's surface without a connection: records what the agent asks."""
     item = "tt1:1:2#1"
+    up = False
 
     def __init__(self, pos=(600_000, 2_700_000, 1.0)):
         self.did, self.pos, self.last = [], pos, {}

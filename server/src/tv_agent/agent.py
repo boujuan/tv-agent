@@ -558,12 +558,15 @@ class Agent:
         t0 = time.perf_counter()
         if not jump:
             asyncio.create_task(self.notify(f"Finding {label}…"))
-        kodi_ready = player_ready = None
+        kodi_ready = player_ready = kodi_open = None
         if self.cfg.player == "kodi" and not self.dry_run:
             kodi_ready = asyncio.create_task(self._start_kodi())   # Kodi gets ready (or cold-starts) during the search
         elif self.cfg.player == "tvplayer" and not self.dry_run:
-            # The player's screen comes up and connects during the search (~0.3 s), so the link goes to a ready player
+            # The player's screen comes up and connects during the search (~0.3 s), so the link goes to a ready player.
+            # Whether Kodi plays too (it's stopped first: one player at a time) is asked meanwhile as well: a Kodi
+            # frozen in the background answers only by its 1.5 s timeout.
             player_ready = asyncio.create_task(self.tvplayer.ready(self.adb))
+            kodi_open = asyncio.create_task(self._kodi_player())
         if prepared is not None:            # found and checked while the previous episode played
             found = [prepared]
         else:
@@ -613,17 +616,21 @@ class Agent:
             if verifying is not None and verifying.done() and chosen is found[0] and not preloaded:
                 chosen, link, verifying = self._known_right(verifying, chosen, link, found, video, meta)
             async with self._starting:
-                if (pid := await self._player_id()) is not None:
-                    await self._note_position(pid)      # a replay of this episode starts where it is
+                if self.tvplayer.now() is not None:
+                    await self._note_position(tvplayer.PID)    # a replay of this episode starts where it is
                 resume_ms = self._replace_session(video, resume_ms, exact=jump)
                 addon_subs = None
                 if plan.subtitles is not None:   # asked now for the file chosen, added if the file lacks the language
                     addon_subs = asyncio.create_task(subtitles.fetch(self.http, await self.addons(), kind, video,
                                                                      chosen))
-                if (kodi := await self._kodi_player()) is not None:
-                    await self.kodi.stop(kodi)                              # one player at a time
+                # One player at a time: Kodi stopped if it plays. With the player's screen already up (binge, a jump,
+                # the next title) Kodi can't be in front, so that's done after the file opens instead of before
+                if kodi_open is not None and not self.tvplayer.up and (kodi := await kodi_open) is not None:
+                    await self.kodi.stop(kodi)
                 await self.tvplayer.open(link, resume_ms, item=video, title=label, headers=chosen.headers or None,
                                          audio=plan.audio, subs=plan.subtitles)
+                if kodi_open is not None and not kodi_open.done():
+                    asyncio.create_task(self._stop_kodi_when(kodi_open))
                 t_open = time.perf_counter()
                 self.state.now_playing = NowPlaying(imdb, kind, video, name, "tvplayer", chosen.url, runtime,
                                                     filename=chosen.filename, size=chosen.size,
@@ -1051,6 +1058,14 @@ class Agent:
             raise
         except Exception as e:      # slow or failing addons, a file that won't parse: the file's own subtitles only
             log.info("addon subtitles for %s: %s", label, type(e).__name__)
+
+    async def _stop_kodi_when(self, kodi_open: asyncio.Task):
+        """Kodi stopped once the check started with the search says it plays (TV Agent Player has the screen)."""
+        try:
+            if (kodi := await kodi_open) is not None:
+                await self.kodi.stop(kodi)
+        except Exception as e:
+            log.info("stopping Kodi: %s", type(e).__name__)
 
     async def _try_another(self, np: NowPlaying, error: dict):
         """TV Agent Player couldn't play a file soon after it opened (a dead link, something it can't read): the next

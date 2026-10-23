@@ -18,6 +18,7 @@ import hmac
 import itertools
 import json
 import logging
+import secrets
 import time
 from collections.abc import Callable
 
@@ -71,6 +72,7 @@ class TvPlayer:
         self.last: dict[str, dict] = {}         # the latest event of each type about self.item
         self._pos_at = 0.0
         self._loads = itertools.count(1)
+        self._run = secrets.token_hex(3)        # an agent restarted meanwhile names its loads differently
         self._adopt: str | None = None          # after a restart: the first item the player reports that starts so
 
     # ---- the connection ----
@@ -228,9 +230,9 @@ class TvPlayer:
                    audio: str | None = None, subs: list[str] | None = None, bitrate: int = 0, play: bool = True,
                    http: str | None = None):
         """Loads it in place (the screen stays: no relaunch). `audio` and `subs` are the track plan
-        (languages.TrackPlan), applied in the player's own first choice. Each load gets its own id (`item`#n), so an
-        event about the one before can't be taken for this one's."""
-        self.item, self.last, self._adopt = f"{item}#{next(self._loads)}", {}, None
+        (languages.TrackPlan), applied in the player's own first choice. Each load gets its own id (`item`#run-n),
+        so an event about the one before, even one this agent opened before a restart, can't be taken for this one's."""
+        self.item, self.last, self._adopt = f"{item}#{self._run}-{next(self._loads)}", {}, None
         fields = {"url": url, "item": self.item, "title": title, "start_ms": max(0, int(resume_ms)), "audio": audio,
                   "subs": subs, "play": play}
         if headers:
