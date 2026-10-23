@@ -7,19 +7,21 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 ## server — unreleased
 
 ### Added
-- Kodi 21 or 22 on the TV (`kodi_versions.py`): `GET /v1/kodi` (installed, the newest build of each for the TV's
-  ABI on Kodi's mirrors, backups), `POST /v1/kodi/switch {"to"}` (the panel only). A switch backs up Kodi's settings,
-  libraries and add-ons on the TV (`/sdcard/tv-agent/kodi-<version>.tar`, ~18 MB), installs the APK only with the
-  SHA-256 the mirror publishes, and going back to 21 uninstalls 22, installs 21 and restores the backup from 21
-  (Kodi 22 converts its databases one way). A Kodi from Google Play, signed with another key, is replaced only when
-  confirmed, with its backup restored.
+- Kodi updates for the TV (`kodi_versions.py`): `GET /v1/kodi` (installed, the newest build for the TV's ABI on
+  Kodi's mirrors: 22.0 RC 1 now, backups), `POST /v1/kodi/update` (the panel only). An update backs up Kodi's
+  settings, libraries and add-ons on the TV first (`/sdcard/tv-agent/kodi-<version>.tar`, ~18 MB) and installs the
+  APK only with the SHA-256 the mirror publishes. A Kodi from Google Play, signed with another key, is replaced only
+  when confirmed, with that backup restored. `POST /v1/kodi/switch {"to": "21"}` goes back from 22 (it converts its
+  databases one way): uninstalled, 21 installed, the backup from 21 restored.
+- `check_episodes` is one of the live settings (`/v1/settings`), for the phone app.
 
 ## panel — unreleased
 
 ### Added
-- Settings › Kodi on the TV: the Kodi installed, its backups, "Use Kodi 22" (Piers: fixes seeking on MediaTek
-  decoders like this TV's; a release candidate for now) and back, and "Update to 21.3" when a newer build of the
-  same version is out. Needs the agent from this version.
+- Settings › Updates has Kodi too: the version on the TV, the newest one (Kodi 22 Piers, a release candidate with
+  fixes for seeking on MediaTek decoders like this TV's) and "Update Kodi", with its progress. Needs the agent from
+  this version.
+- Settings › Playback: "Check each episode is the one asked for, by its subtitles" (`check_episodes`).
 
 ## server 0.4.0 — 2026-10-23
 

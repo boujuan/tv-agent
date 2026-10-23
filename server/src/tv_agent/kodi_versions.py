@@ -1,13 +1,14 @@
-"""Kodi's version on the TV: 21 (Omega, stable) or 22 (Piers), switched from the panel. Kodi 22 has MediaTek fixes
-this TV's decoders need (seeking: xbmc PRs #28505, #28839), but converts its databases one way, and Android installs
-no older version over a newer one. So every switch first backs up Kodi's settings, libraries and add-ons on the TV
-(/sdcard/tv-agent/kodi-<version>.tar, ~20 MB, outside Kodi's folder so an uninstall keeps it); going back to 21
-uninstalls 22, installs 21 and restores the backup made from 21. The APK comes from Kodi's mirrors for the TV's ABI
-and is installed only with the SHA-256 the mirror publishes for it. A switch runs in the background (a minute or
-two: a 70 MB download, the install, Kodi's first start).
+"""Kodi on the TV kept up to date from the panel: the newest Kodi on Kodi's mirrors for the TV's ABI (Kodi 22 Piers
+is a release candidate for now, with MediaTek fixes this TV's decoders need: seeking, xbmc PRs #28505, #28839). An
+update first backs up Kodi's settings, libraries and add-ons on the TV (/sdcard/tv-agent/kodi-<version>.tar, ~18 MB,
+outside Kodi's folder so an uninstall keeps it), since Kodi 22 converts its databases one way and Android installs
+no older version over a newer one: going back to 21 (only through the API) uninstalls 22, installs 21 and restores
+that backup. The APK is installed only with the SHA-256 the mirror publishes for it. An update runs in the
+background (a minute or two: a 70 MB download, the install, Kodi's first start).
 
-    GET  /v1/kodi                   installed, available per version, backups, the switch in progress
-    POST /v1/kodi/switch {"to": "22"|"21", "replace": bool}   (the panel only)
+    GET  /v1/kodi                   installed, the newest build (and of each version), backups, the update running
+    POST /v1/kodi/update {"replace": bool}       to the newest build (the panel only)
+    POST /v1/kodi/switch {"to": "21"|"22", "replace": bool}   to a version, e.g. back to 21 (the panel only)
 """
 import asyncio
 import hashlib
@@ -102,7 +103,11 @@ class KodiVersions:
             avail = await self.available(now["abi"])
         except (httpx.HTTPError, ValueError) as e:
             avail, now["mirror_error"] = {}, type(e).__name__
-        return {**now, "major": (now["version"] or "").split(".")[0] or None, "available": avail, "job": self.job}
+        top = max(avail.items(), key=lambda kv: parse(kv[1]["file"])["key"], default=(None, None))
+        return {**now, "major": (now["version"] or "").split(".")[0] or None, "available": avail, "job": self.job,
+                "latest": top[1] and {**top[1], "major": top[0]},
+                "newer": bool(top[1] and now["version"] and top[1]["version"] != now["version"]
+                              and parse(top[1]["file"])["key"][:2] > tuple(map(int, now["version"].split(".")[:2])))}
 
     def _step(self, text: str):
         log.info("Kodi switch: %s", text)
@@ -231,6 +236,17 @@ def routes(svc) -> APIRouter:
         panel_only(request)
         return await svc.kodi_versions.state()
 
+    @r.post("/v1/kodi/update")
+    async def kodi_update(request: Request):
+        """To the newest Kodi on the mirrors (a backup on the TV first)."""
+        panel_only(request)
+        body = await request.json()
+        state = await svc.kodi_versions.state()
+        if not state.get("newer"):
+            raise HTTPException(409, "Kodi is up to date" if state.get("latest") else
+                                state.get("error") or "Kodi's mirrors didn't answer")
+        return await start(state["latest"]["major"], bool(body.get("replace")))
+
     @r.post("/v1/kodi/switch")
     async def kodi_switch(request: Request):
         panel_only(request)
@@ -238,12 +254,15 @@ def routes(svc) -> APIRouter:
         to = str(body.get("to", ""))
         if to not in NAMES:
             raise HTTPException(422, f"to: one of {', '.join(NAMES)}")
+        return await start(to, bool(body.get("replace")))
+
+    async def start(to: str, replace: bool) -> dict:
         job = svc.kodi_versions.job
         if job and not job["done"] and not job["error"]:
             raise HTTPException(409, "a switch is running already")
         if svc._busy.locked():
             raise HTTPException(409, "The TV app is listening: try again in a moment")
-        asyncio.create_task(svc.kodi_versions.switch(to, replace=bool(body.get("replace"))))
-        return {"ok": True}
+        asyncio.create_task(svc.kodi_versions.switch(to, replace=replace))
+        return {"ok": True, "to": to}
 
     return r

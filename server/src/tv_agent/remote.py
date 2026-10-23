@@ -52,7 +52,8 @@ EPISODE = re.compile(r"^tt\d+:(\d+):(\d+)$")
 LANG = re.compile(r"^[a-z]{3}$")
 # The Settings tab's playback and language settings: each applies to the next command (agent.py reads cfg as it goes).
 SETTINGS = ("player", "max_height", "max_mbps", "probe_streams", "binge", "auto_skip", "audio_language",
-            "subtitle_languages", "native_language", "twitch_favorites", "log_transcripts", "updates")
+            "subtitle_languages", "native_language", "twitch_favorites", "log_transcripts", "updates",
+            "check_episodes")
 AUDIO = ("eng", "spa", "fre", "ita", "ger", "por", "jpn", "kor", "chi")
 SUBTITLES = ("eng", "spa", "chs", "cht", "chi", "fre", "ita", "ger", "por", "jpn", "kor")
 
@@ -67,7 +68,7 @@ def setting(key: str, value):
             return int(value)
         case "max_mbps" if number and 0 <= value <= 1000:
             return float(value)
-        case "probe_streams" | "binge" | "auto_skip" | "log_transcripts" if isinstance(value, bool):
+        case "probe_streams" | "binge" | "auto_skip" | "log_transcripts" | "check_episodes" if isinstance(value, bool):
             return value
         case "updates" if value in config_mod.UPDATES:
             return value

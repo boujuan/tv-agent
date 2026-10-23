@@ -117,3 +117,24 @@ def test_going_back_restores_the_backup_from_21_and_refuses_without_one(tmp_path
     assert job["done"] and did.index("kodi-22.0.tar") < did.index("pm uninstall") < did.index("tar -xf /sdcard/tv-agent/kodi-21.2.tar")
     job, installs = switch(tmp_path, monkeypatch, "21", FakeAdb(version="22.0", backups=()))
     assert job["error"] and "no backup" in job["error"] and installs == []
+
+
+def test_the_newest_kodi_is_offered_over_an_older_one(monkeypatch):
+    def handler(request: httpx.Request):
+        return httpx.Response(200, text=LISTING)
+    adb = FakeAdb()
+
+    async def tv(fn, *args):
+        return fn(adb, *args)
+    agent = types.SimpleNamespace(http=httpx.AsyncClient(transport=httpx.MockTransport(handler)), adb=adb, tv=tv)
+    kv = K.KodiVersions(types.SimpleNamespace(agent=agent, cfg=types.SimpleNamespace(adb_port=5555)))
+    st = asyncio.run(kv.state())
+    assert st["newer"] and st["latest"]["major"] == "22" and st["latest"]["label"] == "22.0 RC 1 (Piers)"
+    adb.version = "22.0"
+    kv._available = None
+    assert not asyncio.run(kv.state())["newer"]
+
+
+def test_the_episode_check_can_be_turned_off_live():
+    from tv_agent import remote
+    assert remote.setting("check_episodes", False) is False

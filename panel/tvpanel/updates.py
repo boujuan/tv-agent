@@ -1,5 +1,6 @@
 """Updates card (Settings tab): the newest releases on GitHub against this computer's code, the TV app and the
-phones. The voice agent asks GitHub (its updates.py, every few hours) and installs the TV app's release over ADB;
+phones, and the newest Kodi for the TV (the agent's kodi_versions.py: a backup on the TV first, the APK checked
+against kodi.tv's SHA-256). The voice agent asks GitHub (its updates.py, every few hours) and installs the TV app's release over ADB;
 this computer's copy is moved up to a newer release tag here, only as a fast-forward of a clean main (never over
 work that isn't on GitHub); each phone updates itself (the phone app's More › About)."""
 import html
@@ -13,7 +14,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QComboBox, QFormLayout, QHBoxLayout, QLabel, QMessageBox, QPushButton, QWidget
 
 from . import __version__
-from .common import AMBER, GREEN, REPO, api, card, dim
+from .common import AMBER, GREEN, RED, REPO, api, card, dim
 from .phones import ago
 
 MODES = (("auto", "Install updates by themselves"), ("notify", "Check, and tell me"), ("off", "Don't check"))
@@ -73,6 +74,7 @@ class UpdatesCard(QWidget):
         self.copy: dict = {}            # checkout()
         self.updated_to = None          # a tag this panel moved to (it runs the old code until restarted)
         self.checked = 0.0              # when this card last asked (showing the tab again within a minute doesn't)
+        self.kodi: dict = {}            # the agent's /v1/kodi
         box = card()
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -97,6 +99,7 @@ class UpdatesCard(QWidget):
         self.rows = {}
         for key, label, button, fn in (("computer", "This computer", "Update this computer", self.update_computer),
                                        ("tv", "TV app", "Update the TV app", self.update_tv),
+                                       ("kodi", "Kodi", "Update Kodi", self.update_kodi),
                                        ("phone", "Phone app", None, None)):
             line = QHBoxLayout()
             text = QLabel("…")
@@ -112,6 +115,9 @@ class UpdatesCard(QWidget):
             f.addRow(label, line)
         self.status = dim("")
         f.addRow(self.status)
+        self.kodi_poll = QTimer(self)               # while Kodi updates (a minute or two)
+        self.kodi_poll.setInterval(2000)
+        self.kodi_poll.timeout.connect(self.refresh_kodi)
 
     def check(self, force: bool = False, quiet: bool = False):
         """The agent's answer (it asks GitHub at most once a minute) and this checkout's tags; with mode "auto" a
@@ -132,11 +138,16 @@ class UpdatesCard(QWidget):
                     state = api("/v1/updates/check", {}, timeout=40)
             except Exception as e:                  # the agent stopped, or older than updates
                 state = {"error": f"the voice agent didn't answer ({e})"}
+            try:
+                state["kodi"] = api("/v1/kodi", timeout=30)
+            except Exception as e:
+                state["kodi"] = {"error": str(e)}
             return state, checkout()
 
         def done(res, err):
             self.check_button.setEnabled(True)
             self.state, self.copy = res if res else ({"error": str(err)}, {"error": str(err)})
+            self.kodi = self.state.pop("kodi", {}) or {}
             self.show_state()
             if self.mode.currentData() == "auto" and self.copy.get("tag") and not self.copy.get("why") \
                     and not self.updated_to:
@@ -154,6 +165,8 @@ class UpdatesCard(QWidget):
         tv = (self.state.get("components") or {}).get("tv") or {}
         if tv.get("newer"):
             parts.append(f"TV app {tv['latest']}")
+        if self.kodi.get("newer"):
+            parts.append(f"Kodi {self.kodi['latest']['label']}")
         return ", ".join(parts)
 
     def show_state(self):
@@ -193,6 +206,7 @@ class UpdatesCard(QWidget):
         else:
             text.setText("<span style='color:gray'>not checked yet</span>")
         b.setVisible(bool(tv.get("newer")) and not self.state.get("installing"))
+        self.show_kodi()
         text, _ = self.rows["phone"]
         phone = comps.get("phone") or {}
         text.setText((f"latest {phone['latest']} · " if phone.get("latest") else "")
@@ -201,6 +215,67 @@ class UpdatesCard(QWidget):
         checked = self.state.get("checked")
         self.status.setText(f"<span style='color:{AMBER}'>{html.escape(err)}</span>" if err else
                             f"Checked {ago(checked)}" if checked else "")
+
+    def show_kodi(self):
+        text, b = self.rows["kodi"]
+        k = self.kodi
+        job = k.get("job") or {}
+        running = bool(job and not job.get("done") and not job.get("error"))
+        latest = k.get("latest") or {}
+        rc = "" if latest.get("stable", True) else " (a release candidate)"
+        if k.get("error") or not k.get("installed", True):
+            why = k.get("error") or "Kodi isn't installed on the TV"
+            text.setText(f"<span style='color:gray'>{html.escape(why)}</span>")
+        elif running:
+            text.setText(f"<span style='color:{AMBER}'>⟳</span> {html.escape(job.get('step', ''))}…")
+        elif k.get("newer"):
+            text.setText(f"<span style='color:{AMBER}'>⬆</span> {k['version']} on the TV · <b>{latest['label']}</b> is "
+                         f"out{rc}")
+        elif k.get("version"):
+            text.setText(f"<span style='color:{GREEN}'>✔</span> {k['version']} on the TV, the latest")
+        else:
+            text.setText("<span style='color:gray'>not checked yet</span>")
+        if job.get("error"):
+            text.setText(text.text() + f"<br><span style='color:{RED}'>Not updated: {html.escape(job['error'])}</span>")
+        elif job.get("done") and job.get("note"):
+            text.setText(text.text() + f"<br><span style='color:gray'>{html.escape(job['note'])}</span>")
+        b.setVisible(bool(k.get("newer")) and not running)
+        if running and not self.kodi_poll.isActive():
+            self.kodi_poll.start()
+        elif not running and self.kodi_poll.isActive():
+            self.kodi_poll.stop()
+            if job.get("needs") == "replace":
+                self.offer_kodi_replace()
+
+    def refresh_kodi(self):
+        def done(res, err):
+            self.kodi = res if res and not err else {"error": str(err)}
+            self.show_kodi()
+        self.panel.bg.run(lambda: api("/v1/kodi", timeout=30), done)
+
+    def update_kodi(self, replace: bool = False):
+        latest = self.kodi.get("latest") or {}
+        if not replace and QMessageBox.question(
+                self, "TV Agent", f"Update Kodi on the TV to {latest.get('label')}"
+                + ("" if latest.get("stable", True) else ", a release candidate") + "?\n\nKodi's settings, libraries and "
+                "add-ons are backed up on the TV first. About 70 MB from kodi.tv, checked against its SHA-256; a minute "
+                "or two.") != QMessageBox.StandardButton.Yes:
+            return
+        self.rows["kodi"][1].setVisible(False)
+
+        def done(res, err):
+            if err:
+                QMessageBox.warning(self, "TV Agent", f"Kodi wasn't updated: {err}")
+            self.refresh_kodi()
+            self.kodi_poll.start()
+        self.panel.bg.run(lambda: api("/v1/kodi/update", {"replace": replace}, timeout=40), done)
+
+    def offer_kodi_replace(self):
+        if QMessageBox.question(
+                self, "TV Agent", "This Kodi came from Google Play, which signs it with another key, so Kodi from "
+                "kodi.tv can't be installed over it.\n\nReplace it? It's uninstalled, the new one installed, and the "
+                "backup just made restored into it (settings, libraries, add-ons).") == QMessageBox.StandardButton.Yes:
+            self.update_kodi(replace=True)
 
     def update_tv(self):
         tv = (self.state.get("components") or {}).get("tv") or {}

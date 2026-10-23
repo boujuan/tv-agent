@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
 from .common import AMBER, GREEN, RED, TV_AGENT, Say, agent_config, api, card, dim, load_cfg, set_autostart
 from .phones import Phones
 from .updates import UpdatesCard
-from .kodi_card import KodiCard
 
 AUDIO = [("English", "eng"), ("Spanish", "spa"), ("French", "fre"), ("Italian", "ita"), ("German", "ger"),
          ("Portuguese", "por"), ("Japanese", "jpn"), ("Korean", "kor"), ("Chinese", "chi")]
@@ -141,9 +140,12 @@ class Settings(QScrollArea):
         f1.addRow("", self.probe)
         f1.addRow("", self.binge)
         f1.addRow("", self.auto_skip)
+        self.check_episodes = QCheckBox("Check each episode is the one asked for, by its subtitles")
+        self.check_episodes.setToolTip("A streaming service's copy can be numbered its own way (Netflix's Community "
+                                       "season 2 skips a pulled episode). A wrong file gives way to a right one at "
+                                       "the same moment; a few seconds the first time, nothing after")
+        f1.addRow("", self.check_episodes)
         outer.addWidget(play)
-        self.kodi = KodiCard(panel)                 # applied at once through the agent (not the window's Save)
-        outer.addWidget(self.kodi)
 
         lang = card()
         f2 = QFormLayout(lang)
@@ -266,7 +268,7 @@ class Settings(QScrollArea):
         outer.addStretch()
         for w in (self.player, self.height_, self.audio, self.native, self.updates.mode):
             w.currentIndexChanged.connect(self.mark_dirty)
-        for w in (self.no_limit, self.probe, self.binge, self.auto_skip, self.log):
+        for w in (self.no_limit, self.probe, self.binge, self.auto_skip, self.log, self.check_episodes):
             w.toggled.connect(self.mark_dirty)
         self.mbps.valueChanged.connect(self.mark_dirty)
         for w in (self.twitch, self.hosts):
@@ -388,6 +390,7 @@ class Settings(QScrollArea):
         self.hosts.setText(", ".join(cfg.tv_hosts))
         self.binge.setChecked(cfg.binge)
         self.auto_skip.setChecked(cfg.auto_skip)
+        self.check_episodes.setChecked(cfg.check_episodes)
         self._select(self.updates.mode, cfg.updates)
         for key, w in self.adv.items():
             value = getattr(cfg, key)
@@ -416,6 +419,7 @@ class Settings(QScrollArea):
             "tv_hosts": split(self.hosts.text()) or agent_config.Config().tv_hosts,
             "binge": self.binge.isChecked(),
             "auto_skip": self.auto_skip.isChecked(),
+            "check_episodes": self.check_episodes.isChecked(),
             "updates": self.updates.mode.currentData(),
             **{k: (w.value() if isinstance(w, QSpinBox) else w.text().strip()) for k, w in self.adv.items()},
         }
