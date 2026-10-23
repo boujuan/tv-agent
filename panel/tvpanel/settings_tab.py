@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
 from .common import AMBER, GREEN, RED, TV_AGENT, Say, agent_config, api, card, dim, load_cfg, set_autostart
 from .phones import Phones
 from .updates import UpdatesCard
+from .kodi_card import KodiCard
 
 AUDIO = [("English", "eng"), ("Spanish", "spa"), ("French", "fre"), ("Italian", "ita"), ("German", "ger"),
          ("Portuguese", "por"), ("Japanese", "jpn"), ("Korean", "kor"), ("Chinese", "chi")]
@@ -141,6 +142,8 @@ class Settings(QScrollArea):
         f1.addRow("", self.binge)
         f1.addRow("", self.auto_skip)
         outer.addWidget(play)
+        self.kodi = KodiCard(panel)                 # applied at once through the agent (not the window's Save)
+        outer.addWidget(self.kodi)
 
         lang = card()
         f2 = QFormLayout(lang)

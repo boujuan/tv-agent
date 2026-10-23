@@ -49,6 +49,7 @@ from . import activity
 from . import clients as clients_mod
 from . import remote
 from . import updates as updates_mod
+from . import kodi_versions
 from .agent import Agent
 from . import config as config_mod
 from .config import Config, lan_address
@@ -183,6 +184,7 @@ class Service:
         self.clients = clients_mod.Clients()
         self._busy = asyncio.Lock()
         self.updates = updates_mod.Updates(self)
+        self.kodi_versions = kodi_versions.KodiVersions(self)
         self._running: asyncio.Task | None = None
         self._rules_mtime = self._mtime()
 
@@ -943,6 +945,7 @@ def local_app(svc: Service) -> FastAPI:
     app.include_router(remote.routes(svc))
     app.include_router(clients_mod.routes(svc))
     app.include_router(updates_mod.routes(svc))
+    app.include_router(kodi_versions.routes(svc))
     return app
 
 
