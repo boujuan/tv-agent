@@ -46,6 +46,12 @@ def parse(name: str) -> dict | None:
             "stable": stage is None, "key": (int(major), int(minor), STAGE[stage], int(n or 0))}
 
 
+def version_key(name: str | None) -> tuple:
+    """Kodi's own version name ("21.2", "22.0-RC1") as parse()'s key, to compare with the mirror's builds."""
+    m = re.match(r"(\d+)\.(\d+)(?:-(alpha|beta|rc)(\d+))?", (name or "").lower())
+    return (int(m.group(1)), int(m.group(2)), STAGE[m.group(3)], int(m.group(4) or 0)) if m else ()
+
+
 def newest(listing: str, abi: str) -> dict[str, dict]:
     """The newest build of each major version on a mirror's directory page (any stage: Kodi 22 is a release
     candidate for now), for this ABI."""
@@ -106,8 +112,7 @@ class KodiVersions:
         top = max(avail.items(), key=lambda kv: parse(kv[1]["file"])["key"], default=(None, None))
         return {**now, "major": (now["version"] or "").split(".")[0] or None, "available": avail, "job": self.job,
                 "latest": top[1] and {**top[1], "major": top[0]},
-                "newer": bool(top[1] and now["version"] and top[1]["version"] != now["version"]
-                              and parse(top[1]["file"])["key"][:2] > tuple(map(int, now["version"].split(".")[:2])))}
+                "newer": bool(top[1] and now["version"] and parse(top[1]["file"])["key"] > version_key(now["version"]))}
 
     def _step(self, text: str):
         log.info("Kodi switch: %s", text)
@@ -151,12 +156,19 @@ class KodiVersions:
                 if version:
                     self._step(f"restoring the backup from Kodi {version}")
                     await asyncio.to_thread(restore, self.adb, version)
-            self._step("starting Kodi (it updates its databases the first time)")
-            try:
-                await self.svc.agent.kodi.start(wait_s=90)
-            except Exception as e:
-                log.info("Kodi after the switch: %s", e)
-                self.job["note"] = "Kodi is installed but didn't answer yet: open it once on the TV"
+            # Kodi 22 RC1 crashes if its window goes while it starts (seen with the TV in standby): the TV is woken
+            # first, and Kodi left for its first opening if it stays asleep
+            await self.svc.agent.tv(lambda adb: adb.run(["input", "keyevent", "KEYCODE_WAKEUP"]))
+            await asyncio.sleep(2)
+            if await asyncio.to_thread(asleep, self.adb):
+                self.job["note"] = "The TV is in standby: Kodi finishes updating the first time it's opened"
+            else:
+                self._step("starting Kodi (it updates its databases the first time)")
+                try:
+                    await self.svc.agent.kodi.start(wait_s=90)
+                except Exception as e:
+                    log.info("Kodi after the switch: %s", e)
+                    self.job["note"] = "Kodi is installed but didn't answer yet: open it once on the TV"
             self.job["done"] = True
             self._step(f"Kodi {target['label']} is installed")
         except Exception as e:
@@ -195,12 +207,19 @@ def cur_backup_missing(now: dict, to: str) -> bool:
     return not any(v.split(".")[0] == to for v in now["backups"])
 
 
+def asleep(adb) -> bool:
+    return "mWakefulness=Awake" not in adb.run(["sh", "-c", "dumpsys power | grep -m1 mWakefulness="], timeout=10)
+
+
 def backup(adb, version: str):
-    """Kodi's userdata and add-ons (not its cache and logs) in a tar on the TV, outside Kodi's own folder."""
+    """Kodi's userdata and add-ons (not its cache and logs) in a tar on the TV, outside Kodi's own folder; checked
+    to be there, just written, and not tiny."""
     path = f"{BACKUPS}/kodi-{version}.tar"
     out = adb.run(["sh", "-c", f"mkdir -p {BACKUPS} && tar -cf {path}.tmp -C {DATA} .kodi/userdata .kodi/addons "
-                               f"&& mv {path}.tmp {path} && ls -l {path}"], timeout=120)
-    if "kodi-" not in out:
+                               f"&& mv -f {path}.tmp {path} && echo BACKUP $(date +%s) $(stat -c '%Y %s' {path})"],
+                  timeout=120)
+    m = re.search(r"BACKUP (\d+) (\d+) (\d+)", out)
+    if not m or int(m.group(1)) - int(m.group(2)) > 60 or int(m.group(3)) < 100_000:
         raise RuntimeError(f"the backup failed: {out.strip()[-120:]}")
 
 

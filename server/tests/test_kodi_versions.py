@@ -43,7 +43,9 @@ class FakeAdb:
                     + "".join(f"BACKUP /sdcard/tv-agent/kodi-{b}.tar 100 1\n" for b in sorted(self.backups)))
         if "tar -cf" in line:
             self.backups.add(self.version)
-            return f"-rw 1 x x 100 kodi-{self.version}.tar"
+            return "BACKUP 1792758087 1792758086 17894400"
+        if "dumpsys power" in line:
+            return "  mWakefulness=Asleep" if getattr(self, "sleeping", False) else "  mWakefulness=Awake"
         if "tar -xf" in line:
             return "restored"
         return ""
@@ -58,6 +60,10 @@ def test_the_tv_says_what_kodi_it_has():
 
 def switch(tmp_path, monkeypatch, to, adb, install_out="Success", replace=False, apk=APK):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+
+    async def no_wait(s):
+        return None
+    monkeypatch.setattr(K.asyncio, "sleep", no_wait)
 
     def handler(request: httpx.Request):
         if request.url.path.endswith("/"):
@@ -138,3 +144,24 @@ def test_the_newest_kodi_is_offered_over_an_older_one(monkeypatch):
 def test_the_episode_check_can_be_turned_off_live():
     from tv_agent import remote
     assert remote.setting("check_episodes", False) is False
+
+
+def test_kodis_own_version_names_compare_with_the_mirrors():
+    assert K.version_key("22.0-RC1") == K.parse("kodi-22.0-Piers_rc1-armeabi-v7a.apk")["key"]
+    assert K.parse("kodi-22.0-Piers-armeabi-v7a.apk")["key"] > K.version_key("22.0-RC1") > K.version_key("21.2")
+
+
+def test_a_tv_in_standby_isnt_given_kodi_to_start(tmp_path, monkeypatch):
+    adb = FakeAdb(backups=())
+    adb.sleeping = True
+    job, installs = switch(tmp_path, monkeypatch, "22", adb)
+    assert job["done"] and installs == [APK] and "standby" in job["note"] and "kodi start" not in adb.did
+    assert any("KEYCODE_WAKEUP" in d for d in adb.did)
+
+
+def test_a_backup_that_wasnt_written_stops_the_update(tmp_path, monkeypatch):
+    adb = FakeAdb(backups=())
+    real = adb.run
+    adb.run = lambda argv, timeout=10.0: "tar: no space left" if "tar -cf" in " ".join(argv) else real(argv, timeout)
+    job, installs = switch(tmp_path, monkeypatch, "22", adb)
+    assert job["error"] and "backup failed" in job["error"] and installs == []

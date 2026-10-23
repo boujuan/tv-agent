@@ -23,9 +23,10 @@ from tv_agent import activity as agent_activity  # noqa: E402,F401  (stdlib only
 from tv_agent import config as agent_config  # noqa: E402  (stdlib only; the daemon's own checks)
 from tv_agent import stt as agent_stt  # noqa: E402,F401  (stdlib only until a model is loaded)
 
-from PySide6.QtCore import QSettings, QSize, Qt, QTimer  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QSettings, QSize, Qt, QTimer  # noqa: E402
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen  # noqa: E402
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMessageBox, QSizePolicy, QVBoxLayout, QWidget  # noqa: E402
+from PySide6.QtWidgets import (QAbstractScrollArea, QAbstractSpinBox, QComboBox, QFrame, QHBoxLayout, QLabel,  # noqa: E402
+                               QMessageBox, QSizePolicy, QVBoxLayout, QWidget)
 
 APP_ID = "tv-agent-panel"
 ICON = PANEL / "tv-agent.svg"
@@ -295,6 +296,25 @@ def journal_history(n: int = 2000) -> list[dict]:
 
 
 # ---------------------------------------------------------------- threads
+
+class WheelGuard(QObject):
+    """The mouse wheel scrolls the page instead of changing a number box or a list it passes over; only one clicked
+    into first takes it. Scrolling through Settings had changed the TV app's port (8765 → 8761) and Save wrote it, so
+    the TV couldn't reach the agent (found 2026-10-23). Installed on the application."""
+
+    def eventFilter(self, obj, event):
+        kind = event.type()
+        if kind == QEvent.Type.Polish and isinstance(obj, (QAbstractSpinBox, QComboBox)):
+            obj.setFocusPolicy(Qt.FocusPolicy.StrongFocus)          # not focused by the wheel
+        elif kind == QEvent.Type.Wheel and isinstance(obj, (QAbstractSpinBox, QComboBox)) and not obj.hasFocus():
+            area = obj.parent()
+            while area is not None and not isinstance(area, QAbstractScrollArea):
+                area = area.parent()
+            if area is not None:
+                QCoreApplication.sendEvent(area.viewport(), event)
+            return True
+        return False
+
 
 class Async:
     """Blocking calls on a thread pool; their callbacks run back on the GUI thread as cb(result, error)."""

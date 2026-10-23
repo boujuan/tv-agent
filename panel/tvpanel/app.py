@@ -19,8 +19,8 @@ from PySide6.QtWidgets import (QApplication, QDialog, QDialogButtonBox, QHBoxLay
 from .about import About
 from .activity_tab import Activity
 from .commands_tab import Commands
-from .common import (APP_ID, ICON, REPO, SERVICES, STYLE, Async, Prefs, agent_config, api, clock, episode_of, gpu_of,
-                     gpu_totals, human, pill, run_doctor, run_eval, unit_info, GREEN, AMBER, RED)
+from .common import (APP_ID, ICON, REPO, SERVICES, STYLE, Async, Prefs, WheelGuard, agent_config, api, clock,
+                     episode_of, gpu_of, gpu_totals, human, pill, run_doctor, run_eval, unit_info, GREEN, AMBER, RED)
 from .decisions import Decisions
 from .mic import Mic
 from .overview import Overview
@@ -510,6 +510,8 @@ def main():
     app.setWindowIcon(QIcon(str(ICON)))
     app.setStyleSheet(STYLE)
     app.setQuitOnLastWindowClosed(False)
+    guard = WheelGuard(app)
+    app.installEventFilter(guard)
 
     sock = QLocalSocket()                     # already running? bring that one up instead
     sock.connectToServer(INSTANCE)

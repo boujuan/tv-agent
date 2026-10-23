@@ -15,6 +15,13 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   databases one way): uninstalled, 21 installed, the backup from 21 restored.
 - `check_episodes` is one of the live settings (`/v1/settings`), for the phone app.
 
+### Fixed
+- `GET /v1/kodi` failed (500) once Kodi 22 was installed: Kodi names its version "22.0-RC1", now compared as the
+  mirror's builds are (so the final 22.0 is offered over the RC too).
+- An update started Kodi while the TV was in standby, and Kodi 22 RC1 crashes when its window goes while it starts:
+  the TV is woken first, and with it still asleep Kodi is left to finish updating the first time it's opened.
+- A backup before a Kodi update is checked to have just been written (and not tiny) before anything is installed.
+
 ## panel — unreleased
 
 ### Added
@@ -26,6 +33,9 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   as the phone app has it: your names (find, add, remove), then Twitch favourites and your library's titles, the
   library switch at the top and the total against the hosted model's 200. Works with the voice agent stopped too
   (written to config.toml).
+- The mouse wheel scrolls the page instead of changing the number box or list under the pointer; only one clicked
+  into first takes it. Scrolling through Settings had changed the TV app's port (8765 → 8761) and Save wrote it, so
+  the TV couldn't reach the agent.
 - Decisions: the "How a command is decided" diagram folds to its header (▲: the editors get the whole height) or
   takes the whole height (▼: the editors are hidden); click it again for both. Remembered.
 
