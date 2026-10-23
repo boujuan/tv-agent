@@ -27,6 +27,18 @@ def ago(t: float | None) -> str:
     return time.strftime("%d %b", time.localtime(t))
 
 
+IN_USE_S = 120           # a phone seen this recently is in use (the app asks the agent every few seconds while open)
+
+
+def via(ip: str) -> str:
+    """How a phone reached the agent, from the address it came from."""
+    if ip.startswith("100."):
+        return "over Tailscale"
+    if ip.startswith(("192.168.", "10.", "172.")):
+        return "on the home network"
+    return f"from {ip}" if ip else ""
+
+
 def newer(latest: str | None, current: str | None) -> bool:
     """"0.10.0" after "0.9.1" (numbers, not text); False when either isn't a version."""
     def parts(v):
@@ -110,9 +122,11 @@ class Phones(QWidget):
             self.status.setText(f"<span style='color:{RED}'>✗ The phones' listener isn't running (port "
                                 f"{res.get('port')} taken? see the voice agent's log)</span>")
         else:
-            self.status.setText(f"<span style='color:{GREEN}'>✔</span> Listening for phones on port {res['port']} "
-                                f"(HTTPS) and {res['stream_port']} (voice) · certificate "
-                                f"<code>{grouped(res['fingerprint'])}</code>")
+            where = " and ".join(html.escape(a) + (" (Tailscale)" if a.startswith("100.") else "")
+                                 for a in res.get("addresses") or [])
+            self.status.setText(f"<span style='color:{GREEN}'>✔</span> Listening for phones"
+                                + (f" on {where}" if where else "") + f", port {res['port']} (HTTPS) and "
+                                f"{res['stream_port']} (voice) · certificate <code>{grouped(res['fingerprint'])}</code>")
         self.pair_button.setEnabled(bool(res.get("listening")))
         devices = res.get("devices") or []
         if not devices:
@@ -121,13 +135,25 @@ class Phones(QWidget):
             row = QWidget()
             h = QHBoxLayout(row)
             h.setContentsMargins(0, 2, 0, 2)
-            seen = ago(d.get("last_seen")) + (f" from {d['last_ip']}" if d.get("last_ip") else "")
+            last, ip = d.get("last_seen") or 0, d.get("last_ip") or ""
+            now = res.get("now") or time.time()
+            if last and now - last < IN_USE_S:
+                link = f"<span style='color:{GREEN}'>● In use now {html.escape(via(ip))}</span>"
+            elif last:
+                link = f"<span style='color:gray'>○ Not connected · last seen {ago(last)} {html.escape(via(ip))}</span>"
+            else:
+                link = f"<span style='color:{AMBER}'>○ Never connected since pairing</span>"
             version = d.get("app_version")
-            app = (f"app {html.escape(version)}" if version else "app version not reported yet")
-            if version and newer(res.get("latest_app"), version):
-                app += f" <span style='color:{AMBER}'>· {html.escape(res['latest_app'])} is out</span>"
-            label = QLabel(f"📱 <b>{html.escape(d['name'])}</b> <span style='color:gray'>· {app} · paired "
-                           f"{ago(d['paired'])} · last seen {html.escape(seen)}</span>")
+            issues = []
+            if not version:
+                issues.append("its app hasn't said its version (an old app: update it from More › About)")
+            elif newer(res.get("latest_app"), version):
+                issues.append(f"{html.escape(res['latest_app'])} is out (the app updates itself: More › About)")
+            if last and ip.startswith("100.") and not any(a.startswith("100.") for a in res.get("addresses") or []):
+                issues.append("it last came over Tailscale, which the agent isn't listening on now (phone_hosts)")
+            label = QLabel(f"📱 <b>{html.escape(d['name'])}</b> {link}<br><span style='color:gray'>app "
+                           f"{html.escape(version or '?')} · paired {ago(d['paired'])}</span>"
+                           + "".join(f"<br><span style='color:{AMBER}'>⚠ {i}</span>" for i in issues))
             label.setWordWrap(True)
             h.addWidget(label, 1)
             rename = QPushButton("Rename…")

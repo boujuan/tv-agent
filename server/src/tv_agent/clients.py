@@ -414,9 +414,11 @@ def routes(svc) -> APIRouter:
     @r.get("/v1/clients")
     async def list_clients(request: Request):
         local_only(request)
+        bound = getattr(getattr(svc, "listeners", None), "bound", {})
         return {"devices": [d.public() for d in clients.devices], "pairing": pairing_state(), "enabled": svc.cfg.phones,
                 "listening": bool(clients.fingerprint), "fingerprint": clients.fingerprint,
-                "port": svc.cfg.phone_port, "stream_port": svc.cfg.phone_stream_port}
+                "port": svc.cfg.phone_port, "stream_port": svc.cfg.phone_stream_port,
+                "addresses": sorted({host for what, host in bound if what == "phones"}), "now": time.time()}
 
     @r.post("/v1/clients/pairing")
     async def start_pairing(request: Request):

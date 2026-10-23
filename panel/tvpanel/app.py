@@ -493,6 +493,9 @@ class Panel(QMainWindow):
                 card_w.show_usage(cpu, rss, gpu_mem if unit == "llama-d1" else None, min(gpu_busy, 100.0))
             else:
                 self.usage.pop(unit, None)
+        if self.overview.cards["tv-agent"].active:      # the TV's own apps and players, from the TV card's last check
+            for a in (getattr(self.overview.tv_card, "info", None) or {}).get("apps") or []:
+                rows.append(("On the TV", a["name"], a["pid"], a["cpu"], a["rss_kb"] * 1024, None))
         if self.isVisible():
             self.overview.show_rows(rows)
             vm = psutil.virtual_memory()

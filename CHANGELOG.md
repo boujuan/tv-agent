@@ -7,6 +7,10 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 ## server — unreleased
 
 ### Added
+- `GET /v1/tv/status` lists the TV's own apps and players that run (TV Agent Player, Kodi, Just Player, the TV app):
+  pid, CPU share over the same half second as the TV's, and memory.
+- `GET /v1/clients` says which addresses the phones' listeners are on (`addresses`) and the agent's clock (`now`);
+  `GET /v1/updates` says whether the TV app and the player are installed (`installed`).
 - TV Agent Player's releases (boujuan/tv-agent-player, tags vX.Y.Z) are checked with the rest: `GET /v1/updates` has
   `components.tvplayer` (its version on the TV against the latest release), `POST /v1/updates/tvplayer` installs it
   over ADB with GitHub's SHA-256, and `updates = "auto"` does so by itself; never while the player plays, and never
@@ -57,6 +61,15 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 ## panel — unreleased
 
 ### Added
+- Overview › Processes lists the TV's apps and players while they run (TV Agent Player, Kodi, Just Player, the TV
+  app), with their CPU and memory, under this computer's services.
+- Settings › Phones: each phone's connection (in use now, or last seen, on the home network or over Tailscale), the
+  addresses the agent listens on for phones, and what's wrong (an old app, Tailscale not listened on).
+- Settings › Updates: TV Agent Player can be installed from there when it isn't on the TV; the phone app row ticks
+  when every phone has the latest release and names the ones that don't.
+
+### Changed
+- Settings › Updates no longer has a Kodi row (the agent can still update Kodi: `POST /v1/kodi/update`).
 - Settings › Updates: a TV Agent Player row, with its version on the TV, the latest release and "Update the player".
 - Settings › Playback › Player: **TV Agent Player** (and the tray menu, the overview, About).
 - Settings › Updates has Kodi too: the version on the TV, the newest one (Kodi 22 Piers, a release candidate with

@@ -82,6 +82,7 @@ class Updates:
         self.checked: float | None = None
         self.error: str | None = None
         self.versions: dict[str, str | None] = {}    # the TV apps' (TV_APPS), as of the last check or install
+        self.installed: dict[str, bool] = {}         # and whether each is on the TV (unknown until the TV answers)
         self.installing = False
         self._lock = asyncio.Lock()
 
@@ -120,6 +121,8 @@ class Updates:
         try:
             pkgs = await asyncio.to_thread(tv_status.packages, self.svc.agent.adb)
             self.versions = {key: (pkgs.get(package) or {}).get("version") for key, (_, package) in TV_APPS.items()}
+            self.installed = {key: bool((pkgs.get(package) or {}).get("installed", self.versions[key]))
+                              for key, (_, package) in TV_APPS.items()}
         except Exception as e:                  # the TV off or asleep: the last known versions stay
             log.info("update check: the TV apps' versions: %s", type(e).__name__)
 
@@ -136,8 +139,9 @@ class Updates:
         return {"checked": self.checked, "error": self.error, "mode": self.svc.cfg.updates,
                 "installing": self.installing,
                 "components": {"server": part("server", __version__), "panel": part("panel", with_current=False),
-                               "tv": part("tv", self.versions.get("tv")),
-                               "tvplayer": part("tvplayer", self.versions.get("tvplayer")),
+                               "tv": part("tv", self.versions.get("tv")) | {"installed": self.installed.get("tv")},
+                               "tvplayer": part("tvplayer", self.versions.get("tvplayer"))
+                               | {"installed": self.installed.get("tvplayer")},
                                "phone": part("phone", with_current=False)}}
 
     async def install_tv(self, only_newer: bool = True) -> dict:

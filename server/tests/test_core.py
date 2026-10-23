@@ -1798,3 +1798,16 @@ def test_a_lost_picture_restarts_kodi_where_the_file_was(monkeypatch):
                          "GetOutputPicture dequeueOutputBuffer failed"] * 30)
     assert asyncio.run(run(failing)) == [(206_000, "The picture was lost: restarting Kodi")]
     assert asyncio.run(run("2026-10-23 13:08:25 info <general>: Using codec: c2.mtk.avc.decoder\n" * 30)) == []
+
+
+def test_the_tvs_own_apps_and_players_get_cpu_and_memory_rows():
+    from tv_agent.tv import status as S
+    stat = ["cpu  1000 0 500 8000 100 0 0 0 0 0",
+            "15395 (com.boujuan.tva) S 1 2 3 4 5 6 7 8 9 10 200 50 0 0",
+            "cpu  1100 0 550 8300 100 0 0 0 0 0",
+            "15395 (com.boujuan.tva) S 1 2 3 4 5 6 7 8 9 10 240 60 0 0"]
+    apps = ["APP 15395 com.boujuan.tvagent.player 132948", "APP 15435 com.boujuan.tvagent 109312", "APP 9 other.app 5"]
+    got = S.apps(stat, apps, {k: S.PACKAGES[k] for k in S.WATCHED})
+    assert [a["name"] for a in got] == ["TV Agent Player", "TV app"]       # in WATCHED's order; unknown ones left out
+    assert got[0]["cpu"] == 11.1 and got[0]["rss_kb"] == 132948           # 50 of 450 ticks
+    assert got[1]["cpu"] == 0.0                                            # no stat lines for it: idle

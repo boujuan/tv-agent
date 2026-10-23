@@ -966,7 +966,7 @@ async def serve(cfg: Config):
         svc._library_names_at = time.monotonic()
         asyncio.create_task(svc._refresh_library_names())
     local = local_app(svc)
-    listeners = Listeners(svc, local)
+    listeners = svc.listeners = Listeners(svc, local)     # also read by /v1/clients (where phones can reach it)
     await listeners.load_certificate()
     await listeners.update(only=("player",))        # before restore(): a player that's open reconnects to it
     try:

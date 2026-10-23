@@ -181,7 +181,8 @@ class Overview(QScrollArea):
         self.table.setFrameShape(QFrame.Shape.NoFrame)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.setFixedHeight(120)
-        p.addWidget(QLabel("<b>Processes</b>"))
+        p.addWidget(QLabel("<b>Processes</b> <span style='color:gray'>· this computer's services, and on the TV its "
+                           "apps and players while they run (CPU as a share of each machine)</span>"))
         p.addWidget(self.table)
         lay.addWidget(procs)
         lay.addStretch()
@@ -204,6 +205,8 @@ class Overview(QScrollArea):
 
     def show_rows(self, rows: list[tuple]):
         t = self.table
+        t.setFixedHeight(t.horizontalHeader().sizeHint().height() + t.verticalHeader().defaultSectionSize()
+                         * max(1, len(rows)) + 6)
         if not rows:
             t.setRowCount(1)
             t.setItem(0, 0, QTableWidgetItem("Nothing running"))

@@ -1,8 +1,8 @@
-"""Updates card (Settings tab): the newest releases on GitHub against this computer's code, the TV app and the
-phones, and the newest Kodi for the TV (the agent's kodi_versions.py: a backup on the TV first, the APK checked
-against kodi.tv's SHA-256). The voice agent asks GitHub (its updates.py, every few hours) and installs the TV app's release over ADB;
-this computer's copy is moved up to a newer release tag here, only as a fast-forward of a clean main (never over
-work that isn't on GitHub); each phone updates itself (the phone app's More › About)."""
+"""Updates card (Settings tab): the newest releases on GitHub against this computer's code, the TV app, TV Agent
+Player and each paired phone. The voice agent asks GitHub (its updates.py, every few hours) and installs the TV
+app's and the player's releases over ADB (the player also when it isn't on the TV yet); this computer's copy is
+moved up to a newer release tag here, only as a fast-forward of a clean main (never over work that isn't on GitHub);
+each phone updates itself (the phone app's More › About)."""
 import html
 import os
 import shutil
@@ -14,8 +14,8 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QComboBox, QFormLayout, QHBoxLayout, QLabel, QMessageBox, QPushButton, QWidget
 
 from . import __version__
-from .common import AMBER, GREEN, RED, REPO, api, card, dim
-from .phones import ago
+from .common import AMBER, GREEN, REPO, api, card, dim
+from .phones import ago, newer
 
 MODES = (("auto", "Install updates by themselves"), ("notify", "Check, and tell me"), ("off", "Don't check"))
 RELEASE_TAGS = ("server-v*", "panel-v*")
@@ -74,7 +74,7 @@ class UpdatesCard(QWidget):
         self.copy: dict = {}            # checkout()
         self.updated_to = None          # a tag this panel moved to (it runs the old code until restarted)
         self.checked = 0.0              # when this card last asked (showing the tab again within a minute doesn't)
-        self.kodi: dict = {}            # the agent's /v1/kodi
+        self.phones: list = []          # the paired phones (/v1/clients), for their app versions
         box = card()
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -92,16 +92,15 @@ class UpdatesCard(QWidget):
         self.mode = QComboBox()                 # saved with the window's Save (config.toml's updates)
         for value, label in MODES:
             self.mode.addItem(label, value)
-        self.mode.setToolTip("By themselves: the voice agent installs the TV app's new release when it isn't "
-                             "listening, and this computer moves to a new release tag when nothing here is unsaved "
-                             "or unpushed. Phones have their own switch (More › About in the app).")
+        self.mode.setToolTip("By themselves: the voice agent installs the TV app's and TV Agent Player's new "
+                             "releases when they're idle, and this computer moves to a new release tag when nothing "
+                             "here is unsaved or unpushed. Phones have their own switch (More › About in the app).")
         f.addRow("Updates", self.mode)
         self.rows = {}
         for key, label, button, fn in (("computer", "This computer", "Update this computer", self.update_computer),
                                        ("tv", "TV app", "Update the TV app", lambda: self.update_app("tv")),
                                        ("tvplayer", "TV Agent Player", "Update the player",
                                         lambda: self.update_app("tvplayer")),
-                                       ("kodi", "Kodi", "Update Kodi", self.update_kodi),
                                        ("phone", "Phone app", None, None)):
             line = QHBoxLayout()
             text = QLabel("…")
@@ -117,9 +116,6 @@ class UpdatesCard(QWidget):
             f.addRow(label, line)
         self.status = dim("")
         f.addRow(self.status)
-        self.kodi_poll = QTimer(self)               # while Kodi updates (a minute or two)
-        self.kodi_poll.setInterval(2000)
-        self.kodi_poll.timeout.connect(self.refresh_kodi)
 
     def check(self, force: bool = False, quiet: bool = False):
         """The agent's answer (it asks GitHub at most once a minute) and this checkout's tags; with mode "auto" a
@@ -141,15 +137,15 @@ class UpdatesCard(QWidget):
             except Exception as e:                  # the agent stopped, or older than updates
                 state = {"error": f"the voice agent didn't answer ({e})"}
             try:
-                state["kodi"] = api("/v1/kodi", timeout=30)
-            except Exception as e:
-                state["kodi"] = {"error": str(e)}
+                state["phones"] = api("/v1/clients", timeout=10).get("devices") or []
+            except Exception:
+                state["phones"] = []
             return state, checkout()
 
         def done(res, err):
             self.check_button.setEnabled(True)
             self.state, self.copy = res if res else ({"error": str(err)}, {"error": str(err)})
-            self.kodi = self.state.pop("kodi", {}) or {}
+            self.phones = self.state.pop("phones", []) or []
             self.show_state()
             if self.mode.currentData() == "auto" and self.copy.get("tag") and not self.copy.get("why") \
                     and not self.updated_to:
@@ -168,8 +164,10 @@ class UpdatesCard(QWidget):
             c = (self.state.get("components") or {}).get(key) or {}
             if c.get("newer") and c.get("current"):
                 parts.append(f"{name} {c['latest']}")
-        if self.kodi.get("newer"):
-            parts.append(f"Kodi {self.kodi['latest']['label']}")
+        latest_phone = ((self.state.get("components") or {}).get("phone") or {}).get("latest")
+        behind = [d["name"] for d in self.phones if d.get("app_version") and newer(latest_phone, d["app_version"])]
+        if behind:
+            parts.append(f"phone app {latest_phone} ({', '.join(behind)})")
         return ", ".join(parts)
 
     def show_state(self):
@@ -202,6 +200,11 @@ class UpdatesCard(QWidget):
             c = comps.get(key) or {}
             if self.state.get("installing"):
                 text.setText("Installing an update on the TV…")
+            elif key == "tvplayer" and c.get("installed") is False:
+                text.setText(f"<span style='color:{AMBER}'>○</span> Not on the TV"
+                             + (f" · <b>{c['latest']}</b> can be installed" if c.get("latest") else
+                                " <span style='color:gray'>· no release on GitHub yet</span>"))
+                b.setText("Install TV Agent Player")
             elif c.get("newer"):
                 text.setText(f"<span style='color:{AMBER}'>⬆</span> {c.get('current') or 'not installed'} on the TV · "
                              f"<b>{c['latest']}</b> is out")
@@ -211,77 +214,30 @@ class UpdatesCard(QWidget):
                 text.setText(f"{c['current']} on the TV <span style='color:gray'>· no release on GitHub yet</span>")
             else:
                 text.setText("<span style='color:gray'>not checked yet</span>")
+            if c.get("newer") and c.get("installed") is not False:
+                b.setText("Update the player" if key == "tvplayer" else "Update the TV app")
             b.setVisible(bool(c.get("newer")) and not self.state.get("installing"))
-        self.show_kodi()
         text, _ = self.rows["phone"]
-        phone = comps.get("phone") or {}
-        text.setText((f"latest {phone['latest']} · " if phone.get("latest") else "")
-                     + "<span style='color:gray'>each phone updates itself (More › About in the app); their versions "
-                       "are under Phones below</span>")
+        latest = (comps.get("phone") or {}).get("latest")
+        known = [d for d in self.phones if d.get("app_version")]
+        behind = [d for d in known if newer(latest, d["app_version"])]
+        if not latest:
+            text.setText("<span style='color:gray'>not checked yet</span>")
+        elif not self.phones:
+            text.setText(f"latest {latest} · <span style='color:gray'>no phones paired</span>")
+        elif behind:
+            text.setText(f"<span style='color:{AMBER}'>⬆</span> <b>{latest}</b> is out · "
+                         + ", ".join(f"{html.escape(d['name'])} has {html.escape(d['app_version'])}" for d in behind)
+                         + " <span style='color:gray'>(each phone updates itself: More › About in the app)</span>")
+        elif known:
+            text.setText(f"<span style='color:{GREEN}'>✔</span> {latest} on "
+                         + ", ".join(html.escape(d["name"]) for d in known) + ", the latest")
+        else:
+            text.setText(f"latest {latest} · <span style='color:gray'>the phones haven't said their app's version "
+                         "yet</span>")
         checked = self.state.get("checked")
         self.status.setText(f"<span style='color:{AMBER}'>{html.escape(err)}</span>" if err else
                             f"Checked {ago(checked)}" if checked else "")
-
-    def show_kodi(self):
-        text, b = self.rows["kodi"]
-        k = self.kodi
-        job = k.get("job") or {}
-        running = bool(job and not job.get("done") and not job.get("error"))
-        latest = k.get("latest") or {}
-        rc = "" if latest.get("stable", True) else " (a release candidate)"
-        if k.get("error") or not k.get("installed", True):
-            why = k.get("error") or "Kodi isn't installed on the TV"
-            text.setText(f"<span style='color:gray'>{html.escape(why)}</span>")
-        elif running:
-            text.setText(f"<span style='color:{AMBER}'>⟳</span> {html.escape(job.get('step', ''))}…")
-        elif k.get("newer"):
-            text.setText(f"<span style='color:{AMBER}'>⬆</span> {k['version']} on the TV · <b>{latest['label']}</b> is "
-                         f"out{rc}")
-        elif k.get("version"):
-            text.setText(f"<span style='color:{GREEN}'>✔</span> {k['version']} on the TV, the latest")
-        else:
-            text.setText("<span style='color:gray'>not checked yet</span>")
-        if job.get("error"):
-            text.setText(text.text() + f"<br><span style='color:{RED}'>Not updated: {html.escape(job['error'])}</span>")
-        elif job.get("done") and job.get("note"):
-            text.setText(text.text() + f"<br><span style='color:gray'>{html.escape(job['note'])}</span>")
-        b.setVisible(bool(k.get("newer")) and not running)
-        if running and not self.kodi_poll.isActive():
-            self.kodi_poll.start()
-        elif not running and self.kodi_poll.isActive():
-            self.kodi_poll.stop()
-            if job.get("needs") == "replace":
-                self.offer_kodi_replace()
-
-    def refresh_kodi(self):
-        def done(res, err):
-            self.kodi = res if res and not err else {"error": str(err)}
-            self.show_kodi()
-        self.panel.bg.run(lambda: api("/v1/kodi", timeout=30), done)
-
-    def update_kodi(self, replace: bool = False):
-        latest = self.kodi.get("latest") or {}
-        if not replace and QMessageBox.question(
-                self, "TV Agent", f"Update Kodi on the TV to {latest.get('label')}"
-                + ("" if latest.get("stable", True) else ", a release candidate") + "?\n\nKodi's settings, libraries and "
-                "add-ons are backed up on the TV first. About 70 MB from kodi.tv, checked against its SHA-256; a minute "
-                "or two.") != QMessageBox.StandardButton.Yes:
-            return
-        self.rows["kodi"][1].setVisible(False)
-
-        def done(res, err):
-            if err:
-                QMessageBox.warning(self, "TV Agent", f"Kodi wasn't updated: {err}")
-            self.refresh_kodi()
-            self.kodi_poll.start()
-        self.panel.bg.run(lambda: api("/v1/kodi/update", {"replace": replace}, timeout=40), done)
-
-    def offer_kodi_replace(self):
-        if QMessageBox.question(
-                self, "TV Agent", "This Kodi came from Google Play, which signs it with another key, so Kodi from "
-                "kodi.tv can't be installed over it.\n\nReplace it? It's uninstalled, the new one installed, and the "
-                "backup just made restored into it (settings, libraries, add-ons).") == QMessageBox.StandardButton.Yes:
-            self.update_kodi(replace=True)
 
     def update_app(self, key: str):
         """The TV app's or TV Agent Player's latest release installed on the TV through the agent."""

@@ -1,6 +1,7 @@
 """What the panel's Overview shows about the TV: its model and Android version, the TV app's version, the network
-(interfaces, Wi-Fi signal and link speed), CPU and memory use, the busiest processes, and the app in front. Read-only
-commands over the agent's ADB connection; plus a transfer speed test and step-by-step ADB checks."""
+(interfaces, Wi-Fi signal and link speed), CPU and memory use, the busiest processes, the project's own apps and the
+players (CPU and memory of each that runs), and the app in front. Read-only commands over the agent's ADB
+connection; plus a transfer speed test and step-by-step ADB checks."""
 import os
 import re
 import socket
@@ -11,13 +12,20 @@ from ..config import Config
 from .adb import Adb
 
 APP = "com.boujuan.tvagent"
+# The apps whose processes the Overview lists, with their names there (PACKAGES below has their packages)
+WATCHED = {"tvplayer": "TV Agent Player", "kodi": "Kodi", "just": "Just Player", "tvagent": "TV app"}
+# Each one's CPU over the same half second as the whole TV's: /proc/<pid>/stat before and after
+_PIDS = "P=$(for n in {}; do pidof $n; done | tr '\\n' ' '); "
+_TICKS = "for p in $P; do cat /proc/$p/stat 2>/dev/null; done; "
 SCRIPT = ("getprop ro.product.model; getprop ro.build.version.release; echo @@; "
           f"dumpsys package {APP} | grep -E 'versionName|versionCode|lastUpdateTime' | head -3; echo @@; "
           "ip -o -4 addr show; echo @@; cmd wifi status 2>/dev/null | grep -m1 WifiInfo; echo @@; "
-          "head -1 /proc/stat; sleep 0.5; head -1 /proc/stat; echo @@; "
+          "{pids}head -1 /proc/stat; " + _TICKS + "sleep 0.5; head -1 /proc/stat; " + _TICKS + "echo @@; "
           "grep -E 'MemTotal|MemAvailable' /proc/meminfo; echo @@; "
           "dumpsys cpuinfo | grep -E '^ +[0-9.]+% [0-9]+/' | head -6; echo @@; uptime; echo @@; "
-          "dumpsys activity activities | grep -m1 ResumedActivity; dumpsys power 2>/dev/null | grep -m1 mWakefulness=")
+          "dumpsys activity activities | grep -m1 ResumedActivity; dumpsys power 2>/dev/null | grep -m1 mWakefulness=; "
+          "echo @@; for n in {packages}; do for p in $(pidof $n); do "
+          "echo APP $p $n $(grep -m1 VmRSS /proc/$p/status | tr -s ' ' | cut -d' ' -f2); done; done")
 KEYS = {"home": "KEYCODE_HOME", "back": "KEYCODE_BACK", "wake": "KEYCODE_WAKEUP", "sleep": "KEYCODE_SLEEP",
         "play_pause": "KEYCODE_MEDIA_PLAY_PAUSE", "volume_up": "KEYCODE_VOLUME_UP",
         "volume_down": "KEYCODE_VOLUME_DOWN", "mute": "KEYCODE_VOLUME_MUTE", "settings": "KEYCODE_SETTINGS"}
@@ -33,8 +41,36 @@ def _cpu(lines: list[str]) -> float | None:
     return round(100 * (1 - idle / total), 1) if total > 0 else None
 
 
+def apps(stat_lines: list[str], app_lines: list[str], packages: dict[str, str]) -> list[dict]:
+    """The watched apps that run: their CPU share of the whole TV over the sample (like the laptop's rows) and memory,
+    from two rounds of /proc/<pid>/stat around two /proc/stat "cpu" lines, and VmRSS. A process is known by its pid
+    ("APP <pid> <package> <kB>" lines): /proc's name keeps only 15 characters, the same for the TV app and the player."""
+    cpu = [[int(x) for x in l.split()[1:]] for l in stat_lines if l.startswith("cpu ")]
+    total = sum(cpu[1]) - sum(cpu[0]) if len(cpu) == 2 else 0
+    ticks: dict[int, list[int]] = {}
+    for line in stat_lines:
+        m = re.match(r"(\d+) \(.*\) \S+ (.*)", line)
+        if m:
+            f = m.group(2).split()                  # after the state: ppid…; utime and stime are fields 14 and 15
+            ticks.setdefault(int(m.group(1)), []).append(int(f[10]) + int(f[11]))
+    keys = {pkg: key for key, pkg in packages.items()}
+    out = []
+    for line in app_lines:
+        m = re.match(r"APP (\d+) (\S+) ?(\d*)", line)
+        if not m or m.group(2) not in keys:
+            continue
+        pid, key, t = int(m.group(1)), keys[m.group(2)], ticks.get(int(m.group(1)), [])
+        busy = (t[-1] - t[0]) if len(t) == 2 else 0
+        out.append({"key": key, "name": WATCHED[key], "package": m.group(2), "pid": pid,
+                    "cpu": round(100 * busy / total, 1) if total > 0 else 0.0, "rss_kb": int(m.group(3) or 0)})
+    return sorted(out, key=lambda a: list(WATCHED).index(a["key"]))
+
+
 def status(adb: Adb) -> dict:
-    parts = [p.strip().splitlines() for p in adb.run(["sh", "-c", SCRIPT], timeout=15).split("@@")]
+    watched = {k: PACKAGES[k] for k in WATCHED}
+    script = SCRIPT.replace("{pids}", _PIDS.format(" ".join(watched.values()))).replace(
+        "{packages}", " ".join(watched.values()))
+    parts = [p.strip().splitlines() for p in adb.run(["sh", "-c", script], timeout=15).split("@@")]
     parts += [[]] * (9 - len(parts))
     out: dict = {"model": (parts[0] + [""])[0], "android": (parts[0] + ["", ""])[1], "address": adb.host}
     app = " ".join(parts[1])
@@ -63,6 +99,7 @@ def status(adb: Adb) -> dict:
     front = " ".join(parts[8])
     out["foreground"] = m.group(1) if (m := re.search(r"ActivityRecord\{\S+ \S+ ([\w.]+)/", front)) else None
     out["screen"] = m.group(1).lower() if (m := re.search(r"mWakefulness=(\w+)", front)) else None   # awake, asleep…
+    out["apps"] = apps(parts[4], parts[9] if len(parts) > 9 else [], watched)
     return out
 
 
