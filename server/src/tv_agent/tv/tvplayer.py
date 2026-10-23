@@ -22,6 +22,7 @@ import secrets
 import time
 from collections.abc import Callable
 
+from ..config import Config, lan_address, tailscale_address
 from .adb import Adb
 
 log = logging.getLogger(__name__)
@@ -37,6 +38,13 @@ SILENCE = 30.0
 
 class PlayerError(RuntimeError):
     pass
+
+
+def addresses(cfg: Config) -> list[str]:
+    """Where the agent listens for the player, in the order the player tries them: the LAN address, phone_hosts, then
+    this computer's Tailscale address while Tailscale runs, so the player finds the agent when the computer is away
+    from the TV's network too."""
+    return list(dict.fromkeys([lan_address(cfg), *cfg.phone_hosts, *filter(None, [tailscale_address()])]))
 
 
 def kodi_tracks(t: dict) -> dict:

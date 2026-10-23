@@ -10,6 +10,7 @@ import re
 import secrets as random_tokens
 import socket
 import stat
+import subprocess
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -174,6 +175,15 @@ def read_secret(name: str) -> str | None:
         return tomllib.loads(SECRETS_FILE.read_text()).get(name) or None
     except (OSError, tomllib.TOMLDecodeError):
         return None
+
+
+def tailscale_address() -> str | None:
+    """This computer's Tailscale IPv4 address while Tailscale runs (its CLI), else None."""
+    try:
+        out = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=3).stdout.split()
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return out[0] if out and re.fullmatch(r"100\.\d+\.\d+\.\d+", out[0]) else None
 
 
 def save_secret(name: str, value: str | None):

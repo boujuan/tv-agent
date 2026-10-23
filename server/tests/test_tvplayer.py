@@ -331,3 +331,12 @@ def test_the_players_events_reach_the_session():
 
     stopped_at, nexts, others = asyncio.run(run())
     assert stopped_at == 1_234_567 and nexts == [1] and others == ["ERROR_CODE_IO_BAD_HTTP_STATUS"]
+
+
+def test_the_player_is_told_the_lan_address_then_tailscales(monkeypatch):
+    cfg = types.SimpleNamespace(phone_hosts=["192.168.1.52"])
+    monkeypatch.setattr(T, "lan_address", lambda c: "192.168.1.52")
+    monkeypatch.setattr(T, "tailscale_address", lambda: "100.125.125.38")
+    assert T.addresses(cfg) == ["192.168.1.52", "100.125.125.38"]        # once each, in the order to try
+    monkeypatch.setattr(T, "tailscale_address", lambda: None)              # Tailscale not running
+    assert T.addresses(cfg) == ["192.168.1.52"]

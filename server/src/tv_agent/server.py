@@ -961,7 +961,7 @@ async def serve(cfg: Config):
         svc._library_names_at = time.monotonic()
         asyncio.create_task(svc._refresh_library_names())
     lan_host = lan_address(cfg)
-    players = await player_listener(svc, lan_host)       # before restore(): a player that's open reconnects to it
+    players = await player_listeners(svc)               # before restore(): a player that's open reconnects to it
     try:
         await svc.agent.restore()
         asyncio.create_task(svc.agent.warm())
@@ -975,7 +975,7 @@ async def serve(cfg: Config):
         uvicorn.Server(uvicorn.Config(local, host="127.0.0.1", port=cfg.local_port, access_log=False,
                                       log_level="warning", timeout_graceful_shutdown=SHUTDOWN_GRACE)),
     ]
-    serving = [s.serve() for s in servers] + [stream.serve_forever()] + ([players.serve_forever()] if players else [])
+    serving = [s.serve() for s in servers] + [stream.serve_forever()] + [p.serve_forever() for p in players]
     if cfg.phones:
         serving += await phone_listeners(svc, local)
 
@@ -996,18 +996,26 @@ async def serve(cfg: Config):
         await svc.agent.close()
 
 
-async def player_listener(svc: Service, host: str) -> asyncio.Server | None:
-    """TV Agent Player's connection (tv/tvplayer.py) on the LAN address at player_port, TLS with the phones'
-    certificate, which the player pins. Listening whatever the player setting, so switching to it needs no restart;
-    a player without the token is turned away."""
+async def player_listeners(svc: Service) -> list[asyncio.Server]:
+    """TV Agent Player's connection (tv/tvplayer.py) at player_port on each of tvplayer.addresses() (the LAN address,
+    then Tailscale's), TLS with the phones' certificate, which the player pins. Listening whatever the player setting,
+    so switching to it needs no restart; a player without the token is turned away. An address that can't be had is
+    skipped with a warning."""
+    port = svc.cfg.player_port
     try:
         await asyncio.to_thread(clients_mod.certificate)
-        server = await svc.agent.tvplayer.serve(host, svc.cfg.player_port, clients_mod.tls_context())
+        ctx = clients_mod.tls_context()
     except (OSError, ValueError, ImportError) as e:
-        log.warning("TV Agent Player: not listening on %s:%d (%s)", host, svc.cfg.player_port, e)
-        return None
-    log.info("TV Agent Player: %s:%d (TLS)", host, svc.cfg.player_port)
-    return server
+        log.warning("TV Agent Player: no certificate (%s), so no listener", e)
+        return []
+    out = []
+    for host in await asyncio.to_thread(tvplayer.addresses, svc.cfg):
+        try:
+            out.append(await svc.agent.tvplayer.serve(host, port, ctx))
+            log.info("TV Agent Player: %s:%d (TLS)", host, port)
+        except OSError as e:
+            log.warning("TV Agent Player: not listening on %s:%d (%s)", host, port, e)
+    return out
 
 
 async def phone_listeners(svc: Service, local: FastAPI) -> list:

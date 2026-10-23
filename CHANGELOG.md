@@ -19,6 +19,9 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   it as with Kodi; with it on screen, transport skips asking the TV which app is in front (~1 s).
 - `tv-agent tv install` takes TV Agent Player's APK too (allowed to start, compiled ahead of time, paired);
   `tv-agent tv pair` pairs it as well when it's installed. `GET /v1/tv/packages` lists it.
+- TV Agent Player is told all the agent's addresses, the LAN's first, then `phone_hosts` and this computer's
+  Tailscale address while Tailscale runs, and the agent listens for it on each: it reaches the agent with the
+  computer away from home too (needs the player from its 0.1.0).
 
 ### Fixed
 - `tv-agent tv install` timed out pushing any APK to this TV: its adbd announces 1 MB writes but never acknowledges

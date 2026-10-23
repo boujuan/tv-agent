@@ -19,6 +19,7 @@ from . import clients
 from .config import Config, lan_address, new_token, read_secret, save_secret
 from .tv.adb import Adb
 from .tv.tvplayer import PACKAGE as PLAYER
+from .tv.tvplayer import addresses as tvplayer_addresses
 
 APP = "com.boujuan.tvagent"
 UNIT_DIR = Path.home() / ".config/systemd/user"
@@ -129,20 +130,22 @@ def installed(adb: Adb, package: str) -> bool:
 
 
 def pair_player(cfg: Config, adb: Adb) -> str:
-    """TV Agent Player's pairing (its PairReceiver, which only ADB may send to): this agent's address and player_port,
-    the player's own token (made the first time), and the certificate it must find there (the phones' listeners'
-    one, clients.py). The running agent reads the token at each connection: no restart."""
+    """TV Agent Player's pairing (its PairReceiver, which only ADB may send to): this agent's addresses in the order
+    to try (the LAN's, then Tailscale's: tvplayer.addresses) and player_port, the player's own token (made the first
+    time), and the certificate it must find there (the phones' listeners' one, clients.py). The running agent reads
+    the token at each connection: no restart."""
     token = read_secret("player_token")
     if not token:
         token = new_token()
         save_secret("player_token", token)
     cfg.secrets["player_token"] = token
-    host = lan_address(cfg)
-    out = adb.run(["am", "broadcast", "-n", f"{PLAYER}/.PairReceiver", "--es", "host", host,
-                   "--ei", "port", str(cfg.player_port), "--es", "token", token, "--es", "cert", clients.certificate()])
+    hosts = tvplayer_addresses(cfg)
+    out = adb.run(["am", "broadcast", "-n", f"{PLAYER}/.PairReceiver", "--es", "hosts", ",".join(hosts),
+                   "--es", "host", hosts[0], "--ei", "port", str(cfg.player_port), "--es", "token", token,
+                   "--es", "cert", clients.certificate()])
     if "result=-1" not in out.replace(" ", ""):
         raise SystemExit(f"TV Agent Player didn't take the settings ({out.strip()[-80:]}); is it installed?")
-    return f"{host}:{cfg.player_port}"
+    return ", ".join(f"{h}:{cfg.player_port}" for h in hosts)
 
 
 def install_app(cfg: Config, adb: Adb, apk: Path) -> str:

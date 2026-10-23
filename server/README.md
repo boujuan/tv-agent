@@ -54,7 +54,9 @@ Settings). Whichever it is, it's brought up while the stream is still being look
 
 **TV Agent Player** ([boujuan/tv-agent-player](https://github.com/boujuan/tv-agent-player)) is a Media3 player
 built for this TV and this agent: an app of its own on the TV that connects to the agent (`player_port`, 8770, TLS
-with the phones' certificate, which it pins; its own `player_token`) and is driven over that connection. Install it
+with the phones' certificate, which it pins; its own `player_token`) and is driven over that connection. It's told
+the agent's addresses in order: the LAN's, any `phone_hosts`, then this computer's Tailscale address while Tailscale
+runs, so it still finds the agent when the computer is away from the TV's network (the TV on Tailscale too). Install it
 with `tv-agent tv install tv-agent-player-<version>.apk` (it's also compiled ahead of time and paired); `tv-agent tv
 pair` pairs it again. Measured on the TV (its DESIGN.md): the first frame 1.3 s after the command (Just Player 2.9 s,
 Kodi 2.4 s warm), the next episode in binge mode 0.1 s (opened in the background 2.5 minutes before the end), jumps
