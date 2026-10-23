@@ -234,7 +234,7 @@ Localhost (127.0.0.1:8766), for the panel, the CLI and the MCP server, same toke
 | `GET /v1/state`, `GET /v1/stats` | what's playing; latency per stage |
 | `GET/POST /v1/rules`, `POST /v1/rules/reset`, `/reload` | the decision rules (checked, saved, live) |
 | `POST /v1/eval` `[{"rules"}]` | score the labelled sentences, optionally with unsaved rules |
-| `GET/POST /v1/pipeline` | decision steps, models, speech-to-text (where, models, loaded, keep recordings), live |
+| `GET/POST /v1/pipeline` | decision steps, models, speech-to-text (where, models, loaded, keep recordings, language hint, vocabulary; `stt_vocabulary_sent`: every name sent, yours then Twitch favourites and library titles), live |
 | `POST /v1/transcribe` `{"recording", "where", "model"}` | transcribe a kept recording again |
 | `GET /v1/tv/status`; `POST /v1/tv/speedtest`, `/diagnose`, `/reconnect` | the TV, its network and the ADB link |
 | `POST /v1/tv/key` `{"key"}`; `GET /v1/tv/screenshot` | a key from a fixed list; the screen as PNG |

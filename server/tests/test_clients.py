@@ -443,3 +443,23 @@ def test_a_phones_list_leaves_the_one_on_the_tv_alone(paths):
     assert svc.agent._shown is on_tv                     # "number 1" on the remote still picks the suggestion
     r = call(gate, "POST", "/v1/lists/pick", token, json={"list": "recent", "imdb": "tt1", "video": "tt1:3:2"})
     assert r.json()["ok"] and played == ["tt1"] and svc.agent._shown is on_tv
+
+
+def test_a_phone_sees_the_whole_vocabulary_sent_with_each_command(paths, monkeypatch):
+    """Yours, then the Twitch favourites and the library's titles (when on), each once: what the app lists."""
+    import types
+    from tv_agent.decide import learned
+    monkeypatch.setattr(learned, "load", lambda: [])
+    svc = service(paths)
+    svc.router = types.SimpleNamespace(steps=["phrases", "patterns", "llm", "d1"], off=set())
+    svc.agent.d1 = types.SimpleNamespace(where="hosted", hosted_model="d1", hosted=lambda: None)
+    svc.agent.rules = types.SimpleNamespace(fallback_intent=None, counts={})
+    svc.stt = None
+    svc.cfg.stt_vocabulary = ["Stremio", "Kodi"]
+    svc.cfg.twitch_favorites = ["Ibai"]
+    svc.cfg.stt_vocabulary_library = True
+    svc._library_names, svc._library_names_at = ["The Bear", "kodi"], 1e12     # fresh: no refresh started
+    gate = C.gateway(svc, server.local_app(svc))
+    p = call(gate, "GET", "/v1/pipeline", paired(svc)).json()
+    assert p["stt_vocabulary"] == ["Stremio", "Kodi"]
+    assert p["stt_vocabulary_sent"] == ["Stremio", "Kodi", "Ibai", "The Bear"] and p["stt_vocabulary_count"] == 4

@@ -701,7 +701,8 @@ def local_app(svc: Service) -> FastAPI:
                 "stt_loaded": svc.stt is not None, "keep_recordings": c.keep_recordings, "d1_model": str(c.d1_model),
                 "stt_language": c.stt_language, "stt_language_now": svc.stt_language(),
                 "stt_vocabulary": list(c.stt_vocabulary), "stt_vocabulary_library": c.stt_vocabulary_library,
-                "stt_vocabulary_count": len(svc.stt_vocabulary()),
+                "stt_vocabulary_count": len(sent := svc.stt_vocabulary()),
+                "stt_vocabulary_sent": sent,        # all of it, as sent: yours, then Twitch favourites and the library
                 "llama_server": c.llama_server}
 
     @app.get("/v1/pipeline")
