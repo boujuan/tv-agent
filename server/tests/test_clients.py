@@ -410,11 +410,11 @@ def test_junk_on_the_phone_audio_port_is_unauthorized(paths):
         assert _stream(svc, junk, "192.168.1.77", phone=True) == [{"error": "unauthorized"}]
 
 
-def test_phones_cant_point_the_agent_at_files_or_change_its_privacy(paths):
+def test_phones_cant_point_the_agent_at_files_on_this_laptop(paths):
     svc = service(paths)
     token = paired(svc)
     app = C.gateway(svc, server.local_app(svc))
-    for body in ({"d1_model": "/etc/passwd.gguf"}, {"stt_model": "/tmp"}, {"llm_private": False}):
+    for body in ({"d1_model": "/etc/passwd.gguf"}, {"stt_model": "/tmp"}):
         r = call(app, "POST", "/v1/pipeline", token, json=body)
         assert r.status_code == 403 and "only from this laptop" in r.text
 

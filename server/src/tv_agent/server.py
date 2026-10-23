@@ -713,8 +713,8 @@ def local_app(svc: Service) -> FastAPI:
         body = await request.json()
         if not isinstance(body, dict):
             raise HTTPException(422, "a JSON object of settings")
-        if request.scope.get(clients_mod.DEVICE) and (local := {"d1_model", "stt_model", "llm_private"} & set(body)):
-            # file paths on this laptop, and the privacy choice: the panel's, not a phone's
+        if request.scope.get(clients_mod.DEVICE) and (local := {"d1_model", "stt_model"} & set(body)):
+            # paths on this laptop (a 422 would tell a phone whether a file exists): the panel's, not a phone's
             raise HTTPException(403, f"{', '.join(sorted(local))}: only from this laptop's panel")
         new = {}
         if "steps" in body:

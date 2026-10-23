@@ -107,7 +107,7 @@ whole recording instead).
     phone's list; phones now keep their own;
   - pairing tries are limited per address, and only while a pairing is open: anyone on the network could keep the
     phone out with junk tries, and five wrong codes closed it for everyone (now: five per address, 50 in all);
-  - a phone can't set `d1_model`, `stt_model` or `llm_private` (paths on this laptop, and the privacy choice);
+  - a phone can't set `d1_model` or `stt_model` (paths on this laptop: the answer told whether a file exists);
   - junk on the phones' audio port is answered "unauthorized" instead of logging an error.
 - Rules: a "title" over 12 words is a description, for the LLM.
 
