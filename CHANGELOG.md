@@ -22,6 +22,12 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   fixes for seeking on MediaTek decoders like this TV's) and "Update Kodi", with its progress. Needs the agent from
   this version.
 - Settings › Playback: "Check each episode is the one asked for, by its subtitles" (`check_episodes`).
+- Decisions › Speech to text › **Show all (N)…**: the whole vocabulary sent with each command in a window of its own,
+  as the phone app has it: your names (find, add, remove), then Twitch favourites and your library's titles, the
+  library switch at the top and the total against the hosted model's 200. Works with the voice agent stopped too
+  (written to config.toml).
+- Decisions: the "How a command is decided" diagram folds to its header (▲: the editors get the whole height) or
+  takes the whole height (▼: the editors are hidden); click it again for both. Remembered.
 
 ## server 0.4.0 — 2026-10-23
 

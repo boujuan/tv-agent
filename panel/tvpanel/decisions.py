@@ -34,6 +34,8 @@ STEP_EDGE = {"phrases": "exact match", "patterns": "a rule fits", "llm": "answer
 NUMS = "①②③④"
 TAB_FOR = {"input": 0, "stt": 0, "clean": 1, "phrases": 2, "patterns": 3, "llm": 4, "d1": 5, "unclear": 5,
            "action": 6, "tv": 6}
+VIEWS = ("normal", "collapsed", "expanded")      # the diagram above the editors, folded to its header, or all of it
+NO_LIMIT = 16777215                              # QWIDGETSIZE_MAX
 
 
 class StepCard(QFrame):
@@ -566,17 +568,35 @@ class Decisions(QWidget):
         tl = QVBoxLayout(top)
         tl.setContentsMargins(14, 10, 14, 10)
         head = QHBoxLayout()
-        head.addWidget(QLabel("<b>How a command is decided</b> <span style='color:gray'>· drag the steps into "
-                              "another order, switch them on or off (live at once) · click one to edit it</span>"))
+        head.addWidget(QLabel("<b>How a command is decided</b>"))
+        self.diagram_hint = QLabel("<span style='color:gray'>· drag the steps into another order, switch them on or "
+                                   "off (live at once) · click one to edit it</span>")
+        head.addWidget(self.diagram_hint)
         head.addStretch()
+        self.view_buttons = {}
+        for view, arrow, tip in (
+                ("collapsed", Qt.ArrowType.UpArrow, "Fold the diagram up: the editors get the whole height"),
+                ("expanded", Qt.ArrowType.DownArrow, "The diagram gets the whole height: the editors are hidden")):
+            b = QToolButton()
+            b.setArrowType(arrow)
+            b.setAutoRaise(True)
+            b.setCheckable(True)
+            b.setToolTip(f"{tip}. Click it again for both")
+            b.clicked.connect(lambda on, view=view: self.set_view(view if on else "normal"))
+            head.addWidget(b)
+            self.view_buttons[view] = b
         tl.addLayout(head)
+        body = QWidget()                           # all but the header: hidden when the diagram is folded
+        dl = QVBoxLayout(body)
+        dl.setContentsMargins(0, 0, 0, 0)
+        tl.addWidget(body, 1)
         self.diagram = FlowDiagram()
         self.diagram.clicked.connect(self.node_clicked)
         self.diagram.order_changed.connect(lambda order: self.set_pipeline({"steps": order}))
         self.diagram.step_toggled.connect(self.step_toggled)
         self.pipeline: dict = {}
         self._checked: dict[str, str] = {}             # the model ids last checked with OpenRouter
-        tl.addWidget(self.diagram, 1)
+        dl.addWidget(self.diagram)
         trow = QHBoxLayout()
         self.test = QLineEdit()
         self.test.setPlaceholderText("Try a sentence to see its path (nothing is sent to the TV)")
@@ -589,17 +609,19 @@ class Decisions(QWidget):
         trow.addWidget(self.test, 1)
         trow.addWidget(go)
         trow.addWidget(self.add_phrase_btn)
-        tl.addLayout(trow)
+        dl.addLayout(trow)
         self.explanation = QLabel("")
         self.explanation.setWordWrap(True)
         self.explanation.setTextFormat(Qt.TextFormat.RichText)
         self.explanation.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        tl.addWidget(self.explanation)
+        dl.addWidget(self.explanation)
+        dl.addStretch(1)                           # room to spare goes below, not inside the diagram
         top_scroll = QScrollArea()                 # drag the divider up for the editors: the diagram scrolls
         top_scroll.setWidgetResizable(True)
         top_scroll.setFrameShape(QFrame.Shape.NoFrame)
         top_scroll.setWidget(top)
         split.addWidget(top_scroll)
+        self.top_card, self.top_scroll, self.diagram_body = top, top_scroll, body
 
         # bottom: editors
         bottom = card()
@@ -808,12 +830,44 @@ class Decisions(QWidget):
         for w in (self.fillers, self.remove_words):
             w.textEdited.connect(self.mark_dirty)
         split.addWidget(bottom)
-        sizes = self.panel.prefs.s.value("decisions_split")
-        split.setSizes([int(x) for x in sizes] if isinstance(sizes, list) and len(sizes) == 2 else [470, 380])
+        self.editors = bottom
+        split.setSizes(self.split_sizes())
         split.splitterMoved.connect(lambda *_: self.panel.prefs.s.setValue("decisions_split", split.sizes()))
+        self.set_view(str(self.panel.prefs.s.value("decisions_view", "normal")))
 
         self.status = Say(self.panel)           # messages go to the window's status bar
         self.loaded = False
+
+    # ---- the diagram's view ----
+
+    def split_sizes(self) -> list[int]:
+        """Where the divider was left."""
+        sizes = self.panel.prefs.s.value("decisions_split")
+        return [int(x) for x in sizes] if isinstance(sizes, list) and len(sizes) == 2 else [470, 380]
+
+    def set_view(self, view: str):
+        """"normal": the diagram above the editors, the divider where you left it; "collapsed": the diagram folded
+        to its header, the editors below it; "expanded": the diagram the whole height, the editors hidden.
+        Remembered."""
+        view = view if view in VIEWS else "normal"
+        self.view = view
+        for v, b in self.view_buttons.items():
+            b.setChecked(v == view)
+        self.diagram_body.setVisible(view != "collapsed")
+        self.diagram_hint.setVisible(view != "collapsed")
+        self.editors.setVisible(view != "expanded")
+        handle = self.split.handle(1)
+        handle.setEnabled(view == "normal")
+        handle.setCursor(Qt.CursorShape.SplitVCursor if view == "normal" else Qt.CursorShape.ArrowCursor)
+        if view == "collapsed":
+            self.top_card.ensurePolished()
+            self.top_card.layout().activate()
+            self.top_scroll.setMaximumHeight(self.top_card.sizeHint().height())
+        else:
+            self.top_scroll.setMaximumHeight(NO_LIMIT)
+        if view == "normal":
+            self.split.setSizes(self.split_sizes())
+        self.panel.prefs.s.setValue("decisions_view", view)
 
     # ---- loading and saving ----
 
@@ -1180,9 +1234,13 @@ class Decisions(QWidget):
 
     def node_clicked(self, node: str):
         if node in TAB_FOR:
+            if self.view == "expanded":            # its editor is hidden
+                self.set_view("normal")
             self.tabs.setCurrentIndex(TAB_FOR[node])
 
     def explain_text(self, text: str):
+        if self.view == "collapsed":               # its path is drawn in the diagram
+            self.set_view("normal")
         self.test.setText(text)
         self.explain()
 
@@ -1321,6 +1379,8 @@ class Decisions(QWidget):
         action = {k: v for k, v in action.items() if v not in (None, False, "") or k == "type"}
         if action.get("type") == "none":
             action = {"type": "transport", "op": "pause"}
+        if self.view == "expanded":
+            self.set_view("normal")
         self.tabs.setCurrentIndex(TAB_FOR["phrases"])
         self.phrases.add_row({"id": "_".join(text.split()[:3]), "say": [text], "do": action,
                               "note": "added from the tester"})

@@ -48,11 +48,14 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
   filter; **try** fills one in with an example you can edit, then explains it (nothing sent) or does it on the TV.
 - **Decisions:** how a command is decided, as a diagram whose decision steps (fixed phrases, pattern rules, the
   LLM, the decision model) you drag into another order (or ▲▼) and switch on or off, live at once; drag the
-  divider up to give the editors room. Type a sentence to
+  divider up to give the editors room, or fold the diagram to its header (▲ at its top right) or give it the whole
+  height (▼; click it again for both). Type a sentence to
   light up its path and read why (which phrase or rule fit, which parts were read, the LLM's answer, d1's top three
   with confidences and where it answered from, two-command sentences); **Add as fixed phrase**; editors in the
   order a command goes through them: **speech to text** (this laptop, hosted, or either first; the local and
-  hosted models; keep recordings for debugging), clean-up, fixed phrases, pattern rules ("How a pattern rule
+  hosted models; the vocabulary the hosted model is sent, all of it in **Show all…**: your names to find, add or
+  remove, then Twitch favourites and your library's titles; keep recordings for debugging), clean-up, fixed
+  phrases, pattern rules ("How a pattern rule
   works…"), the LLM (model, reasoning, private providers), the **decision model** (where it runs and offers to
   start or stop the local server to match, a local GGUF file and a hosted model, question, threshold, what happens
   when no model answers, title choice, intents) and apps & hooks; each tab shows whether the key it needs is set,
