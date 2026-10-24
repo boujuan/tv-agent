@@ -206,8 +206,9 @@ def nightly(stt: str, only: list[str] | None = None, folder: Path | None = None)
     """The three benches against their baselines; the run kept in runs/<date>.json, an alert on a regression."""
     folder = folder or DIR
     stamp = time.strftime("%Y-%m-%d-%H%M")
-    (folder / "runs").mkdir(parents=True, exist_ok=True)
-    (folder / "baselines").mkdir(parents=True, exist_ok=True)
+    for sub in (folder, folder / "runs", folder / "baselines"):     # the runs hold your transcripts: yours alone
+        sub.mkdir(parents=True, exist_ok=True)
+        sub.chmod(0o700)
     run = {"t": time.time(), "stt": stt, "benches": {}}
     for name in only or list(BENCHES):
         raw = folder / "runs" / f"{stamp}-{name}.json"

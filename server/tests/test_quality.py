@@ -68,6 +68,7 @@ def test_nightly_compares_with_the_baseline_and_alerts_only_on_a_regression(tmp_
     first = Q.nightly("local", ["chains"], tmp_path)
     assert first["regressions"] == 0 and first["benches"]["chains"]["right"] == 1
     assert (tmp_path / "baselines" / "chains.json").exists() and Q.alert(tmp_path) is None
+    assert (tmp_path / "runs").stat().st_mode & 0o777 == 0o700
 
     results["chains"]["rows"] = [{"text": "pause", "ok": False, "cost": 0.0},
                                  {"text": "play dune then go to 1:00", "ok": True, "cost": 0.01},

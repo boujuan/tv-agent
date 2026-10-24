@@ -429,7 +429,8 @@ start) `tv-agent quality nightly` runs `bench_voice.py` (your voice tests throug
 `bench_chains.py` and `bench_finding.py` with your setup, nothing sent to the TV, and compares each case with its
 baseline (the first run's, until a run is accepted as the baseline after a change made on purpose). The runs stay in
 `~/.local/share/tv-agent/quality/runs/` with what they cost (the LLM, d1 and a hosted speech model are called as in
-use: about $0.05–0.15 a night). A regression leaves `quality/alert.json`: the panel notifies you, and a paired phone
+use: $0.10 and 3 minutes for 207 voice tests, 29 sentences and 24 searches). The folder is yours alone (mode 700). A
+regression leaves `quality/alert.json`: the panel notifies you, and a paired phone
 asking `GET /v1/quality` sees it, until it's seen.
 
 ## HTTP API
