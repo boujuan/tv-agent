@@ -959,6 +959,7 @@ def test_a_start_whose_links_fail_leaves_what_plays_alone():
         async def tv(fn, *args):
             return ""
         a.account, a.dry_run, a.notify, a.tv = object(), False, nothing, tv
+        a._streams, a._stream_jobs = {}, {}
         a.cfg = types.SimpleNamespace(player="kodi", probe_streams=True)
         a._start_kodi, a.streams_for, a._first_playable = ready, found, nothing      # no link answers
         a.track_plan = lambda meta: languages.TrackPlan("eng", None)
@@ -1796,6 +1797,7 @@ def test_a_file_opens_in_kodi_only_after_the_playing_one_has_let_go(monkeypatch)
             await real_sleep(0)
         monkeypatch.setattr(agent_mod.asyncio, "sleep", sleep)
         a.account, a.dry_run, a.notify, a.tv, a.state = object(), False, nothing, tv, agent_mod.State()
+        a._streams, a._stream_jobs = {}, {}
         a.cfg = types.SimpleNamespace(player="kodi", probe_streams=False, auto_skip=False)
         a._start_kodi, a.streams_for, a._kodi_player = ready, found, player
         a.track_plan = lambda meta: languages.TrackPlan("eng", None)

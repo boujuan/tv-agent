@@ -211,6 +211,7 @@ def bare_agent(player: FakeTvPlayer) -> Agent:
     a.cfg = types.SimpleNamespace(player="tvplayer", probe_streams=False, auto_skip=False, check_episodes=False,
                                   binge=True)
     a._progress, a._starting, a._user_stopped = None, asyncio.Lock(), False
+    a._streams, a._stream_jobs = {}, {}
     return a
 
 

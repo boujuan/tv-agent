@@ -59,11 +59,13 @@ def title_agent(monkeypatch, catalog: dict[str, list[C.Meta]], sounds_like: list
             return list(library)
 
     class Llm:
+        model = "deepseek/deepseek-v4.1-flash-1017"
+
         async def titles(self, heard, sentence, names):
             return list(sounds_like)
 
     class D1:
-        last_source = "hosted"
+        last_source, hosted_model = "hosted", "d1"
 
         async def choice(self, state, question, options):
             asked.append((state, dict(options)))
@@ -224,21 +226,71 @@ def test_the_episode_check_waits_for_the_file_to_open_and_reads_the_link_found(m
     assert did == [("wait", agent_mod.CHECK_AFTER), ("check", "https://cdn/resolved")]
 
 
-def test_a_starts_record_says_how_its_title_was_found(monkeypatch):
-    """For the activity history: the candidates, how each choice was made (d1 with its confidence), the LLM's
-    sound-alikes and which one won, and the times."""
+def test_a_starts_trace_says_how_its_title_was_found(monkeypatch):
+    """For the activity history and the panel's diagram: each step after the decision, in order, with what it found
+    and its time: the library, the searches, the LLM's sound-alikes, each choice (d1 with its model and confidence),
+    the pick."""
     a, _ = title_agent(monkeypatch, {"rebel mung": [REBELDE, PART_TWO], "Rebel Moon": [PART_ONE, PREQUEL, PART_TWO]},
                        ["Rebel Moon"], prefer=["Rebelde", "Rebel Moon - Part One"])
     a.dry_run, a._closing, a.state = True, None, agent_mod.State()
 
     async def play_found(play, imdb, kind, name, playing_video=None):
+        agent_mod._step("start", "streams", 2100, kept=11)
         return agent_mod.Outcome(True, f"Playing {name}", {"stages": {"streams_ms": 2100}})
     a._play_found = play_found
     out = asyncio.run(a.execute(PlayTitle(title="rebel mung"), "Pon Rebel Mung"))
-    title = out.details["title"]
-    assert title["said"] == "rebel mung" and title["picked"] == PART_ONE.name and title["imdb"] == PART_ONE.id
-    assert title["by"] == "sounds like 'Rebel Moon', in Cinemeta" and title["sounds_like"] == ["Rebel Moon"]
-    assert any(c.startswith("Rebelde (2022)") for c in title["candidates"])
-    moon = next(c for c in title["choices"] if c["for"] == "Rebel Moon")
-    assert moon["by"] == "d1" and moon["confidence"] == 0.5 and moon["picked"].startswith(PART_ONE.name)
-    assert {"ms", "library_ms", "search_ms", "llm_ms"} <= set(title) and out.details["stages"] == {"streams_ms": 2100}
+    trace = out.details["trace"]
+    steps = [(t["stage"], t["step"], t.get("query")) for t in trace]
+    assert steps[0] == ("title", "library", "rebel mung") and trace[0]["matched"] is False
+    assert ("title", "search", "rebel mung") in steps and ("title", "sound-alikes", "rebel mung") in steps
+    assert ("title", "search", "Rebel Moon") in steps and steps[-2:] == [("title", "picked", None),
+                                                                        ("start", "streams", None)]
+    moon = next(t for t in trace if t["step"] == "choice" and t["query"] == "Rebel Moon")
+    assert moon["by"] == "d1" and moon["model"] == "hosted: d1" and moon["confidence"] == 0.5 and moon["of"] == 3
+    assert moon["picked"].startswith(PART_ONE.name) and len(moon["candidates"]) == 3
+    assert next(t for t in trace if t["step"] == "sound-alikes")["names"] == ["Rebel Moon"]
+    assert all(isinstance(t["at"], int) for t in trace) and [t["at"] for t in trace] == sorted(t["at"] for t in trace)
+    assert out.details["title"] == {"said": "rebel mung", "picked": PART_ONE.name, "imdb": PART_ONE.id,
+                                    "by": "sounds like 'Rebel Moon', in Cinemeta", "ms": out.details["title"]["ms"]}
+    assert out.details["stages"] == {"streams_ms": 2100}
+
+
+def test_the_activity_entry_has_the_whole_trace_and_explain_finds_the_title(monkeypatch):
+    """The decision's steps, then the action's own (finding the title, starting it), in one trace; and the panel's
+    Explain gets the title steps too, without anything played."""
+    from tv_agent import server
+    from tv_agent.decide.router import Decision
+    decided = [{"stage": "clean", "text": "pon rebel mung"}, {"stage": "llm", "action": "play_title", "reached": True}]
+    after = [{"stage": "title", "step": "picked", "title": "Rebel Moon", "at": 900}]
+    svc = server.Service.__new__(server.Service)
+    svc.token, svc.cfg = "agent-token", types.SimpleNamespace(tv_hosts=[], log_transcripts=True)
+    svc.clients = None                   # only read by the phone routes, which this test doesn't call
+    recorded = []
+    svc.record = lambda *args: recorded.append(args)
+
+    async def execute(action, heard=""):
+        return agent_mod.Outcome(True, "Playing Rebel Moon", {"trace": list(after), "stages": {"streams_ms": 2}})
+
+    async def trace_title(a, heard):
+        return ("tt14998742", "movie", "Rebel Moon - Part One"), list(after)
+
+    async def decide(text):
+        return Decision(PlayTitle(title="rebel mung"), "llm", 0.9, "llm", list(decided))
+    svc.agent = types.SimpleNamespace(execute=execute, trace_title=trace_title, state=agent_mod.State(),
+                                      adb=types.SimpleNamespace(host=None))
+    svc.router = types.SimpleNamespace(decide=decide)
+    svc.maybe_reload = lambda: None
+    d = asyncio.run(decide("pon rebel mung"))
+    asyncio.run(svc.execute(d, "Pon Rebel Mung", "tv"))
+    extra = recorded[0][-1]
+    assert extra["trace"] == decided + after and extra["stages"] == {"streams_ms": 2}
+    assert d.trace == decided                           # the decision itself is left as it was
+
+    async def explain(title: bool):
+        transport = httpx.ASGITransport(app=server.local_app(svc), client=("127.0.0.1", 1))
+        async with httpx.AsyncClient(transport=transport, base_url="http://agent") as http:
+            return (await http.post("/v1/decide", json={"text": "pon rebel mung", "title": title},
+                                    headers={"authorization": "Bearer agent-token"})).json()
+    plain, found = asyncio.run(explain(False)), asyncio.run(explain(True))
+    assert plain["trace"] == decided and "title" not in plain
+    assert found["trace"] == decided + after and found["title"]["name"] == "Rebel Moon - Part One"

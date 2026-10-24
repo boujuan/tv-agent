@@ -262,7 +262,10 @@ class Service:
         ms = (time.perf_counter() - t) * 1000
         self.agent.state.timings.add(f"execute:{d.action.type}", ms)
         log.info("%s -> %s (%.0f ms)", d.action.type, out.say, ms)
-        self.record(source, heard, d, out.ok, out.say, ms, {**(extra or {}), **(out.details or {})})
+        details = dict(out.details or {})
+        if steps := details.pop("trace", None):          # what the action did, after the decision's own steps
+            details["trace"] = list(d.trace or []) + steps
+        self.record(source, heard, d, out.ok, out.say, ms, {**(extra or {}), **details})
         return out
 
     async def run(self, d: Decision, heard: str, source: str, extra: dict | None = None):
@@ -663,9 +666,19 @@ def local_app(svc: Service) -> FastAPI:
 
     @app.post("/v1/decide")
     async def decide(request: Request):
+        """What a sentence would do. With "title": true, a play request's title is also found as a start would
+        find it (its steps added to the trace; no streams, nothing on the TV): the panel's Explain."""
         svc.check(request, lan=False)
         svc.maybe_reload()
-        return decision_json(await svc.router.decide(str((await request.json()).get("text", ""))[:300]))
+        body = await request.json()
+        text = str(body.get("text", ""))[:300]
+        out = decision_json(await svc.router.decide(text))
+        a = A.parse(out["action"]) if body.get("title") and out["action"]["type"] == "play_title" else None
+        if a is not None and a.title:
+            found, steps = await svc.agent.trace_title(a, text)
+            out["trace"] = list(out["trace"] or []) + steps
+            out["title"] = {"imdb": found[0], "type": found[1], "name": found[2]} if found else None
+        return out
 
     @app.post("/v1/action")
     async def action(request: Request):

@@ -39,7 +39,9 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
 - **Activity:** give a command typed or **spoken into the computer's microphone** (stops when you stop talking;
   press again to send at once); the history of everything said from the remote, the computer, typed or via
   Claude, with how it was decided and what happened; **Export** (JSON lines or CSV), **Import** (merges, skipping
-  duplicates), **Erase**; double-click a line to see it in Decisions; with **Keep recordings** on, right-click a
+  duplicates), **Erase**; double-click a line to see in Decisions what happened, as recorded (how it was decided,
+  then how its title was found and how it started, step by step), or right-click it to decide it again now; with
+  **Keep recordings** on, right-click a
   spoken command (🔊) to play it or transcribe it again with another model. **Response times**: a chart of the
   last commands (speech-to-text, deciding, waiting for your pause; doing it) with typical and slowest times by
   step, model and action, and the cloud cost. History lives in `~/.local/share/tv-agent/activity.jsonl`, recordings
@@ -51,7 +53,11 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
   divider up to give the editors room, or fold the diagram to its header (▲ at its top right) or give it the whole
   height (▼; click it again for both). Type a sentence to
   light up its path and read why (which phrase or rule fit, which parts were read, the LLM's answer, d1's top three
-  with confidences and where it answered from, two-command sentences); **Add as fixed phrase**; editors in the
+  with confidences and where it answered from, two-command sentences); for a title, a row under the steps shows how
+  it's found, as a start would find it (your library, the title search and its candidates, the LLM's sound-alikes,
+  the pick and by what: d1 with its confidence, drawn from its card, or popularity), and for a command from the
+  Activity tab how it started too (streams, link check, the player, the load, the first frame), each with its
+  time; **Add as fixed phrase**; editors in the
   order a command goes through them: **speech to text** (this laptop, hosted, or either first; the local and
   hosted models; the vocabulary the hosted model is sent, all of it in **Show all…**: your names to find, add or
   remove, then Twitch favourites and your library's titles; keep recordings for debugging), clean-up, fixed

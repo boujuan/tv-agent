@@ -238,7 +238,8 @@ class Activity(QWidget):
                                   QHeaderView.ResizeMode.Stretch)):
             hh.setSectionResizeMode(c, mode)
         h.addWidget(self.table)
-        h.addWidget(dim("Double-click a line to see in Decisions how it was decided. Right-click to mark it "
+        h.addWidget(dim("Double-click a line to see in Decisions what happened: how it was decided, how its title "
+                        "was found and how it started, step by step. Right-click to decide it again now, mark it "
                         "wrong or teach it the right action (saying “that's wrong” marks the last one)."))
         lay.addWidget(hist, 3)
 
@@ -385,8 +386,10 @@ class Activity(QWidget):
         if row < 0 or row >= len(self.rows):
             return
         m = QMenu(self)
-        explain = QAction("Explain in Decisions", m)
+        explain = QAction("Explain in Decisions (what happened)", m)
         explain.triggered.connect(lambda: self.explain_row(row))
+        decide = QAction("Decide it again now", m)
+        decide.triggered.connect(lambda: self.panel.show_decisions(self.rows[row].get("heard", "")))
         again = QAction("Run it again", m)
         again.triggered.connect(lambda: (self.cmd.setText(self.rows[row].get("heard", "")), self.send()))
         copy = QAction("Copy what was said", m)
@@ -399,7 +402,7 @@ class Activity(QWidget):
                                          self.load()))
         forget = QAction("Forget what it was taught", m)
         forget.triggered.connect(lambda: self.forget(e))
-        for a in (explain, again, copy):
+        for a in (explain, decide, again, copy):
             m.addAction(a)
         if e.get("recording") and agent_stt.recording(e["recording"]):
             m.addSeparator()
@@ -476,8 +479,9 @@ class Activity(QWidget):
         self.load()
 
     def explain_row(self, row: int):
+        """The command as it happened: its recorded trace in the Decisions diagram, title and start steps too."""
         if 0 <= row < len(self.rows):
-            self.panel.show_decisions(self.rows[row].get("heard", ""))
+            self.panel.show_recorded(self.rows[row])
 
     def export(self):
         path, kind = QFileDialog.getSaveFileName(self, "Export history", "tv-agent-activity.jsonl",

@@ -3,8 +3,10 @@ order and switched on or off (live, /v1/pipeline); a tester that lights up the p
 for every rule (clean-up, fixed phrases, patterns, the LLM, the d1 model, apps and hooks). Saving sends the rules to
 the agent, which checks them and uses them at once (no restart)."""
 import copy
+import html
 import json
 import subprocess
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
@@ -34,8 +36,102 @@ STEP_EDGE = {"phrases": "exact match", "patterns": "a rule fits", "llm": "answer
 NUMS = "①②③④"
 TAB_FOR = {"input": 0, "stt": 0, "clean": 1, "phrases": 2, "patterns": 3, "llm": 4, "d1": 5, "unclear": 5,
            "action": 6, "tv": 6}
+# What an action does after the decision, as the agent records it (the trace's "title" and "start" stages): a row of
+# its own under the decision steps
+AFTER = {"title": ("Finding the title", [("library", "Your library"), ("search", "Title search"),
+                                         ("sound-alikes", "LLM sound-alikes"), ("choice", "Pick"),
+                                         ("picked", "Title")]),
+         "start": ("Starting it", [("streams", "Streams"), ("link check", "Link check"), ("player", "Player up"),
+                                   ("load", "Load"), ("first frame", "First frame")])}
 VIEWS = ("normal", "collapsed", "expanded")      # the diagram above the editors, folded to its header, or all of it
 NO_LIMIT = 16777215                              # QWIDGETSIZE_MAX
+
+
+def _secs(ms: float) -> str:
+    return f"{ms / 1000:.1f} s" if ms >= 1000 else f"{ms:.0f} ms"
+
+
+def after_steps(trace: list[dict], recorded: bool) -> tuple[dict[str, tuple[str, str]], list[str], str]:
+    """What the action did after the decision: the trace's "title" and "start" steps, as the agent records them. The
+    diagram's row (each step's state and what it found), a line per step for the explanation, and d1's confidence
+    when d1 picked the title."""
+    steps = sorted((t for t in trace if t.get("stage") in AFTER), key=lambda t: t.get("at", 0))    # as they ended
+    after: dict[str, tuple[str, str]] = {}
+    lines: list[str] = []
+    d1 = ""
+    picked = next((t for t in steps if t["step"] == "picked"), None)
+    stage_now = ""
+    for t in steps:
+        stage, step, key = t["stage"], t["step"], f"{t['stage']}:{t['step']}"
+        if stage != stage_now:
+            lines.append(f"<b>{AFTER[stage][0]}</b>")
+            stage_now = stage
+        at = f"<span style='color:gray'>{t['at'] / 1000:+.1f} s</span> " if "at" in t else ""
+        took = f" ({_secs(t['ms'])})" if t.get("ms") is not None else ""
+        q = html.escape(str(t.get("query", "")))
+        if step == "library":
+            found = t.get("found")
+            lines.append(f"{at}Your library: " + (f"“{html.escape(found)}” for “{q}”" if found
+                                                  else f"nothing called “{q}”") + took)
+            if found or key not in after:
+                after[key] = ("hit", found) if found else ("visited", "not there")
+        elif step == "search":
+            found = " · ".join(html.escape(c) for c in t.get("candidates", [])) or "nothing"
+            lines.append(f"{at}Title search for “{q}” in {t.get('sources', '')}{took}: {found}"
+                         + (" — nothing close" if t.get("nothing_close") else ""))
+            n = sum(1 for x in steps if x["step"] == "search")
+            after[key] = ("visited", f"{n} searches" if n > 1 else _secs(t.get("ms", 0)))
+        elif step == "sound-alikes":
+            names = ", ".join(f"“{html.escape(n)}”" for n in t.get("names", [])) or "nothing it knows"
+            lines.append(f"{at}The LLM ({str(t.get('model', '')).split('/')[-1]}): “{q}” sounds like {names}{took}")
+            after[key] = ("visited", ", ".join(t.get("names", [])) or "nothing")
+        elif step == "choice":
+            by, what = t.get("by", ""), html.escape(t.get("picked", ""))
+            if by == "d1":
+                lines.append(f"{at}d1 ({html.escape(str(t.get('model', '')))}) picked “{what}” for “{q}”, confidence "
+                             f"{t.get('confidence', 0):.2f}, of {t.get('of', '?')} ({_secs(t.get('d1_ms', 0))}): "
+                             + " · ".join(html.escape(c) for c in t.get("candidates", [])))
+            elif by == "popularity":
+                lines.append(f"{at}Popularity settled it: “{what}” for “{q}”{took}")
+            else:
+                lines.append(f"{at}“{what}” clearly led the search for “{q}” ({html.escape(by)}){took}")
+            led_to_it = picked is None or t.get("picked", "").startswith(picked["title"])
+            if led_to_it or key not in after:
+                after[key] = ("visited", f"d1 {t.get('confidence', 0):.2f}" if by == "d1" else by)
+                if by == "d1" and led_to_it:
+                    d1 = f"{t.get('confidence', 0):.2f}"
+        elif step == "season check":
+            lines.append(f"{at}“{q}” has no season {t.get('season')}: not it")
+        elif step == "picked":
+            lines.append(f"{at}→ <b>{html.escape(t.get('title', ''))}</b>: {html.escape(t.get('by', ''))}{took}")
+            after[key] = ("hit", t.get("title", ""))
+        elif step == "streams":
+            kept = t.get("kept", 0)
+            lines.append(f"{at}Streams: {kept} kept, {html.escape(t.get('how', ''))}{took}"
+                         + (f" — best: {html.escape(t['best'])}" if t.get("best") else ""))
+            after[key] = ("visited" if kept else "out", f"{kept} · {_secs(t.get('ms', 0))}")
+        elif step == "link check":
+            ok = t.get("ok")
+            lines.append(f"{at}Link check: " + ("answered" if ok else "no answer" + ("; opened anyway (in your debrid "
+                                                                                     "library, or checked before)"
+                                                                                     if t.get("trusted") else ""))
+                         + took)
+            after[key] = ("visited" if ok or t.get("trusted") else "out", _secs(t.get("ms", 0)))
+        elif step == "player":
+            lines.append(f"{at}{html.escape(t.get('app', 'The player'))} up{took}")
+            after[key] = ("visited", _secs(t.get("ms", 0)))
+        elif step == "load":
+            lines.append(f"{at}Loaded{took}" + (f", from {t['resume']}" if t.get("resume") else "")
+                         + (" (preloaded)" if t.get("preloaded") else ""))
+            after[key] = ("visited", _secs(t.get("ms", 0)))
+        elif step == "first frame":
+            lines.append(f"{at}First frame {_secs(t.get('ms', 0))} after the load (as the player measured it)")
+            after[key] = ("hit", _secs(t.get("ms", 0)))
+    if any(t["stage"] == "title" for t in steps) and picked is None:
+        after["title:picked"] = ("out", "not found")
+    if steps and not recorded and not any(t["stage"] == "start" for t in steps):
+        lines.append("<span style='color:gray'>Found as a start would find it; nothing was played</span>")
+    return after, lines, d1
 
 
 class StepCard(QFrame):
@@ -126,7 +222,7 @@ class FlowDiagram(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setMinimumHeight(390)
+        self.setMinimumHeight(520)
         self.order = ["phrases", "patterns", "llm", "d1"]
         self.cards = {}
         for step in self.order:
@@ -142,6 +238,8 @@ class FlowDiagram(QWidget):
         self.path: set[str] = set()       # fixed nodes on the traced path
         self.walked: list[str] = []       # steps the sentence went through, in order
         self.hit = ""                     # the step that decided ("fallback": the offline guess)
+        self.after: dict[str, tuple[str, str]] = {}    # "title:search" etc.: (state, what it found) when it ran
+        self.d1_picked = False            # d1 chose the title (a line from its card to the Pick)
         self._dragging_step = ""
         self.setMouseTracking(True)
 
@@ -162,8 +260,10 @@ class FlowDiagram(QWidget):
                          "action": "one typed action (or two)", "tv": "player · app · volume"})
         self.update()
 
-    def show_trace(self, path: list[str], walked: list[str], states: dict[str, str], hit: str, notes: dict):
+    def show_trace(self, path: list[str], walked: list[str], states: dict[str, str], hit: str, notes: dict,
+                   after: dict[str, tuple[str, str]] | None = None, d1_picked: bool = False):
         self.path, self.walked, self.hit = set(path), walked, hit
+        self.after, self.d1_picked = after or {}, d1_picked
         for step, c in self.cards.items():
             c.set_state(states.get(step, ""))
             c.sub.setText(notes.get(step) or self.steps_sub.get(step, ""))
@@ -173,7 +273,7 @@ class FlowDiagram(QWidget):
         self.update()
 
     def clear(self):
-        self.path, self.walked, self.hit = set(), [], ""
+        self.path, self.walked, self.hit, self.after, self.d1_picked = set(), [], "", {}, False
         for step, c in self.cards.items():
             c.set_state("")
             c.sub.setText(self.steps_sub.get(step, ""))
@@ -243,6 +343,17 @@ class FlowDiagram(QWidget):
         r["action"] = QRectF(ax, mid - nh / 2, aw, nh)
         r["tv"] = QRectF(ax, r["action"].bottom() + 26, aw, nh)
         return r
+
+    def _after_rects(self, below: float) -> dict[str, QRectF]:
+        """The title and start rows under everything: a label, then one chip per step, left to right."""
+        out, label_w, gap, h = {}, 118.0, 22.0, 38.0
+        for i, (stage, (_, chips)) in enumerate(AFTER.items()):
+            y = below + 22 + i * (h + 16)
+            w = (self.width() - label_w - 12 - gap * (len(chips) - 1)) / len(chips)
+            out[stage] = QRectF(8, y, label_w - 8, h)
+            for j, (key, _) in enumerate(chips):
+                out[f"{stage}:{key}"] = QRectF(label_w + j * (w + gap), y, w, h)
+        return out
 
     def _place(self, skip: str = ""):
         for step, rect in zip(self.order, self._slots()):
@@ -373,6 +484,47 @@ class FlowDiagram(QWidget):
             p.setPen(sub)
             p.drawText(r.adjusted(6, r.height() / 2 - 2, -6, -3), Qt.AlignmentFlag.AlignCenter,
                        p.fontMetrics().elidedText(self.sub.get(k, ""), Qt.TextElideMode.ElideRight, int(r.width() - 10)))
+        self._paint_after(p, rects, slots, text, faint, small, bold, tracing)
+
+    def _paint_after(self, p: QPainter, rects: dict, slots: dict, text: QColor, faint: QColor, small: QFont,
+                     bold: QFont, tracing: bool):
+        """The title and start rows: each step lit when the action ran it, with what it found and its time."""
+        after = self._after_rects(max(rects["unclear"].bottom(), rects["tv"].bottom()))
+        ran = bool(self.after)
+        for stage, (label, chips) in AFTER.items():
+            p.setFont(bold)
+            p.setPen(text if ran or not tracing else faint)
+            p.drawText(after[stage], Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, label)
+            for (a, _), (b, _) in zip(chips, chips[1:]):
+                ra, rb = after[f"{stage}:{a}"], after[f"{stage}:{b}"]
+                on = f"{stage}:{a}" in self.after and f"{stage}:{b}" in self.after
+                path = QPainterPath(QPointF(ra.right(), ra.center().y()))
+                path.lineTo(QPointF(rb.left(), rb.center().y()))
+                self._arrow(p, path, QColor(BLUE) if on else (faint if tracing else QColor(GREY)), 2.0 if on else 1.1)
+            for key, title in chips:
+                r = after[f"{stage}:{key}"]
+                state, sub = self.after.get(f"{stage}:{key}", ("", ""))
+                color = {"hit": GREEN, "visited": BLUE, "out": AMBER}.get(state)
+                fill = QColor(color) if color else QColor(self.palette().base().color())
+                if color:
+                    fill.setAlpha(45)
+                p.setPen(QPen(QColor(color) if color else (faint if tracing else QColor(GREY)), 1.6 if color else 1.0))
+                p.setBrush(fill)
+                p.drawRoundedRect(r, 8, 8)
+                p.setFont(bold)
+                p.setPen(text if (color or not tracing) else faint)
+                p.drawText(r.adjusted(5, 2, -5, -r.height() / 2), Qt.AlignmentFlag.AlignCenter,
+                           p.fontMetrics().elidedText(title, Qt.TextElideMode.ElideRight, int(r.width() - 8)))
+                p.setFont(small)
+                p.drawText(r.adjusted(5, r.height() / 2 - 2, -5, -2), Qt.AlignmentFlag.AlignCenter,
+                           p.fontMetrics().elidedText(sub, Qt.TextElideMode.ElideRight, int(r.width() - 8)))
+        if self.d1_picked and "d1" in slots:      # d1 chose between the title's candidates
+            card, pick = slots["d1"], after["title:choice"]
+            start = QPointF(card.left() + card.width() * 0.75, card.bottom())
+            end = QPointF(pick.center().x(), pick.top())
+            path = QPainterPath(start)
+            path.cubicTo(QPointF(start.x(), start.y() + 40), QPointF(end.x(), end.y() - 40), end)
+            self._arrow(p, path, QColor(BLUE), 1.6, "picked the title", 0.3, dashed=True)
 
 
 # ---------------------------------------------------------------- a generic table editor
@@ -1251,9 +1403,27 @@ class Decisions(QWidget):
             self.explanation.setText("")
             return
         self.explanation.setText("…")
-        self.panel.bg.run(lambda: api("/v1/decide", {"text": text}, timeout=20), self.show_decision)
+        # A play request's title is found as a start would find it (nothing is played): its steps are drawn too
+        self.panel.bg.run(lambda: api("/v1/decide", {"text": text, "title": True}, timeout=30), self.show_decision)
 
-    def show_decision(self, res, err):
+    def show_recorded(self, e: dict):
+        """An Activity entry as it happened: its recorded trace (the decision, then what the action did), not a
+        new decision. Entries from before the trace was kept are decided again."""
+        if self.view == "collapsed":
+            self.set_view("normal")
+        self.test.setText(e.get("heard", ""))
+        if not e.get("trace"):
+            self.explain()
+            return
+        when = time.strftime("%a %H:%M:%S", time.localtime(e["t"]))
+        result = (f"→ the TV said “{e.get('say', '')}”" + (f" ({e['ms'] / 1000:.1f} s)" if e.get("ms") else "")
+                  + ("" if e.get("ok") is not False else f" <span style='color:{AMBER}'>(it didn't work)</span>"))
+        self.show_decision({"trace": e["trace"], "action": e.get("action") or {"type": e.get("type", "none")},
+                            "via": e.get("via"), "rule": e.get("rule"), "describe": e.get("say", "")}, None,
+                           header=f"<span style='color:gray'>What happened {when} (recorded; agent "
+                                  f"{e.get('agent', '?')})</span>", footer=result)
+
+    def show_decision(self, res, err, header: str = "", footer: str = ""):
         if err:
             why = str(err) if isinstance(err, ApiError) else "The voice agent isn’t running."
             self.explanation.setText(f"<span style='color:{RED}'>{why}</span>")
@@ -1266,6 +1436,7 @@ class Decisions(QWidget):
         path, walked, states, notes, lines = ["input", "stt", "clean"], [], {}, {}, []
         skipped: list[str] = []          # pattern rules whose regex matched but whose parts didn't convert
         cleaned = trace[0].get("text", "")
+        lines = [header] if header else []
         lines.append(f"Cleaned to “<b>{cleaned}</b>”" if cleaned else "Nothing left after clean-up")
         hit = ""
         for t in trace[1:]:
@@ -1363,7 +1534,14 @@ class Decisions(QWidget):
             notes["tv"] = res.get("describe", "")
             lines.append(f"→ <span style='color:{GREEN}'><b>{what}</b></span> {fields} — the TV would show "
                          f"“{res.get('describe', '')}”")
-        self.diagram.show_trace(path, walked, states, hit, notes)
+        after, more, d1_picked = after_steps(trace, recorded=bool(header))
+        if d1_picked:
+            notes["d1"] = f"picked the title · {d1_picked}" + (f" · {notes['d1']}" if notes.get("d1") else "")
+            states.setdefault("d1", "visited")
+        lines += more
+        if footer:
+            lines.append(footer)
+        self.diagram.show_trace(path, walked, states, hit, notes, after, bool(d1_picked))
         self.explanation.setText("<br>".join(lines))
         rule = res.get("rule")
         if res.get("via") == "pattern":

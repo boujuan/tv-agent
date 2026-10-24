@@ -375,6 +375,14 @@ class Panel(QMainWindow):
             self.decisions.load()
         self.decisions.explain_text(text)
 
+    def show_recorded(self, entry: dict):
+        """An Activity entry in the Decisions diagram, as it happened (its recorded trace)."""
+        self.bring_up()
+        self.tabs.setCurrentWidget(self.decisions)
+        if not self.decisions.loaded:
+            self.decisions.load()
+        self.decisions.show_recorded(entry)
+
     def mic_result(self, r: dict):
         if self.isVisible() and self.tabs.currentWidget() is self.activity:
             return                      # the Activity tab shows it

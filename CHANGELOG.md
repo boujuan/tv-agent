@@ -4,6 +4,34 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
+## server — unreleased
+
+### Added
+- The activity history's `trace` has the whole command: after the decision's steps, what the action did, in order,
+  each with what it found, its time (`ms`) and when it ended (`at`, from the command's start). Finding the title:
+  your library, each title search with its sources and candidates (scores after popularity), the LLM's
+  sound-alikes, each choice and how it was made (d1 with its model and confidence, popularity, or a clear lead),
+  season checks, the pick. Starting it: the streams (how many, and whether they were looked up ahead), the link
+  check, the player coming up, the load and the first frame. A d1 that picked the title shows there; until now only
+  a d1 that decided the command did. Never a link.
+- `POST /v1/decide` with `"title": true` also finds a play request's title as a start would (nothing is looked up
+  for streams, nothing reaches the TV), with its steps in the trace and the title found: the panel's Explain.
+
+### Changed
+- `details.title` is the summary (said, picked, imdb, by, ms); the candidates and choices are in the trace.
+
+## panel — unreleased
+
+### Added
+- Decisions: a row under the decision steps shows what happens after the decision: how a title is found (your
+  library, the title search, the LLM's sound-alikes, the pick, the title) and how it starts (streams, link check,
+  player up, load, first frame), each step lit when it ran with what it found and its time, and a line per step
+  under the diagram. When d1 picked the title, a dashed line goes from its card to the pick, with its confidence.
+  Explaining a typed sentence finds its title too (nothing is played; needs server 0.7.0).
+- Activity: double-clicking a command (or "Explain in Decisions") shows what happened, from its recorded trace, not
+  a new decision; "Decide it again now" in its menu does the old thing. Commands from before the trace was kept are
+  decided again.
+
 ## server 0.6.0 — 2026-10-24
 
 ### Added

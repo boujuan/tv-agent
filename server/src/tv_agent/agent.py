@@ -73,16 +73,26 @@ CERTAIN_GAP = 15
 CHECK_AFTER = 5.0           # the episode check waits this long after the file opens: the start has the network first
 ERROR_SHOWN = 3.0           # a start that fails says why on the loading screen this long before going Home
 HEARD: ContextVar[str] = ContextVar("heard", default="")    # what the command being run was, as transcribed
-# What a start command found and how long each part took, for the activity history (execute() adds it to the
-# outcome's details): the title's candidates and how one was picked, the stages, the stream. Never a link.
+# What a start command did, for the activity history (execute() adds it to the outcome's details): its steps after
+# the decision, in order (`trace`: finding the title, then starting it), the title picked, the stages' times and the
+# stream played. Never a link.
 START: ContextVar[dict | None] = ContextVar("start", default=None)
 FIRST_FRAME_WAIT = 10.0     # how long a start waits for TV Agent Player's first frame, to report it
 
 
 def _note_title(**fields):
-    """Into the record of the start being made (START): how its title was found."""
+    """Into the record of the start being made (START): the title it found, and how."""
     if (record := START.get()) is not None:
         record.setdefault("title", {}).update(fields)
+
+
+def _step(stage: str, step: str, ms: float | None = None, done: float | None = None, **fields):
+    """One step of the start being made, into its trace (START), as the panel draws it: what ran, what it found, how
+    long it took (`ms`) and when it ended (`at`: ms since the command began; `done` is that moment, if not now)."""
+    if (record := START.get()) is not None:
+        entry = {"stage": stage, "step": step, **({"ms": round(ms)} if ms is not None else {}),
+                 "at": round(((done or time.perf_counter()) - record["_t0"]) * 1000)}
+        record.setdefault("trace", []).append(entry | {k: v for k, v in fields.items() if v is not None})
 
 
 def _ms(since: float) -> int:
@@ -357,7 +367,7 @@ class Agent:
         """`heard`: the command as transcribed, for the loading screen and the title choice."""
         handler = getattr(self, "_" + action.type.replace("none", "unclear"))
         HEARD.set(heard)
-        record = {} if action.type in STARTS else None
+        record = {"_t0": time.perf_counter()} if action.type in STARTS else None
         START.set(record)
         if action.type in STARTS and self._closing is not None:
             self._closing.cancel()              # the screen stays up for this start
@@ -368,9 +378,19 @@ class Agent:
         except Exception as e:
             log.exception("action %s failed", action.type)
             out = Outcome(False, f"That didn't work ({type(e).__name__})")
-        if record:
+        if record is not None:
+            record.pop("_t0")
             out.details = {**record, **(out.details or {})}
         return out
+
+    async def trace_title(self, a: PlayTitle, heard: str) -> tuple[tuple[str, str, str] | None, list[dict]]:
+        """Finding the title of a play request as a start would (nothing is looked up for streams, nothing reaches
+        the TV), with its trace: for the panel's Explain."""
+        HEARD.set(heard)
+        record = {"_t0": time.perf_counter()}
+        START.set(record)
+        found = await self.resolve(a.title, a.kind, a.season, exact=a.guess) if a.title else None
+        return found, record.get("trace", [])
 
     # ---- Stremio: addons, titles, streams ----
 
@@ -584,6 +604,7 @@ class Agent:
     async def _title_hits(self, title: str, kind: str | None, with_addons: bool = True,
                           enough: asyncio.Event | None = None) -> list[tuple[float, cinemeta.Meta]]:
         """The title search's candidates, best first ([] when nothing comes close). `enough`: see search.search."""
+        t = time.perf_counter()
         try:
             addons = await self.addons() if with_addons else []
         except Exception as e:
@@ -592,9 +613,12 @@ class Agent:
         hits = cinemeta.ranked(title, await title_search.search(self.http, title, addons, enough=enough), kind)
         if kind:
             hits = [h for h in hits if h[1].type == kind] or hits
-        if not hits or (min(hits[0][1].rank, hits[0][1].extra_rank) > 0 and cinemeta.similarity(title, hits[0][1]) < 70):
-            return []
-        return hits
+        weak = not hits or (min(hits[0][1].rank, hits[0][1].extra_rank) > 0
+                            and cinemeta.similarity(title, hits[0][1]) < 70)
+        _step("title", "search", _ms(t), query=title,
+              sources="Cinemeta and your metadata addons" if title_search.search_catalogs(addons) else "Cinemeta",
+              candidates=[f"{m.label} {score:.0f}" for score, m in hits[:4]], nothing_close=True if weak else None)
+        return [] if weak else hits
 
     async def _choose_title(self, title: str, kind: str | None, hits: list[tuple[float, cinemeta.Meta]],
                             utterance: str | None = None,
@@ -602,11 +626,9 @@ class Agent:
         t = time.perf_counter()
 
         def chose(m: cinemeta.Meta, by: str, **more) -> cinemeta.Meta:
-            """The pick, noted in the start's record with the candidates it was made from."""
-            if (record := START.get()) is not None:
-                record.setdefault("title", {}).setdefault("choices", []).append(
-                    {"for": title, "picked": m.label, "by": by, "ms": _ms(t), **more,
-                     "candidates": [f"{m_.label} {score:.0f}" for score, m_ in hits[:4]]})
+            """The pick, into the start's trace with the candidates it was made from (scores after popularity)."""
+            _step("title", "choice", _ms(t), query=title, picked=m.label, by=by, **more,
+                  candidates=[f"{c.label} {score:.0f}" for score, c in hits[:4]])
             return m
         if self._decisive(title, hits):
             return chose(hits[0][1], "the search")
@@ -630,7 +652,8 @@ class Agent:
                                         {f"c{i}": m.label for i, (_, m) in enumerate(top)})
             log.info("d1 title choice %s (confidence %.2f)", pick.key, pick.confidence)
             return chose(top[int(pick.key[1:])][1], "d1", confidence=round(pick.confidence, 2), d1_ms=_ms(t_d1),
-                         d1=self.d1.last_source)
+                         model=f"{self.d1.last_source}: {self.d1.hosted_model}" if self.d1.last_source == "hosted"
+                         else "local d1", of=len(top))
         except (httpx.HTTPError, KeyError, ValueError, IndexError) as e:
             log.warning("d1 unavailable for title choice (%s); using the best match", type(e).__name__)
             return chose(top[0][1], f"the search (d1: {type(e).__name__})")
@@ -665,9 +688,12 @@ class Agent:
         def picked(got: tuple[str, str, str] | None, by: str) -> tuple[str, str, str] | None:
             if got:
                 _note_title(picked=got[2], imdb=got[0], by=by)
+                _step("title", "picked", _ms(t), title=got[2], imdb=got[0], by=by)
             return got
         item = await self.library.find(title, kind)
-        _note_title(said=title, library_ms=_ms(t))
+        _note_title(said=title)
+        _step("title", "library", _ms(t), query=title, found=item.get("name") if item else None,
+              matched=bool(item))
         if item and (not exact or library_mod.bare(item.get("name", "")) == library_mod.bare(title)):
             return picked((item["_id"], item["type"], item.get("name", title)), "your library")
         utterance = HEARD.get() or None        # d1 sees the whole sentence ("…season four")
@@ -683,7 +709,11 @@ class Agent:
         decided = False                        # once it has: nothing more is looked up
 
         async def look(name: str) -> tuple[str, str, str] | None:
-            if item := await self.library.find(name, kind):
+            tl = time.perf_counter()
+            item = await self.library.find(name, kind)
+            _step("title", "library", _ms(tl), query=name, found=item.get("name") if item else None,
+                  matched=bool(item))
+            if item:
                 got, how[name] = (item["_id"], item["type"], item.get("name", name)), "your library"
             elif (hit := await self.find_title(name, kind, season, utterance, with_addons=False)) \
                     and title_search.said_as(name, hit):
@@ -691,6 +721,7 @@ class Agent:
             else:
                 return None
             if not await self._has_season(got[0], got[1], season):
+                _step("title", "season check", query=got[2], season=season, ok=False)
                 return None
             found.set()
             if expect:
@@ -704,13 +735,12 @@ class Agent:
 
         def answered(task: asyncio.Task):       # looked up as soon as the LLM answers, while the search goes on
             if not task.cancelled() and not task.exception():
-                _note_title(sounds_like=task.result(), llm_ms=_ms(t))
+                _step("title", "sound-alikes", _ms(t), query=title, model=self.llm.model, names=task.result())
                 looking(task.result())
         fix.add_done_callback(answered)
         m = choosing = None
         try:
             hits = await heard
-            _note_title(search_ms=_ms(t), candidates=[f"{h.label} {score:.0f}" for score, h in hits[:4]])
             if any(title_search.said_exactly(title, h) for _, h in hits):
                 m = await self._choose_title(title, kind, hits, utterance, expect)
                 if title_search.said_exactly(title, m):
@@ -729,6 +759,8 @@ class Agent:
                 if got and await self._has_season(got[0], got[1], season):
                     where = "the search for what was heard"
                 else:
+                    if got:
+                        _step("title", "season check", query=got[2], season=season, ok=False)
                     got, where = await looks[name], how.get(name, "")
                 if got:
                     log.info("title %r: sounds like %r (LLM): %s", title, name, got[2])
@@ -808,12 +840,18 @@ class Agent:
             if not jump:
                 loading = Loading(self.tvplayer, video, _title_screen(name, meta, video) | {"heard": HEARD.get()},
                                   player_ready, "Starting…" if prepared is not None else "Finding streams…")
+        hit = self._streams.get((kind, video))
+        how = ("found while the last episode played" if prepared is not None else
+               "kept from earlier" if hit and time.monotonic() - hit[0] < STREAMS_TTL else
+               "already being looked up" if (kind, video) in self._stream_jobs else "looked up now")
         if prepared is not None:            # found and checked while the previous episode played
             found = [prepared]
         else:
             found = [s for s in await self.streams_for(kind, video, meta) if not s.why_dropped]
         if self.cfg.player == "just":
             found = [s for s in found if not s.headers]     # Just Player can't send an addon's extra headers
+        _step("start", "streams", _ms(t0), video=video, how=how, kept=len(found),
+              best=" ".join(found[0].name.split()) if found else None)
         if not found:
             if kodi_ready is not None or player_ready is not None:
                 self._not_started(f"No playable stream for {label}", kodi_ready or player_ready, loading)
@@ -838,6 +876,8 @@ class Agent:
             got = await checking
             if got is not None:
                 chosen, link = got
+            _step("start", "link check", (done_at["link"] - t_streams) * 1000, done=done_at["link"], ok=got is not None,
+                  of=len(found[:3]), trusted=True if got is None and trusted else None)
             return got is not None or trusted
 
         if self.dry_run:   # nothing reaches the player either
@@ -854,6 +894,9 @@ class Agent:
             if not (player_ready is not None and await player_ready) and not await self.tvplayer.ready(self.adb):
                 return Outcome(False, "TV Agent Player didn't open: is it installed and paired (tv-agent tv pair)?")
             t_ready = time.perf_counter()
+            if "screen" in done_at:
+                _step("start", "player", (done_at["screen"] - t0) * 1000, done=done_at["screen"],
+                      app=f"TV Agent Player {self.tvplayer.app or ''}".strip())
             async with self._starting:
                 if self.tvplayer.now() is not None:
                     await self._note_position(tvplayer.PID)    # a replay of this episode starts where it is
@@ -874,6 +917,8 @@ class Agent:
                 if kodi_open is not None and not kodi_open.done():
                     asyncio.create_task(self._stop_kodi_when(kodi_open))
                 t_open = time.perf_counter()
+                _step("start", "load", (t_open - t_ready) * 1000, preloaded=True if preloaded else None,
+                      resume=_clock(resume_ms) if resume_ms else None)
                 self.state.now_playing = NowPlaying(imdb, kind, video, name, "tvplayer", chosen.url, runtime,
                                                     filename=chosen.filename, size=chosen.size,
                                                     video_hash=chosen.video_hash, dolby_vision=chosen.dolby_vision)
@@ -891,6 +936,8 @@ class Agent:
             frame = self.tvplayer.last.get("first_frame") or await self.tvplayer.wait_for(
                 lambda m: m.get("t") == "first_frame" and m.get("item") == item, FIRST_FRAME_WAIT)
             first_frame = frame.get("ms") if frame else None
+            if first_frame is not None:
+                _step("start", "first frame", first_frame, measured="by the player, from the load")
             stages = (("streams", t0, t_streams), ("player", t_streams, t_ready), ("open", t_ready, t_open))
             for stage, a, b in stages:
                 self.state.timings.add(f"start:{stage}", (b - a) * 1000)
@@ -909,7 +956,9 @@ class Agent:
                 await self.tv(justplayer.captions, plan.subtitles is not None, subs)
                 if (pid := await self._kodi_player()) is not None:
                     await self.kodi.stop(pid)                               # one player at a time
+                t_load = time.perf_counter()
                 await self.tv(justplayer.start, link, label, resume_ms)
+                _step("start", "load", _ms(t_load), app="Just Player")
                 self.state.now_playing = NowPlaying(imdb, kind, video, name, "just", chosen.url, runtime,
                                                     filename=chosen.filename, size=chosen.size,
                                                     video_hash=chosen.video_hash)
@@ -931,6 +980,7 @@ class Agent:
             except KodiError as e:
                 log.warning("Kodi language settings: %s", e)
             t_kodi = time.perf_counter()
+            _step("start", "player", _ms(t0), app="Kodi")
             if not await checked():              # what was playing carries on, followed as before
                 await self._home_unless_playing()
                 return Outcome(False, f"The links for {label} didn't answer")
@@ -948,6 +998,7 @@ class Agent:
                     await self._free_kodi(pid)
                 await self.kodi.open(link + extra, resume_ms)
                 t_open = time.perf_counter()
+                _step("start", "load", (t_open - t_check) * 1000, app="Kodi")
                 self.state.now_playing = NowPlaying(imdb, kind, video, name, "kodi", chosen.url + extra, runtime,
                                                     filename=chosen.filename, size=chosen.size,
                                                     video_hash=chosen.video_hash, dolby_vision=chosen.dolby_vision)
