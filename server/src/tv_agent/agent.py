@@ -194,7 +194,7 @@ def _stream_screen(s: streams.Stream) -> dict:
 
 class Loading:
     """TV Agent Player's loading screen for one start: shown once the player's screen is up, then each step. A player
-    without it (older than 0.2) answers "unknown command" once and isn't sent it again (tvplayer.loading)."""
+    without it (0.1.x) answers "unknown command" once and isn't sent it again (tvplayer.loading)."""
 
     def __init__(self, player: TvPlayer, video: str, screen: dict, ready: asyncio.Task, step: str):
         self.player, self.video, self.step, self.shown = player, video, step, False

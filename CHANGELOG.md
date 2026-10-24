@@ -7,8 +7,8 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 ## server — unreleased
 
 ### Added
-- TV Agent Player's loading and pause screens get what they show (from player 0.2; its PROTOCOL.md, `loading` and
-  `info`). As soon as the title is known, a `loading` command with the title, a subtitle ("2024 · 2 h 46 min", or
+- TV Agent Player's loading and pause screens get what they show (the player's release that has them; its
+  PROTOCOL.md, `loading` and `info`). As soon as the title is known, a `loading` command with the title, a subtitle ("2024 · 2 h 46 min", or
   "S4E1 · <episode name>"), what was heard and Cinemeta's artwork, then each step: "Finding streams…", "Checking
   the link…", "Starting…". A start that fails says why there for 3 s, then the player closes (or, with something
   else playing on, only the screen goes). `load` and `preload` carry `info` for the pause screen: the plot, the
