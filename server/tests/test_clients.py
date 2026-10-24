@@ -481,11 +481,11 @@ def test_a_phone_sees_the_whole_vocabulary_sent_with_each_command(paths, monkeyp
     gate = C.gateway(svc, server.local_app(svc))
     p = call(gate, "GET", "/v1/pipeline", paired(svc)).json()
     assert p["stt_vocabulary"] == ["Stremio", "Kodi"]
-    assert p["stt_vocabulary_sent"] == ["Stremio", "Kodi", "The Bear", "Ibai"] and p["stt_vocabulary_count"] == 4
+    assert p["stt_vocabulary_sent"] == ["Stremio", "Kodi", "Ibai", "The Bear"] and p["stt_vocabulary_count"] == 4
     assert p["stt_vocabulary_language"] == "es" and p["stt_vocabularies"] == {}
-    assert p["stt_vocabulary_sent_by_language"] == {"es": ["Stremio", "Kodi", "The Bear", "Ibai"],
-                                                    "en": ["Stremio", "Kodi", "The Bear (FX)", "Ibai"],
-                                                    "": ["Stremio", "Kodi", "The Bear", "The Bear (FX)", "Ibai"]}
+    assert p["stt_vocabulary_sent_by_language"] == {"es": ["Stremio", "Kodi", "Ibai", "The Bear"],
+                                                    "en": ["Stremio", "Kodi", "Ibai", "The Bear (FX)"],
+                                                    "": ["Stremio", "Kodi", "Ibai", "The Bear", "The Bear (FX)"]}
 
 
 def test_each_language_hint_can_have_its_own_names(paths, monkeypatch):

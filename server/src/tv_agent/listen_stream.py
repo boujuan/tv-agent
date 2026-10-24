@@ -9,8 +9,12 @@ This module decides when you've finished, from the audio as it arrives (the same
                     the models' answers, two commands in one)
   ~720 ms           whatever was heard (the old fixed wait), or at once when the app ends the audio. A title or a
                     search on its own waits this long too: people pause before the season ("play the bear … season 3")
+  ~1.5 s            words that can't end a command ("… throws the crystal at", "cambia los subtítulos a"): people
+                    pause before a name, and 720 ms cut 12 of 190 kept commands short (measured 2026-10-24)
 
-At each step the audio so far is transcribed and decided; if you start talking again, that result is dropped.
+At each step the audio so far is transcribed and decided; if you start talking again, that result is dropped. When
+no voice was heard at all (the remote's mic sending near-silence, only the TV's own sound), nothing is transcribed:
+a line of the film's dialogue can't become a command.
 """
 import asyncio
 import logging
@@ -26,11 +30,16 @@ log = logging.getLogger(__name__)
 FRAME = 320                          # samples: 20 ms at 16 kHz
 START_FRAMES = 3                     # 60 ms above the threshold = speech
 PREROLL = 15                         # frames kept before speech starts (300 ms), as the app does
-CHECKPOINTS = (8, 23, 36)            # frames of quiet after speech: 160, 460, 720 ms
+CHECKPOINTS = (8, 23, 36, 75)        # frames of quiet after speech: 160, 460, 720 ms, 1.5 s (the TV app's own end)
 # Last words that mean more is coming ("play the …", "season …", "volume …", "skip thirty …").
 OPEN_ENDED = re.compile(r"\b(?:the|a|an|to|of|on|in|and|then|with|by|for|from|at|season|series|episode|ep|part|play|"
                         r"watch|put|open|go|start|continue|resume|volume|set|skip|jump|seek|search|turn|switch|y|"
                         r"luego|despu[eé]s)$")
+# Last words that never end a command: an article, a preposition, "where", "señor"… The name comes next.
+CUT = re.compile(r"\b(?:the|a|an|to|of|at|for|from|with|by|into|and|or|then|where|when|which|who|whose|that's|says|"
+                 r"said|is|are|was|were|my|his|her|their|your|our|he|she|they|we|open|season|series|episode|ep|part|"
+                 r"el|la|los|las|un|una|de|del|al|en|con|por|para|que|donde|cual|cuando|y|o|pon|ponme|abre|vete|"
+                 r"temporada|cap[ií]tulo|episodio|parte|se[nñ]or|se[nñ]ora|mr|mrs|ms|mister|doctor|dr)$")
 # A number that can still grow: "twenty" → "twenty five", "30" → "35". "two" or "fifteen" is final.
 TRAILING_NUMBER = re.compile(r"(?:\b\d*0|\b(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred))$")
 # Whole commands that are often the first word of a longer one ("play" → "play the bear").
@@ -77,7 +86,7 @@ class Endpointer:
 
     @property
     def stage(self) -> int:
-        """-1 while talking (or before), else how many checkpoints the quiet has passed (0, 1, 2)."""
+        """-1 while talking (or before), else how many checkpoints the quiet has passed (0, 1, 2, 3)."""
         if not self.speaking:
             return -1
         return sum(self.quiet >= c for c in CHECKPOINTS) - 1
@@ -86,8 +95,10 @@ class Endpointer:
 def ready(action, via: str, text: str, stage: int) -> bool:
     """Whether a decision made after `stage` checkpoints of quiet should be acted on now. text is the cleaned-up
     sentence (router.normalize)."""
-    if stage >= 2:
+    if stage >= 3:
         return True
+    if stage == 2:                   # "next episode" is whole; "… crystal at" waits for the name
+        return action.type == "next_episode" or not CUT.search(text)
     if action.type == "none" or text in PREFIXES:
         return False
     if action.type != "next_episode" and OPEN_ENDED.search(text):   # "next episode" is whole; "season 3 episode" isn't
@@ -185,9 +196,9 @@ class StreamSession:
                 t.cancel()
 
     async def finish(self):
-        """The audio ended (or broke off): decide on what there is, unless that's already done."""
-        if not self.committed.is_set():
-            await self._check(2)
+        """The audio ended (or broke off): decide on what there is, unless that's already done or no voice was heard."""
+        if not self.committed.is_set() and self.ep.speaking:
+            await self._check(3)
         for t in self._tasks:
             if not t.done():
                 t.cancel()

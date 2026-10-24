@@ -35,6 +35,30 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   "that's wrong", or what you taught it. Labels live in `~/.local/share/tv-agent/voice-tests/labels.jsonl`, never
   in the repo, editable by hand, each recording hard-linked beside them so it outlives the agent's last-300
   rotation and erasing the history (`voicetests.py`).
+- `bench_voice.py --stt MODEL@es,MODEL@en,MODEL@none`: hosted models with another language hint (and its names) in
+  the same run; `--transcripts run.json` decides on a saved run's transcripts (a rules change measured without
+  speech to text's cost or wobble); any label field can be `<field>_any` ("episode_name_any", "seconds_any").
+
+### Changed
+- Spanish and misheard commands from 190 of your recorded ones (2026-10-24): "Pon" heard as "Pong", "Paul",
+  "Ponga" ("Paul Dune", "Pong: Rebel Moon") is "pon"; "Paws", "Pulse", "Pose", "Paul" on their own are "pause";
+  "Este al minuto 20" (vete), "minuto 30", "vete a una hora", "vete a la primera hora", "vete a los 20 minutos",
+  "vete al principio (del episodio)", "pasa la intro", "pásate la introducción", "volumen 25" without "a", "put
+  volume 50", "let's skip the intro", "play the moment where…" (a scene, not a title called "The Moment"), "the
+  moment in this episode where…", "Open X in Twitch". The LLM: going to an episode ("¿puedes ir al episodio en el
+  que…?") is playing it, not a scene search, and it gives a season or episode number only when you said one (it
+  invented S2E4 for Community's dark-elf episode). On the recordings, with AssemblyAI and a Spanish hint: 151 →
+  160 of 190 right on the same transcripts.
+- When the words so far can't end a command ("… throws the crystal at", "¿puedes ir al momento donde disparan al
+  señor", "cambia los subtítulos a"), the agent waits for up to 1.5 s of quiet instead of 0.72 s: you pause before a
+  name, and 12 of the 190 commands were cut short there.
+- Your Twitch favourites go to the speech model right after your own names, ahead of what you watched before:
+  those titles filled all 100 places, so "Ibai" was never sent (heard as "eBay", "eBuy").
+
+### Fixed
+- No voice, no transcription: when the remote's mic sends near-silence (it did for 15 minutes on 2026-10-24, the
+  film faintly behind it), nothing is sent to speech to text, so a line of dialogue can't become a command (“Ya no
+  me oigo”, heard in that near-silence, turned the volume up).
 
 ## panel — unreleased
 

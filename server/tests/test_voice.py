@@ -180,6 +180,17 @@ def test_judge_label_exact_checks_every_field_the_label_doesnt_name():
     assert bench_voice.judge_label(A.Transport(op="pause"), {"type": "transport"}, True)[1]     # op: required
 
 
+def test_judge_label_any_of_for_every_field():
+    burns = A.PlayTitle(title="The Simpsons", episode_name="Mr. Burns gets shot")
+    want = {"type": "play_title", "title_any": ["simpson"], "episode_name_any": ["burns"]}
+    assert bench_voice.judge_label(burns, want, True) == (True, True)
+    assert bench_voice.judge_label(burns.model_copy(update={"episode_name": "Homer's dream"}), want, True) == (True, False)
+    start = {"type": "transport", "op": "seek_to", "seconds_any": [0, None]}       # "go to the start", either way
+    assert bench_voice.judge_label(A.Transport(op="seek_to"), start, True)[1]
+    assert bench_voice.judge_label(A.Transport(op="seek_to", seconds=0), start, True)[1]
+    assert not bench_voice.judge_label(A.Transport(op="seek_to", seconds=1200), start, True)[1]
+
+
 def test_judge_label_sequence_step_by_step():
     seq = A.Sequence(steps=[A.PlayTitle(title="Severance", episode=2), A.Transport(op="seek_to", percent=50)])
     want = {"type": "sequence", "steps": [{"type": "play_title", "title": "severance", "episode": 2},

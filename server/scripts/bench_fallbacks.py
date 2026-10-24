@@ -55,9 +55,12 @@ def judge(action: A.Action, expect: dict) -> tuple[bool, bool]:
     for key, want in expect.items():
         if key == "type":
             continue
-        if key in ("title_any", "query_any"):
-            have = norm(got.get(key.removesuffix("_any")) or "")
-            if not any(norm(w) in have for w in want):
+        if key.endswith("_any") and isinstance(want, list):     # "title_any": any of these words; "seconds_any": [0, null]
+            have = got.get(key.removesuffix("_any"))
+            if all(isinstance(w, str) for w in want):
+                if not any(norm(w) in norm(have or "") for w in want):
+                    return True, False
+            elif have not in want:
                 return True, False
         elif isinstance(want, str) and isinstance(got.get(key), str):
             if want.lower().strip() != got[key].lower().strip():

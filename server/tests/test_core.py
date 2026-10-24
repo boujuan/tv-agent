@@ -73,6 +73,35 @@ def test_grammar(text, expect):
     assert rule_action(text) == expect
 
 
+@pytest.mark.parametrize("text,expect", [         # as the hosted model heard them (voice tests, 2026-10-24)
+    ("Paul Dune.", A.PlayTitle(title="dune")),
+    ("Pong: Rebel Moon.", A.PlayTitle(title="rebel moon")),
+    ("Paul, The Boys, Season 4, Episode 1.", A.PlayTitle(title="the boys", season=4, episode=1, kind="series")),
+    ("Ponga a Ibai en Twitch.", A.Twitch(channel="ibai")),
+    ("Open IoJuan in Twitch.", A.Twitch(channel="iojuan")),
+    ("Paws.", A.Transport(op="pause")), ("Pulse.", A.Transport(op="pause")), ("Paul.", A.Transport(op="pause")),
+    ("Este al minuto 20.", A.Transport(op="seek_to", seconds=1200)),
+    ("Minuto 30.", A.Transport(op="seek_to", seconds=1800)),
+    ("Vete a una hora.", A.Transport(op="seek_to", seconds=3600)),
+    ("Vete a la primera hora.", A.Transport(op="seek_to", seconds=3600)),
+    ("Vete a los 20 minutos.", A.Transport(op="seek_to", seconds=1200)),
+    ("Vete al principio del episodio.", A.Transport(op="seek_to", seconds=0)),
+    ("Pasa la intro.", A.Skip(what="intro")), ("Pásalos la introducción.", A.Skip(what="intro")),
+    ("Volumen veinticinco.", A.Volume(op="set", amount=25)), ("Put volume 50.", A.Volume(op="set", amount=50)),
+    ("Let's skip the intro.", A.Skip(what="intro")),
+    ("Play the moment where he throws the crystal at Tuco.", A.FindScene(what="he throws the crystal at tuco")),
+    ("Go to the moment in this episode where Carol finds out.", A.FindScene(what="carol finds out")),
+])
+def test_spanish_and_misheard_commands(text, expect):
+    assert rule_action(text) == expect
+
+
+def test_only_the_usual_mishearings_of_pon_become_play():
+    assert rule_action("Pon Oppenheimer") == A.PlayTitle(title="oppenheimer")
+    assert rule_action("Let's watch The Bear.") == A.PlayTitle(title="the bear")
+    assert rule_action("Pont du Parti d'Oz.") is None          # the LLM made Dune: Part Two of that; a rule can't
+
+
 @pytest.mark.parametrize("text,expect", [
     ("play lofi hip hop on youtube", A.YouTube(query="lofi hip hop")),
     ("put ibai on twitch", A.Twitch(channel="ibai")),
@@ -380,6 +409,41 @@ def test_when_a_streamed_command_is_acted_on(text, stage, expect):
     hit = router.match_rules(t, RULES, [])
     assert hit, text
     assert ready(hit[0], hit[1], t, stage) is expect
+
+
+@pytest.mark.parametrize("text", ["go to the moment where he throws the crystal at", "can you open",
+                                  "puedes ir al momento donde disparan al señor", "cambia los subtítulos a",
+                                  "go to the moment where troy says that's", "play dune part"])
+def test_words_that_cant_end_a_command_wait_for_the_name(text):
+    """A pause before a name ("… crystal at … Tuco") isn't the end: 720 ms cut those short, 1.5 s doesn't."""
+    from tv_agent.listen_stream import ready
+    t = router.normalize(text, RULES)
+    for action in (A.FindScene(what="x"), A.Unclear(), A.PlayTitle(title="x", episode=1)):
+        assert not ready(action, "llm", t, 2) and ready(action, "llm", t, 3)
+    assert ready(A.NextEpisode(), "phrase", "next episode", 2)
+    assert ready(A.Transport(op="pause"), "phrase", "pause", 2)
+
+
+def test_no_voice_at_all_is_never_transcribed():
+    """The remote's mic sending near-silence with the film faintly behind it: no speech starts, so nothing is
+    transcribed and no line of dialogue becomes a command."""
+    import asyncio
+    import numpy as np
+    from tv_agent.listen_stream import FRAME, StreamSession
+    faint = (np.random.default_rng(4).normal(0, 3, FRAME)).astype("<i2").tobytes()     # ~-80 dB
+    asked = []
+
+    async def run():
+        async def transcribe(audio):
+            asked.append(len(audio))
+            return "free the spice, i'll make you emperor"
+
+        sess = StreamSession(transcribe, None, lambda t: t, lambda m: None)
+        for _ in range(200):                     # the TV app gives up after 4 s without speech
+            sess.feed(faint)
+        return await sess.finish()
+
+    assert asyncio.run(run()) is None and asked == []
 
 
 def test_d1_answers_wait_for_the_second_checkpoint():
@@ -1480,15 +1544,15 @@ def test_the_hosted_model_gets_a_language_hint_and_the_vocabulary(monkeypatch, t
     svc.cfg.stt_vocabulary_library = True
     svc._library_names, svc._library_names_at = {"recent": ["The Bear", "stremio"]}, 1e12   # fresh: no refresh
     asyncio.run(svc.transcribe(b"\0" * 32000))
-    assert sent == {"language": "es", "vocabulary": ["Stremio", "The Bear", "Ibai"]}   # native Spanish; no repeats
+    assert sent == {"language": "es", "vocabulary": ["Stremio", "Ibai", "The Bear"]}   # native Spanish; no repeats
     svc.cfg.stt_language = ""
     asyncio.run(svc.transcribe(b"\0" * 32000))
     assert sent["language"] == ""                    # the model guesses
 
 
 def test_the_vocabulary_sends_the_likeliest_names_first_in_the_hints_language(monkeypatch, tmp_path):
-    """What's playing and Continue Watching, then yours, what you watched (newest first), Twitch and the rest of
-    the library (newest added first). Stremio's names with a Spanish hint, Cinemeta's with an English one, both
+    """What's playing and Continue Watching, then yours and your Twitch favourites, what you watched (newest first)
+    and the rest of the library (newest added first). Stremio's names with a Spanish hint, Cinemeta's with an English one, both
     without. Only the first 100 go (AssemblyAI refuses more), so the least likely are the ones left out."""
     import asyncio
     import types
@@ -1516,20 +1580,20 @@ def test_the_vocabulary_sends_the_likeliest_names_first_in_the_hints_language(mo
     asyncio.run(svc._refresh_library_names())
     svc._library_names_at = 1e12
     assert sorted(asked) == ["tt1", "tt2", "tt3", "tt4", "tt5", "tt6"]       # each title's other name asked once
-    assert svc.stt_vocabulary() == ["Severance", "Half Watched", "Stremio", "El señor de los anillos", "Old Film",
-                                    "Ibai", "Added Lately", "Never Watched"]     # a Spanish hint: Stremio's names
+    assert svc.stt_vocabulary() == ["Severance", "Half Watched", "Stremio", "Ibai", "El señor de los anillos",
+                                    "Old Film", "Added Lately", "Never Watched"]     # a Spanish hint: Stremio's names
     svc.cfg.stt_language = "en"
-    assert svc.stt_vocabulary()[3] == "The Lord of the Rings"
+    assert svc.stt_vocabulary()[4] == "The Lord of the Rings"
     svc.cfg.stt_language = ""
-    assert svc.stt_vocabulary()[3:5] == ["El señor de los anillos", "The Lord of the Rings"]
+    assert svc.stt_vocabulary()[4:6] == ["El señor de los anillos", "The Lord of the Rings"]
     # A hint's own list replaces yours while that hint is on; the others keep stt_vocabulary
     svc.cfg.stt_vocabularies = {"es": ["Movistar Plus"]}
     svc.cfg.stt_language = "native"
     assert svc.stt_vocabulary()[2] == "Movistar Plus" and "Stremio" not in svc.stt_vocabulary()
     assert svc.stt_vocabulary("en")[2] == "Stremio" and svc.stt_vocabulary("")[2] == "Stremio"
     assert svc.vocabulary_languages() == ["es", "en", ""]
-    svc._library_names = {"rest": [f"Film {i}" for i in range(150)]}
-    assert len(svc.stt_vocabulary()) == stt.VOCABULARY_MAX == 100
+    svc._library_names = {"recent": [f"Film {i}" for i in range(150)]}
+    assert len(svc.stt_vocabulary()) == stt.VOCABULARY_MAX == 100 and "Ibai" in svc.stt_vocabulary()
 
 
 def test_another_script_from_this_laptop_asks_the_hosted_model(monkeypatch, tmp_path):

@@ -51,8 +51,8 @@ sounds like ("of" or "all" after subtitles, "oh" after mode: on / off; "beach mo
 
 Actions and their fields (every other field null):
 play_title: title, season, episode, episode_name (an episode named or described instead of numbered: its name as
-said, or what happens in it, in English; numbers too only when said or certain) · continue_watching: title, or null
-for what was watched last
+said, or what happens in it, in English; season and episode only when their numbers are said) · continue_watching:
+title, or null for what was watched last
 show_in_stremio: title (its page, without playing)
 info: title, or null for what's playing ("what am I watching", "what episode of X am I on", "where am I in X")
 next_episode, previous_episode, pause, resume, stop, home, start_over, replay ("what did they say?")
@@ -72,7 +72,7 @@ show_recent (a list of what was being watched, not finished yet), show_new ("wha
 help ("what can you do") · recommend: query (they want suggestions: "something like Dark", "a short comedy", "what
 should we watch?"; the query is their request, in their words)
 find_scene: query (a moment of what's playing described in words, in English: "go to the part where Mr. Burns
-gets shot")
+gets shot"). Going to an episode ("ve al episodio de … donde", "¿puedes ir al episodio en el que…?") is play_title.
 pick: number (an item of the list on screen) · wrong ("that's wrong": the last command was misunderstood)
 
 Titles: copy one exactly from "candidates" when it's what was said, even misheard ("the bare" is "The Bear"). When
@@ -98,6 +98,7 @@ Examples:
 "the second thing on the list" -> {"action":"pick","number":2}
 "algo de miedo que no sea muy largo" -> {"action":"recommend","query":"algo de miedo que no sea muy largo"}
 "vete al minuto en el que mr burns le dispara" -> {"action":"find_scene","query":"Mr. Burns gets shot"}
+"¿puedes ir al episodio de friends en el que ross se casa?" -> {"action":"play_title","title":"Friends","episode_name":"Ross gets married"}
 "what was the weather like yesterday" -> {"action":"none"}"""
 
 

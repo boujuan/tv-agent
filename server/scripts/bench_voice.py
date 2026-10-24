@@ -9,10 +9,12 @@ label. Nothing is sent to the TV; the LLM and the hosted models are called (and 
               it worked and wasn't marked wrong, or what the panel taught for it (voicetests.expected)
 --stt         local (stt_model), parakeet-v2 / parakeet-v3 (that model on this laptop), an OpenRouter transcription
               model id (sent the language hint and names the agent sends: stt_language, its vocabulary and your
-              library's titles), heard (what the agent heard back then: the decision steps only) or text (the
-              label's words)
+              library's titles; MODEL@es, MODEL@en, MODEL@none: with that hint and its names instead), heard (what
+              the agent heard back then: the decision steps only) or text (the label's words)
 --off         decision steps switched off on top of the agent's own decide_off (phrases, patterns, llm, d1)
 --no-learned  without the sentences taught in the panel (a taught recording otherwise matches its own sentence)
+--transcripts  reuse a saved run's transcripts (same --stt names): the decision steps alone, without speech to
+              text's cost or its answers changing from one run to the next
 --save, --compare  keep a run's results, or show the regressions and fixes since one (exits 1 on a regression).
               A bare file name is kept with the voice tests, out of the repo: the transcripts are yours.
 """
@@ -21,6 +23,7 @@ import asyncio
 import json
 import math
 import os
+import re
 import statistics
 import subprocess
 import sys
@@ -149,23 +152,38 @@ async def run(args, cfg: config.Config, labels: list[dict], specs: list[str]) ->
     router = Router(agent.d1, rules, agent.llm, agent.llm_context, cfg.decide_steps, off)
     steps = [s for s in cfg.decide_steps if s not in off and (s != "llm" or agent.llm)]     # no key: no LLM
     setup = {"commit": commit(), "version": __version__, "stt_model": cfg.stt_model, "steps": steps,
+             "transcripts": args.transcripts,
              "llm_model": cfg.llm_model if "llm" in steps else None,
              "llm_reasoning": cfg.llm_reasoning, "d1_where": cfg.d1_where, "hosted_d1_model": cfg.hosted_d1_model,
              "rules": rules.source, "learned": len(taught)}
     key = cfg.secret("openrouter_api_key")
-    language, vocabulary = "", []
+    language, vocabulary, hints = "", [], None
     if any("/" in s for s in specs):
         hints = Hints(cfg, agent)
         if cfg.stt_vocabulary_library:
             await hints._refresh_library_names()
         language, vocabulary = hints.stt_language(), hints.stt_vocabulary()
         setup |= {"stt_language": language, "stt_vocabulary": len(vocabulary)}
+
+    def hinted(spec: str) -> tuple[str, str, list[str]]:
+        """A hosted spec's model, language hint and names: the agent's own, or MODEL@es / @en / @none's."""
+        model, at, lang = spec.partition("@")
+        if not at:
+            return model, language, vocabulary
+        lang = "" if lang == "none" else lang
+        return model, lang, hints.stt_vocabulary(lang)
     local: dict[str, stt_mod.Stt] = {}
+    saved = {}
+    if args.transcripts:
+        saved = json.loads(place(args.transcripts).read_text()).get("results", {})
     decided: dict[str, object] = {}                      # the same words are decided once per run
 
     async def hear(spec: str, pcm: bytes, lab: dict) -> dict:
         if spec in ("heard", "text"):
             return {"transcript": lab.get(spec)} if lab.get(spec) is not None else {}
+        was = saved.get(lab["recording"], {}).get(spec)
+        if was and not was.get("error"):
+            return {"transcript": was["transcript"], "stt_ms": was.get("stt_ms")}
         if spec == "local" or spec in stt_mod.MODELS:
             name = cfg.stt_model if spec == "local" else spec
             if name not in local:
@@ -176,8 +194,9 @@ async def run(args, cfg: config.Config, labels: list[dict], specs: list[str]) ->
         for _ in range(3):                               # a rate limit or a hiccup: twice more, a second apart
             t = time.perf_counter()
             try:
-                text, cost = await stt_mod.hosted_transcribe(agent.http, key, spec, pcm, language=language,
-                                                             vocabulary=vocabulary)
+                model, lang, names = hinted(spec)
+                text, cost = await stt_mod.hosted_transcribe(agent.http, key, model, pcm, language=lang,
+                                                             vocabulary=names)
                 return {"transcript": text, "stt_ms": round((time.perf_counter() - t) * 1000), "stt_cost": cost}
             except (httpx.HTTPError, ValueError, KeyError) as e:
                 error = f"{type(e).__name__}"
@@ -297,6 +316,7 @@ async def main() -> int:
     ap.add_argument("--failures", action="store_true", help="show only what's wrong (and the totals)")
     ap.add_argument("--save", help="keep this run's results (a bare name: with the voice tests)")
     ap.add_argument("--compare", help="show regressions and fixes since a saved run")
+    ap.add_argument("--transcripts", help="reuse a saved run's transcripts: the decision steps only")
     args = ap.parse_args()
     cfg = config.load()
     specs = [s.strip() for s in args.stt.split(",") if s.strip()]
@@ -304,6 +324,8 @@ async def main() -> int:
         ap.error(f"--off takes {', '.join(STEPS)}, not {', '.join(sorted(bad))}")
     for spec in specs:
         name = cfg.stt_model if spec == "local" else spec
+        if "@" in spec and ("/" not in spec or not re.fullmatch(r"[a-z]{2}|none", spec.partition("@")[2])):
+            ap.error(f"--stt {spec}: a hint goes after an OpenRouter model id: @es, @en, @none")
         if (spec == "local" or spec in stt_mod.MODELS) and not stt_mod.installed(name):
             ap.error(f"the speech model {name} isn't installed (tv-agent setup stt {name})")
         if "/" in spec and not cfg.secret("openrouter_api_key"):

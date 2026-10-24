@@ -8,7 +8,7 @@ labels.jsonl, one line per recording, editable by hand:
    "t": 1761161400.123}
 
 - expect: the action it should give, as in eval/*.jsonl: the keys listed must match (strings ignoring case;
-  "title_any": [...] any of these words). With "exact", every other field must be at its default too, so "play
+  "title_any": [...] any of these words, and so for any field: "episode_name_any", "seconds_any": [0, null]). With "exact", every other field must be at its default too, so "play
   The Bear" that comes out as season 2 is wrong; a sequence's steps are judged one by one. Film or series ("kind")
   and a guessed title's mark count only when a label names them.
 - text: what was said, word for word, once someone checked it: the transcripts are judged against it.

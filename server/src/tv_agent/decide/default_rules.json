@@ -36,9 +36,14 @@
         "note": "Spanish: “oye”, “venga”, “a ver” (and hesitations) before a command"
       },
       {
-        "from": "^(?:(?:okay |ok )?so|right|well|now|oh|yeah|and(?: then)?|then)(?:\\s*,\\s*|\\s+(?=(?:play|put|watch|start|stream|open|launch|pause|stop|resume|continue|skip|go|jump|turn|switch|volume|mute|unmute|next|previous|what|show|set|add|mark|remove|subtitles|subs|louder|quieter|rewind|fast|back|cancel|help|pon|ponme|abre|quita|sube|baja|salta|para|sigue|ve)\\b))",
+        "from": "^(?:pon|pong|ponga|pongan|pongo|pom|pung|paul)[,:.]?\\s+(?=\\S)",
+        "to": "pon ",
+        "note": "Spanish: “pon” as the hosted model often hears it (“Paul Dune”, “Pong: Rebel Moon”), measured 2026-10-24"
+      },
+      {
+        "from": "^(?:(?:okay |ok )?so|right|well|now|oh|yeah|and(?: then)?|then|let'?s)(?:\\s*,\\s*|\\s+(?=(?:play|put|watch|start|stream|open|launch|pause|stop|resume|continue|skip|go|jump|turn|switch|volume|mute|unmute|next|previous|what|show|set|add|mark|remove|subtitles|subs|louder|quieter|rewind|fast|back|cancel|help|pon|ponme|abre|quita|sube|baja|salta|para|sigue|ve)\\b))",
         "to": "",
-        "note": "“so”, “right”, “now”… before a command, not the start of a title (“Now You See Me”)"
+        "note": "“so”, “right”, “now”, “let's”… before a command, not the start of a title (“Now You See Me”)"
       },
       {
         "from": "^got to\\b",
@@ -111,9 +116,9 @@
         "note": "Spanish: ¿qué puedes hacer?"
       },
       {
-        "from": "^(?:pausa|pon pausa|pausar|espera(?: un momento)?|para un momento)$",
+        "from": "^(?:pausa|pon pausa|pausar|espera(?: un momento)?|para un momento|paws|paus|pauz|pauza|pose|poser|pulse|paul'?s|paul)$",
         "to": "pause",
-        "note": "Spanish: pausa"
+        "note": "Spanish: pausa; and “pause” or “pausa” misheard on its own (“Paws”, “Pulse”, “Pose”, “Paul”)"
       },
       {
         "from": "^(?:sigue|contin[uú]a|continuar|continuemos|seguimos|reanuda|dale|dale al play|quita la pausa|seguir|sigue viendo|contin[uú]a viendo)$",
@@ -186,12 +191,12 @@
         "note": "Spanish: a tope"
       },
       {
-        "from": "^(?:pon |sube |baja )?(?:el )?volumen (?:al?|en) ",
+        "from": "^(?:pon |sube |baja )?(?:el )?volumen (?:(?:al?|en) )?(?=\\S)",
         "to": "volume ",
-        "note": "Spanish: volumen al veinte"
+        "note": "Spanish: volumen al veinte, volumen veinticinco"
       },
       {
-        "from": "^(?:desde el principio|empieza de nuevo|vuelve al principio|desde el inicio|emp[ií]ezalo de nuevo)$|^(?:empieza|empi[eé]zalo|vuelve a empezar|pon(?:lo)?) (?:el (?:cap[ií]tulo|episodio)|la peli(?:cula)?) (?:otra vez|de nuevo|desde el principio)$|^otra vez desde el principio$|^(?:vuelve a empezar|empieza otra vez|emp[ií]ezalo otra vez|p[oó]nlo (?:otra vez )?desde el (?:principio|inicio))$",
+        "from": "^(?:desde el principio|empieza de nuevo|(?:vuelve|ve|vete|ir|pasa|salta) al principio(?: del (?:cap[ií]tulo|episodio)| de la peli(?:cula)?)?|desde el inicio|emp[ií]ezalo de nuevo)$|^(?:empieza|empi[eé]zalo|vuelve a empezar|pon(?:lo)?) (?:el (?:cap[ií]tulo|episodio)|la peli(?:cula)?) (?:otra vez|de nuevo|desde el principio)$|^otra vez desde el principio$|^(?:vuelve a empezar|empieza otra vez|emp[ií]ezalo otra vez|p[oó]nlo (?:otra vez )?desde el (?:principio|inicio))$",
         "to": "start over",
         "note": "Spanish: desde el principio"
       },
@@ -226,17 +231,17 @@
         "note": "Spanish: películas nuevas"
       },
       {
-        "from": "^(?:salta|s[aá]ltate|quita) (?:la )?(?:intro|introducci[oó]n|cabecera|sinton[ií]a)$",
+        "from": "^(?:salta|s[aá]lta(?:te|la|lo|los)|quita|pasa|p[aá]sa(?:te|la|lo|los)) (?:la )?(?:intro|introducci[oó]n|cabecera|sinton[ií]a)$",
         "to": "skip the intro",
-        "note": "Spanish: salta la intro"
+        "note": "Spanish: salta la intro, pasa la intro, pásate la introducción"
       },
       {
-        "from": "^(?:salta|s[aá]ltate|quita) (?:el )?resumen$",
+        "from": "^(?:salta|s[aá]lta(?:te|la|lo|los)|quita|pasa|p[aá]sa(?:te|la|lo|los)) (?:el )?resumen$",
         "to": "skip the recap",
         "note": "Spanish: salta el resumen"
       },
       {
-        "from": "^(?:salta|s[aá]ltate|quita) (?:los )?cr[eé]ditos$",
+        "from": "^(?:salta|s[aá]lta(?:te|la|lo|los)|quita|pasa|p[aá]sa(?:te|la|lo|los)) (?:los )?cr[eé]ditos$",
         "to": "skip the credits",
         "note": "Spanish: salta los créditos"
       },
@@ -386,9 +391,24 @@
         "note": "Spanish: un poco"
       },
       {
-        "from": "^(?:ve|vete|ir|salta|pasa) al minuto\\b",
+        "from": "^(?:(?:ve|vete|ir|salta|pasa|este|te|bete|bitte|vente) )?al minuto\\b|^minuto\\b(?= )",
         "to": "go to minute",
-        "note": "Spanish: ve al minuto veinte"
+        "note": "Spanish: ve al minuto veinte, minuto treinta; “vete” heard as “este”, “te” (measured 2026-10-24)"
+      },
+      {
+        "from": "^((?:ve|vete|ir|salta|pasa|este|te) a) la primera hora$",
+        "to": "\\1 una hora",
+        "note": "Spanish: vete a la primera hora (1:00:00)"
+      },
+      {
+        "from": "^((?:ve|vete|ir|salta|pasa|este|te) a) la segunda hora$",
+        "to": "\\1 dos horas",
+        "note": "Spanish: vete a la segunda hora (2:00:00)"
+      },
+      {
+        "from": "^(?:ve|vete|ir|salta|pasa|este|te) (?:a|al) (?:la |los |las )?(?=\\S+ (?:horas?|minutos?|segundos?)\\b)",
+        "to": "go to ",
+        "note": "Spanish: vete a una hora, ve a los veinte minutos"
       },
       {
         "from": "^(?:ve|vete|ir|salta|pasa|ll[eé]vame|ponlo) a la mitad(?: del (?:cap[ií]tulo|episodio)| de la peli(?:cula)?)?$",
@@ -834,12 +854,12 @@
     {
       "id": "find_scene",
       "stage": "grammar",
-      "match": "^(?:go|jump|skip|take me|fast forward|rewind|go back|open|salta|s[aá]ltate|ll[eé]vame|pon(?:lo)?|ve|vete)(?: back)?\\s+(?:to |a |al |hasta )?(?:the |la |el )?(?:minute|moment|part|bit|scene|point|place|time|minuto|momento|parte|escena|trozo|punto)s?\\s+(?:where|when|in which|that|en (?:el|la) (?:que|cual)|donde|cuando|del? que)\\b\\s*(?P<what>.+)$",
+      "match": "^(?:go|jump|skip|take me|fast forward|rewind|go back|open|play|put on|show me|watch|salta|s[aá]ltate|ll[eé]vame|pon(?:lo)?|ve|vete|mu[eé]strame|ens[eé][nñ]ame)(?: back)?\\s+(?:to |a |al |hasta )?(?:the |la |el )?(?:minute|moment|part|bit|scene|point|place|time|minuto|momento|parte|escena|trozo|punto)s?\\s+(?:(?:in|of|de|del|en) (?:this|the|este|el|esta|la) (?:episode|movie|film|show|episodio|cap[ií]tulo|peli(?:cula)?|serie)\\s+)?(?:where|when|in which|that|en (?:el|la) (?:que|cual)|donde|cuando|del? que)\\b\\s*(?P<what>.+)$",
       "do": {
         "type": "find_scene",
         "what": "{what|text!}"
       },
-      "note": "“go to the part where they kiss”, “vete al minuto en el que…”: found in the subtitles"
+      "note": "“go to the part where they kiss”, “play the moment where…”, “vete al minuto en el que…”: found in the subtitles"
     },
     {
       "id": "previous_episode",
@@ -991,7 +1011,7 @@
     {
       "id": "volume_set",
       "stage": "grammar",
-      "match": "^(?:set (?:the )?)?volume(?:(?: up| down)? to| at| level)? (?P<level>.+)$",
+      "match": "^(?:(?:set|put|turn) (?:the )?)?volume(?:(?: up| down)? to| at| level)? (?P<level>.+)$",
       "do": {
         "type": "volume",
         "op": "set",
@@ -1423,7 +1443,7 @@
     {
       "id": "twitch_on",
       "stage": "cue",
-      "match": "^(?:put on|put|watch|open|play|show me)?\\s*(?P<ch>.+?)\\s+on\\s+twitch$",
+      "match": "^(?:put on|put|watch|open|play|show me)?\\s*(?P<ch>.+?)\\s+(?:on|in)\\s+twitch$",
       "do": {
         "type": "twitch",
         "channel": "{ch|text!}"

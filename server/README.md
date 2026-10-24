@@ -108,7 +108,9 @@ on the same address and token as the TV's HTTP endpoint). tv-agent tracks speech
 in the quiet after you speak, transcribes and decides: at ~160 ms of quiet for a complete command that can't be
 the start of a longer one ("pause", "next episode", "go home", "… season 3 episode 2"), at ~460 ms for other
 understood commands ("volume twenty" could still become "twenty five"), at ~720 ms otherwise (a title alone, since
-a season often follows). If you go on talking, the early result is dropped. Measured with the remote on
+a season often follows), and at ~1.5 s when the words so far can't end a command ("… throws the crystal at",
+"cambia los subtítulos a": people pause before a name). If you go on talking, the early result is dropped. When no
+voice is heard at all (the remote's mic sending near-silence, the film faintly behind it), nothing is transcribed. Measured with the remote on
 2026-10-22: 240-310 ms from your last word to the decision for complete commands (it was ~0.9 s). The pill shows
 what it has understood so far. Pressing the mic again sends at once; without the stream the app falls back to
 recording until 0.7 s of quiet and sending it all. Logic: `listen_stream.py`; protocol: `server.py`.
@@ -269,6 +271,8 @@ Nothing is sent to the TV; the LLM and hosted models are called, and cost, as in
 # … change the rules, a model, the code …
 .venv/bin/python scripts/bench_voice.py --compare before.json       # regressions and fixes (exit 1 on a regression)
 .venv/bin/python scripts/bench_voice.py --stt local,parakeet-v2,mistralai/voxtral-mini-transcribe-3-0,heard,text
+.venv/bin/python scripts/bench_voice.py --stt assemblyai/universal-3-6-pro@es,assemblyai/universal-3-6-pro@none
+.venv/bin/python scripts/bench_voice.py --transcripts before.json --compare before.json   # a rules change alone
 ```
 
 - **Labels** live in `~/.local/share/tv-agent/voice-tests/labels.jsonl` (mode 600, never in the repo), one per
@@ -280,11 +284,17 @@ Nothing is sent to the TV; the LLM and hosted models are called, and cost, as in
   that also asks for the words said, so the transcripts are judged too.
 - A label: `{"recording": "…wav", "expect": {…}, "exact": true, "text": "what was said"}`. `expect` is as in
   `eval/*.jsonl`; with `exact` every field it doesn't name must be at its default (film or series and a guessed
-  title count only when named). Edit one by hand to loosen it (`"exact": false`, `"title_any"`) or correct it.
+  title count only when named). Edit one by hand to loosen it (`"exact": false`; `"title_any"`,
+  `"episode_name_any"`: any of these words; `"seconds_any": [0, null]`: any of these values) or correct it.
 - Per recording: ✓ right, ~ right kind of action, ✗ wrong; the transcript, ✓/✗ against `text` (case, punctuation,
   accents and "three" / "3" don't count); the timings. Per speech model: how many right, word error rate, p50/p95
   of speech to text and deciding, which steps decided, cost. `--stt heard` decides on what the agent heard back
-  then (the decision steps alone), `text` on the words said (what perfect hearing would get).
+  then (the decision steps alone), `text` on the words said (what perfect hearing would get). A hosted model
+  with `@es`, `@en` or `@none` after its id gets that language hint and that hint's names instead of the agent's
+  own, so hints can be compared in one run.
+- `--transcripts run.json` reuses a saved run's transcripts (same `--stt` names): the decision steps alone, with no
+  speech-to-text cost, and none of the hosted model's run-to-run wobble (2-3% of AssemblyAI's transcripts change
+  between two identical runs) in a comparison.
 - `--save` / `--compare` with a bare file name keep the run with the voice tests (its transcripts are yours);
   `--compare` lists regressions, fixes, changed transcripts and what changed in the setup (commit, models, steps).
   Also `--no-learned` (without the taught sentences), `--failures` (only what's wrong).

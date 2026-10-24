@@ -356,9 +356,10 @@ class Service:
     def stt_vocabulary(self, lang: str | None = None) -> list[str]:
         """The names the hosted model should hear with the language hint `lang` (the one set, by default), most
         likely first, since only VOCABULARY_MAX go: what's playing and Continue Watching, then yours (the hint's own
-        list, else stt_vocabulary), what you watched before (newest first), your Twitch favourites and the rest of
-        the library. Command words aren't sent: the model hears those well, and they'd take the names' places. The
-        library part is refreshed in the background every 10 minutes.
+        list, else stt_vocabulary) and your Twitch favourites, what you watched before (newest first), then the rest
+        of the library (what you watched before filled the 100 places on its own, so "Ibai" went unsent; 2026-10-24).
+        Command words aren't sent: the model hears those well, and they'd take the names' places. The library part
+        is refreshed in the background every 10 minutes.
 
         The titles follow the hint too, since the list's language leans how borderline words come out (English
         names next to Spanish ones turned 4 of 91 kept commands worse, "Pause" into "Paws"; measured 2026-10-24):
@@ -378,7 +379,7 @@ class Service:
             return [m for n in names for m in (n, self._other_names.get(n, ""))] if lang == "" else names
         lib, np = self._library_names, self.agent.state.now_playing
         return stt_mod.vocabulary(named([np.name] if np and np.name else []), named(lib.get("continue", [])), own,
-                                  named(lib.get("recent", [])), self.cfg.twitch_favorites, named(lib.get("rest", [])))
+                                  self.cfg.twitch_favorites, named(lib.get("recent", [])), named(lib.get("rest", [])))
 
     def vocabulary_languages(self) -> list[str]:
         """The hints that can have a list of their own, the one set first: yours, Spanish, English, then none."""
