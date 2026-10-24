@@ -310,6 +310,9 @@ class Router:
         steps = [d.action, *[chain.settled(h[0]) for _, h in after]]
         problem = "more than three steps" if more else A.chain_problem(steps)
         trace += part
+        if problem and d.action == A.Transport(op="stop") and all(h[0].type == "home" for _, h in after):
+            part[0]["same"] = "stop goes Home"       # "stop the video and go back to the menu": one command
+            return Decision(d.action, d.via, d.confidence, f"{d.rule} + home", trace)
         if problem:
             part[0]["refused"] = problem
             left = " · ".join(f"“{p}”" for p, _ in after)

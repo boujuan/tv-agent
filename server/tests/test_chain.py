@@ -551,3 +551,56 @@ def test_a_start_made_later_in_the_background_writes_nothing_into_a_finished_rec
         agent_mod._note_title(by="search")
         return record
     assert asyncio.run(go()) == {"title": {"name": "Community"}}
+
+
+@pytest.mark.parametrize("text", ["Stop the video and go back to the menu", "Para y vuelve a menú",
+                                  "para el vídeo y vuelve al menú", "stop and go home"])
+def test_stop_and_home_said_together_is_one_stop(text):
+    """Stop goes back to Home by itself: no note about Home not being done (a regression of the chains: the voice
+    tests of 2026-10-23 had these as two commands)."""
+    d = decide(text)
+    assert d.action == A.Transport(op="stop") and not d.note
+
+
+def test_stop_in_another_app_goes_home_too():
+    from tv_agent import agent as agent_mod
+    from tv_agent.tv import apps, media
+    did = []
+
+    async def tv(fn, *args):
+        did.append((fn, *args))
+
+    async def front():
+        return "com.google.android.youtube.tv"
+
+    async def no_kodi():
+        return None
+    me = types.SimpleNamespace(tvplayer=types.SimpleNamespace(now=lambda: None), front_app=front, _kodi_player=no_kodi,
+                               tv=tv)
+    out = asyncio.run(agent_mod.Agent._transport(me, A.Transport(op="stop")))
+    assert out.ok and did == [(media.dispatch, "stop"), (apps.home,)]
+
+
+def test_a_start_stops_when_its_loading_screen_is_closed():
+    """TV Agent Player 0.6.2: Back on a start's loading screen sends "closed" at 0 for the item it was loading."""
+    from tv_agent.agent import Agent
+    me = types.SimpleNamespace(_left=asyncio.Event(), tvplayer=types.SimpleNamespace(_coming=("tt1:2:5", "tt1:2:5#3-1")))
+    cancelled = []
+
+    async def start():
+        try:
+            await asyncio.sleep(30)                         # still finding streams
+        except asyncio.CancelledError:
+            cancelled.append(True)
+            raise
+
+    async def go():
+        task = asyncio.create_task(Agent._unless_left(me, start()))
+        await asyncio.sleep(0.01)
+        Agent._left_loading(me, {"t": "closed", "item": "tt1:2:4#3-0", "pos": 0, "why": "back"})   # another start's
+        await asyncio.sleep(0.01)
+        assert not task.done()
+        Agent._left_loading(me, {"t": "closed", "item": "tt1:2:5#3-1", "pos": 0, "dur": 0, "why": "back"})
+        return await task
+    out = asyncio.run(go())
+    assert not out.ok and out.say == "Stopped: the player was closed before it started" and cancelled

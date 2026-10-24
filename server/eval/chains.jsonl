@@ -23,3 +23,7 @@
 {"lang": "es", "text": "Pon el capítulo 2 de Pluribus y vete a la escena donde Carol se entera de que comen carne humana.", "expect": {"type": "sequence", "steps": [{"type": "play_title", "title_any": ["pluribus"], "episode": 2}, {"type": "find_scene"}]}, "why": "said at the TV, 2026-10-24"}
 {"lang": "en", "text": "Play the Community episode where it's Halloween and play the part where Mr. Chang dances with", "expect": {"type": "sequence", "steps": [{"type": "play_title", "title_any": ["community"]}, {"type": "find_scene"}]}, "why": "said at the TV, 2026-10-24"}
 {"lang": "en", "text": "Play the Community episode where Mr. Chang goes to dance with his ex-wife and play the scene where he dances.", "expect": {"type": "sequence", "steps": [{"type": "play_title", "title_any": ["community"]}, {"type": "find_scene"}]}, "why": "said at the TV, 2026-10-24"}
+{"lang": "en", "text": "Stop the video and go back to the menu.", "expect": {"type": "transport", "op": "stop"}, "why": "stop goes Home by itself: one command, no note"}
+{"lang": "es", "text": "Para y vuelve a menú.", "expect": {"type": "transport", "op": "stop"}, "why": "stop goes Home by itself: one command, no note"}
+{"lang": "es", "text": "para el vídeo y vuelve al menú", "expect": {"type": "transport", "op": "stop"}, "why": "stop goes Home by itself: one command, no note"}
+{"lang": "en", "text": "Quit and go to menu.", "expect": {"type": "transport", "op": "stop"}, "why": "stop goes Home by itself: one command, no note"}

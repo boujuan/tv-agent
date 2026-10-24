@@ -21,6 +21,12 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   episode or a scene" has the timings.
 
 ### Fixed
+- "Stop the video and go back to the menu", "para y vuelve a menú", "quit and go to menu" are one stop again (it
+  goes Home): since chains they were only "home" (the LLM's pick), as two commands that can't be chained. "Go back
+  to the menu", "vuelve al menú", "para el vídeo", "quit" are known by the rules. Stop goes back to Home in Just
+  Player and other apps too, as the help says, not only in TV Agent Player and Kodi.
+- Back or Home on a start's loading screen (TV Agent Player 0.6.2 says so at once: "closed" at 0 for that start)
+  stops the start there, its stream search included, instead of finding the streams and failing to load.
 - Binge mode: the next episode didn't start at the end of an episode ("Couldn't start the next episode"): a start
   made in the background wrote into the finished record of the command before it (since server 0.6.0). The same
   stopped a switch to the right episode's file, or to another copy, made after the start.

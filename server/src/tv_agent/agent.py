@@ -1,5 +1,6 @@
 """Executes actions on the TV. One Agent per process: it owns the ADB connection, the HTTP client and the state."""
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -278,6 +279,8 @@ class Agent:
         # TV Agent Player connects to this agent (server.py listens for it); its token is read at each connection
         self.tvplayer = TvPlayer(lambda: read_secret("player_token"), self._tv_addresses, __version__)
         self.tvplayer.listeners.append(self._player_event)
+        self.tvplayer.listeners.append(self._left_loading)
+        self._left = asyncio.Event()             # the start's loading screen was closed (Back, Home)
         self.d1 = D1(self.http, cfg.d1_url, cfg.secret("liquid_api_key"), cfg.hosted_d1_model, cfg.d1_where,
                      cfg.secret("openrouter_api_key"))
         self.rules, self.rules_error = rules_mod.load_safe()
@@ -369,6 +372,34 @@ class Agent:
                         f" (HTTP {msg['http']})" if msg.get("http") else "")
             asyncio.create_task(self.notify(load_failed_text(msg)))
 
+    def _left_loading(self, msg: dict):
+        """TV Agent Player 0.6.2 and later: Back or Home on a start's loading screen sends "closed" for the item it
+        was loading, at 0 (PROTOCOL.md). That start stops at once (_unless_left)."""
+        coming = getattr(self.tvplayer, "_coming", None)
+        if msg.get("t") == "closed" and not msg.get("pos") and coming and msg.get("item") == coming[1]:
+            self._left.set()
+
+    async def _unless_left(self, start) -> Outcome:
+        """A start, unless you leave its loading screen meanwhile: then it stops there, its stream search and all,
+        instead of loading into a player that's gone."""
+        self._left.clear()
+        task = asyncio.ensure_future(start)
+        left = asyncio.ensure_future(self._left.wait())
+        try:
+            await asyncio.wait({task, left}, return_when=asyncio.FIRST_COMPLETED)
+        except BaseException:
+            task.cancel()
+            raise
+        finally:
+            left.cancel()
+        if task.done():
+            return task.result()
+        task.cancel()
+        with contextlib.suppress(BaseException):
+            await task
+        log.info("start stopped: its loading screen was closed")
+        return Outcome(False, "Stopped: the player was closed before it started")
+
     async def _wake(self):
         """End the screensaver. A command from the laptop (panel, MCP, CLI) presses no key, and an app started
         behind Aerial Views stays hidden and gets frozen by Android (Kodi's playback died that way)."""
@@ -400,7 +431,10 @@ class Agent:
         if action.type not in ("volume", "none", "binge", "timer", "auto_skip", "wrong") and not self.dry_run:
             asyncio.create_task(self._wake())
         try:
-            out = await handler(action)
+            if action.type in STARTS and getattr(self.cfg, "player", "") == "tvplayer" and not self.dry_run:
+                out = await self._unless_left(handler(action))
+            else:
+                out = await handler(action)
         except Exception as e:
             log.exception("action %s failed", action.type)
             out = Outcome(False, f"That didn't work ({type(e).__name__})")
@@ -2942,6 +2976,8 @@ class Agent:
             if a.op == "seek_to":
                 return Outcome(False, "Jumping to a time works in TV Agent Player, Kodi and Just Player only")
             await self.tv(media.dispatch, a.op)
+            if a.op == "stop":                   # stop goes back to Home, in any app ("stop and go to the menu")
+                await self.tv(apps.home)
             return Outcome(True, "Play/pause" if a.op == "toggle" else a.op.capitalize())
         if pid is not None and a.op in ("seek_to", "forward", "back") and (
                 (np := self.state.now_playing) and np.dolby_vision or front not in (KODI, None)):
@@ -3004,6 +3040,8 @@ class Agent:
             return await self._next_episode(NextEpisode(offset=1 if a.op == "next" else -1))
         if a.op in ("pause", "resume", "toggle", "stop"):
             await self.tv(media.dispatch, a.op)
+            if a.op == "stop":
+                await self.tv(apps.home)
             return Outcome(True, "Play/pause" if a.op == "toggle" else a.op.capitalize())
         pos = st[1]
         if a.op in ("forward", "back"):

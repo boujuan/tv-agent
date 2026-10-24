@@ -141,9 +141,9 @@
         "note": "Spanish: pon el sonido"
       },
       {
-        "from": "^(?:inicio|(?:ve|vete|vuelve) (?:al inicio|a la pantalla de inicio)|pantalla de inicio|men[uú] principal)$",
+        "from": "^(?:inicio|(?:ve|vete|vuelve|volver|ir) (?:al inicio|a la pantalla de inicio|al? men[uú](?: principal)?)|pantalla de inicio|(?:al )?men[uú](?: principal)?)$",
         "to": "go home",
-        "note": "Spanish: inicio"
+        "note": "Spanish: inicio, vuelve al menú"
       },
       {
         "from": "^(?:p[oó]n(?:me|nos)? |ve al |pasa al )?(?:el )?(?:(?:siguiente|pr[oó]ximo) (?:cap[ií]tulo|episodio)|(?:cap[ií]tulo|episodio) siguiente|siguiente|pr[oó]ximo|que viene)$",
@@ -635,7 +635,17 @@
         "stop and go to the home screen",
         "para y vete al inicio",
         "para y ve al inicio",
-        "para y vete al menú"
+        "para y vete al menú",
+        "para el vídeo",
+        "para el video",
+        "para la película",
+        "para la peli",
+        "para el capítulo",
+        "para el episodio",
+        "detén el vídeo",
+        "deten el video",
+        "quit",
+        "quit it"
       ],
       "do": {
         "type": "transport",
@@ -720,7 +730,18 @@
         "go back home",
         "go back to the home screen",
         "main menu",
-        "home page"
+        "home page",
+        "menu",
+        "the menu",
+        "go to menu",
+        "go to the menu",
+        "go back to menu",
+        "go back to the menu",
+        "back to menu",
+        "back to the menu",
+        "go to the main menu",
+        "back to the main menu",
+        "go back to the main menu"
       ],
       "do": {
         "type": "home"
