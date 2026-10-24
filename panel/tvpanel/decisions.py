@@ -11,13 +11,14 @@ from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
                                QFormLayout, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
-                               QPushButton, QScrollArea, QSpinBox, QSplitter, QTableWidget,
+                               QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QSplitter, QTableWidget,
                                QTableWidgetItem, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
-from .common import (AMBER, BLUE, GREEN, GREY, RED, TV_AGENT, WHERE, ApiError, KeyLine, Say, agent_config, agent_stt,
-                     api, card, dim, openrouter_check, systemctl)
+from . import timeline
+from .common import (AMBER, BLUE, GREEN, GREY, RED, TV_AGENT, WHERE, ApiError, KeyLine, Say, agent_activity,
+                     agent_config, agent_stt, api, card, dim, openrouter_check, systemctl)
 from .speech_tab import SpeechToText
 
 # ---------------------------------------------------------------- the diagram
@@ -764,15 +765,23 @@ class Decisions(QWidget):
         self.add_phrase_btn = QPushButton("Add as fixed phrase…")
         self.add_phrase_btn.setToolTip("Make this exact sentence always do a given action")
         self.add_phrase_btn.clicked.connect(self.add_phrase_for_test)
+        self.copy_btn = QPushButton("Copy as JSON")
+        self.copy_btn.setToolTip("The command shown from the history: its record and details, for debugging")
+        self.copy_btn.clicked.connect(self.copy_json)
+        self.copy_btn.setVisible(False)
         trow.addWidget(self.test, 1)
         trow.addWidget(go)
         trow.addWidget(self.add_phrase_btn)
+        trow.addWidget(self.copy_btn)
         dl.addLayout(trow)
         self.explanation = QLabel("")
         self.explanation.setWordWrap(True)
         self.explanation.setTextFormat(Qt.TextFormat.RichText)
-        self.explanation.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.explanation.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse
+                                                 | Qt.TextInteractionFlag.LinksAccessibleByMouse)
+        self.explanation.linkActivated.connect(self.open_link)     # a step's details, the settings at the time
         dl.addWidget(self.explanation)
+        self.recorded: tuple[dict, dict | None] | None = None      # the command shown from the history, its details
         dl.addStretch(1)                           # room to spare goes below, not inside the diagram
         top_scroll = QScrollArea()                 # drag the divider up for the editors: the diagram scrolls
         top_scroll.setWidgetResizable(True)
@@ -1409,6 +1418,8 @@ class Decisions(QWidget):
             self.explanation.setText("")
             return
         self.explanation.setText("…")
+        self.recorded = None
+        self.copy_btn.setVisible(False)
         # A play request's title is found as a start would find it (nothing is played): its steps are drawn too
         self.panel.bg.run(lambda: api("/v1/decide", {"text": text, "title": True}, timeout=30), self.show_decision)
 
@@ -1424,12 +1435,44 @@ class Decisions(QWidget):
         when = time.strftime("%a %H:%M:%S", time.localtime(e["t"]))
         result = (f"→ the TV said “{e.get('say', '')}”" + (f" ({e['ms'] / 1000:.1f} s)" if e.get("ms") else "")
                   + ("" if e.get("ok") is not False else f" <span style='color:{AMBER}'>(it didn't work)</span>"))
+        details = agent_activity.details(e)
+        self.recorded = (e, details)
+        self.copy_btn.setVisible(True)
         self.show_decision({"trace": e["trace"], "action": e.get("action") or {"type": e.get("type", "none")},
                             "via": e.get("via"), "rule": e.get("rule"), "describe": e.get("say", "")}, None,
                            header=f"<span style='color:gray'>What happened {when} (recorded; agent "
-                                  f"{e.get('agent', '?')})</span>", footer=result)
+                                  f"{e.get('agent', '?')})</span>", footer=result,
+                           extra=timeline.timeline(e, details is not None))
 
-    def show_decision(self, res, err, header: str = "", footer: str = ""):
+    def open_link(self, href: str):
+        """A step's details (what's in the command's own file), or the settings it ran with: as JSON in a window."""
+        if not self.recorded:
+            return
+        e, details = self.recorded
+        kind, _, key = href.partition(":")
+        if kind == "detail":
+            what, title = (details or {}).get(key), key
+        elif kind == "settings":
+            what, title = e.get("settings"), "Settings at the time"
+        else:
+            return
+        box = QDialog(self)
+        box.setWindowTitle(title)
+        box.resize(900, 640)
+        lay = QVBoxLayout(box)
+        text = QPlainTextEdit()
+        text.setReadOnly(True)
+        text.setFont(QFont("monospace"))
+        text.setPlainText(what if isinstance(what, str) else json.dumps(what, ensure_ascii=False, indent=1))
+        lay.addWidget(text)
+        box.show()
+
+    def copy_json(self):
+        if self.recorded:
+            QApplication.clipboard().setText(timeline.as_json(*self.recorded))
+            self.panel.say("Copied the record and its details as JSON", 4000)
+
+    def show_decision(self, res, err, header: str = "", footer: str = "", extra: str = ""):
         if err:
             why = str(err) if isinstance(err, ApiError) else "The voice agent isn’t running."
             self.explanation.setText(f"<span style='color:{RED}'>{why}</span>")
@@ -1561,6 +1604,8 @@ class Decisions(QWidget):
         lines += more
         if footer:
             lines.append(footer)
+        if extra:                                  # a recorded command's whole trace (timeline.py)
+            lines.append(extra)
         self.diagram.show_trace(path, walked, states, hit, notes, after, bool(d1_picked))
         self.explanation.setText("<br>".join(lines))
         rule = res.get("rule")

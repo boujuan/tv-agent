@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from rapidfuzz import fuzz
 
 from . import actions as A
+from . import tracing
 from .languages import matches, name as language_name
 from .tv import media, tvplayer
 
@@ -40,6 +41,10 @@ VERDICT_WAIT = 25.0         # the episode check of a file not checked before (~1
 NEAR_MS = 10_000            # a jump is where it was asked to go when the position is this close
 KODI_SETTLES = 1.5          # Kodi jumps to where you stopped by itself right after it starts
 STOPS = "“cancel” or Back stops it"
+# How each kind of step after the play is checked (the trace says it)
+PROOF = {"jump": "the position, within 10 s of the time", "find_scene": "the position, at the line found",
+         "skip": "the skip set for when it comes", "tracks": "the track playing is in that language",
+         "volume": "the TV's level", "pause": "the player paused"}
 SCENE_SHOWN = 2.5           # the line a scene was found by stays on the TV this long before the jump
 SCENE_BEFORE = 3            # the jump lands this many seconds before that line
 
@@ -165,9 +170,14 @@ async def run(agent, a: A.Sequence, heard: str = ""):
     details: dict = {"chain": r.labels}
     try:
         await agent.notify(f"{plan(a)} · {STOPS}")
-        return await _steps(agent, r, details, heard)
+        tracing.step("chain", "plan", label="Plan shown", method=tracing.method("local", "chain.py"),
+                     plan=plan(a), steps=len(a.steps))
+        ok, say, details = await _steps(agent, r, details, heard)
+        tracing.step("chain", "end", label="Chain", verdict="done" if ok else "stopped", why=None if ok else say)
+        return ok, say, details
     except Stopped as e:
         log.info("chain stopped at step %d: %s", r.at, e)
+        tracing.step("chain", "end", label="Chain", verdict="stopped", why=str(e), at_step=r.at)
         if r.playing is None:
             await abandon_start(agent)
         return False, f"Stopped: {e} · not done: {r.left()}", details
@@ -201,6 +211,9 @@ async def _steps(agent, r: Run, details: dict, heard: str):
         PLAN.set("")
         REST.set(())
     details.update({k: v for k, v in (out.details or {}).items() if k not in details})
+    tracing.step("chain", "step 1", label=f"Step 1: {r.labels[0]}", ms=tracing.since(t0),
+                 method=tracing.method("local", "playing: something new, the episode asked for, the picture moving"),
+                 verdict="proven" if out.ok and not why else "failed", why=None if out.ok and not why else (why or out.say))
     if not out.ok:
         return False, f"Step 1 ({r.labels[0]}): {out.say} · not done: {', '.join(r.labels[1:])}", details
     if why:
@@ -210,6 +223,7 @@ async def _steps(agent, r: Run, details: dict, heard: str):
     for n, step in enumerate(rest, 2):
         r.at = n
         kind, later = _limit(step), ", ".join(r.labels[n:]) or "nothing"
+        t_step = time.perf_counter()
         try:
             if why := await _still(agent, r):
                 return False, f"Step {n} ({r.labels[n - 1]}): {why} · not done: {r.left()}", details
@@ -227,6 +241,9 @@ async def _steps(agent, r: Run, details: dict, heard: str):
         except Exception as e:
             log.exception("chain step %d", n)
             return False, f"Step {n} ({r.labels[n - 1]}): it failed ({type(e).__name__}) · not done: {later}", details
+        tracing.step("chain", f"step {n}", label=f"Step {n}: {r.labels[n - 1]}", ms=tracing.since(t_step),
+                     method=tracing.method("local", PROOF.get(kind, "done")), limit_s=WAIT[kind],
+                     verdict="failed" if why else "proven", why=why or None)
         if why:
             return False, f"Step {n} ({r.labels[n - 1]}): {why} · not done: {later}", details
         said.append(done)

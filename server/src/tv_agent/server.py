@@ -39,6 +39,7 @@ import logging
 import os
 import platform
 import re
+import subprocess
 import time
 from pathlib import Path
 
@@ -55,6 +56,7 @@ from . import chain
 from . import clients as clients_mod
 from . import install
 from . import remote
+from . import tracing
 from . import updates as updates_mod
 from . import kodi_versions
 from .agent import Agent
@@ -203,6 +205,10 @@ class Service:
         self.kodi_versions = kodi_versions.KodiVersions(self)
         self._running: asyncio.Task | None = None
         self._rules_mtime = self._mtime()
+        self._settings: tuple[float, dict] | None = None    # settings() kept a minute
+        self._kodi_version: str | None = None
+        self._settings: tuple[float, dict] | None = None    # settings() kept a minute
+        self._kodi_version: str | None = None
 
     # ---- rules, live ----
 
@@ -226,6 +232,8 @@ class Service:
             self.agent.llm.rules = rules
         self.agent.rules_error = error
         self._rules_mtime = self._mtime()
+        self._settings: tuple[float, dict] | None = None    # settings() kept a minute
+        self._kodi_version: str | None = None
         log.info("rules: %s (%s)", rules.source, ", ".join(f"{v} {k}" for k, v in rules.counts.items()))
 
     def maybe_reload(self):
@@ -253,25 +261,77 @@ class Service:
             raise HTTPException(401)
 
     def record(self, source: str, heard: str, d: Decision, ok, say: str, ms, extra: dict | None = None):
-        if self.cfg.log_transcripts:
-            try:
-                activity.append(activity.entry(source, heard, d, ok, say, ms, extra))
-            except OSError as e:
-                log.warning("activity log: %s", e)
+        """The command into the history: the decision's steps, then the whole trace of what it did (tracing.py:
+        speech to text, model calls, the title, episode and scene searches, the start…), the settings it ran with,
+        and what's too big for a line (plots, subtitle passages, prompts and answers) in its own file beside it."""
+        if not self.cfg.log_transcripts:
+            return
+        extra = dict(extra or {})
+        steps, big = d.run.close() if isinstance(d.run, tracing.Trace) else ([], {})
+        extra["trace"] = [*(d.trace or []), *stt_steps(heard, extra), *steps] or None
+        extra["settings"] = self.settings()
+        t = round(time.time(), 3)
+        try:
+            if big:
+                extra["details"] = activity.save_details(t, big)
+            activity.append({"t": t, **activity.entry(source, heard, d, ok, say, ms, extra)})
+        except OSError as e:
+            log.warning("activity log: %s", e)
 
     async def execute(self, d: Decision, heard: str, source: str, extra: dict | None = None):
-        t = time.perf_counter()
-        out = await self.agent.execute(d.action, heard)
-        if d.note:                                       # what of the sentence wasn't done (a chain refused)
-            out.say = f"{out.say} · {d.note}"
-        ms = (time.perf_counter() - t) * 1000
+        if not isinstance(d.run, tracing.Trace):
+            d.run = tracing.Trace()
+        token = tracing.TRACE.set(d.run)
+        try:
+            t = time.perf_counter()
+            out = await self.agent.execute(d.action, heard)
+            if d.note:                                   # what of the sentence wasn't done (a chain refused)
+                out.say = f"{out.say} · {d.note}"
+            ms = (time.perf_counter() - t) * 1000
+            tracing.step("done", "outcome", label="Outcome", ms=ms, verdict="done" if out.ok else "failed",
+                         say=out.say)
+        finally:
+            tracing.TRACE.reset(token)
         self.agent.state.timings.add(f"execute:{d.action.type}", ms)
         log.info("%s -> %s (%.0f ms)", d.action.type, out.say, ms)
         details = dict(out.details or {})
-        if steps := details.pop("trace", None):          # what the action did, after the decision's own steps
-            details["trace"] = list(d.trace or []) + steps
+        details.pop("trace", None)
         self.record(source, heard, d, out.ok, out.say, ms, {**(extra or {}), **details})
         return out
+
+    def settings(self) -> dict:
+        """What the agent was set to when a command ran, for its record: the versions of each part and the settings
+        that change what it does. Never a secret. Kept a minute."""
+        if self._settings and time.monotonic() - self._settings[0] < 60:
+            return self._settings[1]
+        c, up = self.cfg, self.updates
+        if c.player == "kodi":
+            asyncio.create_task(self._read_kodi_version())
+        snap = {
+            "versions": {k: v for k, v in {
+                "agent": __version__, "commit": commit(), "tv_app": up.versions.get("tv"),
+                "player": self.agent.tvplayer.app or up.versions.get("tvplayer"),
+                "phones": sorted({x.app_version for x in self.clients.devices if x.app_version}) or None,
+                "kodi": self._kodi_version}.items() if v},
+            "player": c.player,
+            "speech": {"where": c.stt_where, "model": c.stt_model, "hosted_model": c.stt_hosted_model,
+                       "language": self.stt_language() or None, "vocabulary": len(self.stt_vocabulary())},
+            "deciding": {"steps": list(c.decide_steps), "off": list(c.decide_off), "llm": c.llm_model,
+                         "llm_reasoning": c.llm_reasoning, "llm_private": c.llm_private, "d1_where": c.d1_where,
+                         "d1_hosted": c.hosted_d1_model, "rules": self.agent.rules.source,
+                         "taught": sum(1 for _, (_, why) in self.agent.rules.phrases.items() if why == "learned")},
+            "languages": {"audio": c.audio_language, "subtitles": c.subtitles,
+                          "subtitle_languages": list(c.subtitle_languages), "native": c.native_language},
+            "playback": {"check_episodes": c.check_episodes, "binge": c.binge, "auto_skip": c.auto_skip,
+                         "max_height": c.max_height, "max_mbps": c.max_mbps, "probe_streams": c.probe_streams}}
+        self._settings = (time.monotonic(), snap)
+        return snap
+
+    async def _read_kodi_version(self):
+        try:
+            self._kodi_version = (await asyncio.to_thread(kodi_versions.installed, self.agent.adb)).get("version")
+        except Exception as e:
+            log.info("Kodi's version: %s", type(e).__name__)
 
     async def run(self, d: Decision, heard: str, source: str, extra: dict | None = None):
         """Execute in the background so the pill can close; the result arrives on the TV as a toast."""
@@ -293,10 +353,19 @@ class Service:
         self._running = asyncio.create_task(self.run(d, heard, source, extra))
 
     async def decide(self, text: str) -> Decision:
+        """The decision, with the command's trace begun (its model calls; execute() goes on with it)."""
         self.maybe_reload()
-        t = time.perf_counter()
-        d = await self.router.decide(text)
-        d.ms = (time.perf_counter() - t) * 1000
+        trace = tracing.Trace()
+        token = tracing.TRACE.set(trace)
+        try:
+            t = time.perf_counter()
+            d = await self.router.decide(text)
+            d.ms = (time.perf_counter() - t) * 1000
+            tracing.step("decide", "decided", label="Decided", ms=d.ms, method=decided_by(d, self.cfg),
+                         confidence=round(d.confidence, 3), verdict=d.action.type, why=d.note or None)
+        finally:
+            tracing.TRACE.reset(token)
+        d.run = trace
         self.agent.state.timings.add(f"decide:{d.via}", d.ms)
         if self.cfg.log_transcripts:
             log.info("heard %r -> %s via %s (%.2f)", text, d.action.type, d.via, d.confidence)
@@ -602,6 +671,48 @@ def vocabulary_list(words, name: str) -> list[str]:
         if w and w.lower() not in {x.lower() for x in clean}:
             clean.append(w)
     return clean
+
+
+_commit: list[str | None] = []
+
+
+def commit() -> str | None:
+    """The agent's git commit (with "-dirty" for changes not committed), read once: it's what this process runs."""
+    if not _commit:
+        try:
+            out = subprocess.run(["git", "describe", "--always", "--dirty", "--exclude", "*"],
+                                 cwd=Path(__file__).resolve().parent, capture_output=True, text=True, timeout=5)
+            _commit.append(out.stdout.strip() or None)
+        except (OSError, subprocess.SubprocessError):
+            _commit.append(None)
+    return _commit[0]
+
+
+def decided_by(d: Decision, cfg) -> dict:
+    """How a decision was made, as the trace's method: the rule, the LLM or d1 that answered."""
+    if d.via in ("phrase", "pattern"):
+        return tracing.method("rule", d.rule)
+    if d.via == "llm":
+        return tracing.method("llm", cfg.llm_model)
+    if d.via == "d1":
+        return tracing.method("d1", cfg.hosted_d1_model if "hosted" in str(cfg.d1_where) else "local d1")
+    if d.via == "chain":
+        return tracing.method("rule" if d.rule != "llm" else "llm", d.rule if d.rule != "llm" else cfg.llm_model)
+    return tracing.method(d.via or "none")
+
+
+def stt_steps(heard: str, extra: dict) -> list[dict]:
+    """The speech to text, as the trace's first step (before the decision: a negative time)."""
+    model = extra.get("stt_model") or extra.get("stt")
+    if not model and extra.get("stt_ms") is None:
+        return []
+    ms = extra.get("stt_ms")
+    step = {"stage": "stt", "step": "speech to text", "label": "Speech to text", "at": -round(ms or 0), "ms": ms,
+            "method": tracing.method("stt", model), "where": extra.get("stt_where"),
+            "language": extra.get("stt_language"), "vocabulary": extra.get("stt_vocabulary"),
+            "cost": extra.get("stt_cost"), "audio_s": extra.get("audio_s"),
+            "after_speech_ms": extra.get("after_speech_ms"), "heard": heard, "error": extra.get("stt_error")}
+    return [{k: v for k, v in step.items() if v is not None}]
 
 
 def unclear_say(text: str) -> str:

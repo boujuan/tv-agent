@@ -15,12 +15,14 @@ the title search before it lists it.
 """
 import json
 import logging
+import time
 
 import httpx
 from pydantic import ValidationError
 from rapidfuzz import fuzz
 
 from .. import actions as A
+from .. import tracing
 from .rules import LANGUAGE_NAMES, Rules
 
 log = logging.getLogger(__name__)
@@ -104,6 +106,12 @@ Examples:
 "what was the weather like yesterday" -> {"action":"none"}"""
 
 
+# What each call is for (by its answer's schema name), as the trace labels it
+PURPOSE = {"tv_action": "Decide the command", "tv_steps": "Read a chain", "title": "Sound-alike titles",
+           "suggestions": "Suggestions", "look_for": "Words to look for", "episodes": "Which episode fits",
+           "moment": "Where the moment is"}
+
+
 TITLE_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["titles"],
                 "properties": {"titles": {"type": "array", "items": {"type": "string"}, "maxItems": 3}}}
 TITLE_SYSTEM = """Someone asked their TV for a film or series by voice. Speech-to-text wrote its name down wrong, as
@@ -146,6 +154,7 @@ class Llm:
         provider for a parameter a model doesn't take (404), so it's asked again without the temperature, then
         without the reasoning setting, then without both; a model that can't turn reasoning off is asked at its
         lowest. What worked is remembered."""
+        t0 = time.perf_counter()
         body = {"model": self.model, "max_tokens": 400, "provider": PRIVATE if self.private else FAST, **body}
         effort = self._floor.get(self.model, self.reasoning) if self.reasoning == "none" else self.reasoning
         tries = self._params.get(self.model) or [(True, True), (False, True), (True, False), (False, False)]
@@ -167,8 +176,24 @@ class Llm:
                 continue
             r.raise_for_status()
             self._params[self.model] = [(temperature, reasoning)]
-            return r.json()
+            data = r.json()
+            self._traced(body, data, t0, reasoning and effort)
+            return data
         raise httpx.HTTPError("no provider takes this model's parameters")
+
+    def _traced(self, body: dict, data: dict, t0: float, effort):
+        """The call into the command's trace: what it was for, the model, time, tokens and cost; its prompt and
+        answer in the record's details."""
+        name = ((body.get("response_format") or {}).get("json_schema") or {}).get("name", "")
+        usage = data.get("usage") or {}
+        try:
+            answer = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            answer = None
+        tracing.step("llm", name or "call", label=PURPOSE.get(name, name or "LLM call"), ms=tracing.since(t0),
+                     method=tracing.method("llm", self.model), tokens_in=usage.get("prompt_tokens"),
+                     tokens_out=usage.get("completion_tokens"), cost=usage.get("cost"), reasoning=effort or None,
+                     detail={"messages": body.get("messages"), "answer": answer})
 
     async def ask(self, said: str, context: dict, timeout: float = 3.0) -> dict | None:
         data = await self._post({

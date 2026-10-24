@@ -7,6 +7,7 @@ import types
 import httpx
 
 from tv_agent import agent as agent_mod
+from tv_agent import tracing
 from tv_agent.actions import PlayTitle
 from tv_agent.agent import Agent
 from tv_agent.decide.d1 import Choice
@@ -242,8 +243,13 @@ def test_a_starts_trace_says_how_its_title_was_found(monkeypatch):
         agent_mod._step("start", "streams", 2100, kept=11)
         return agent_mod.Outcome(True, f"Playing {name}", {"stages": {"streams_ms": 2100}})
     a._play_found = play_found
-    out = asyncio.run(a.execute(PlayTitle(title="rebel mung"), "Pon Rebel Mung"))
-    trace = out.details["trace"]
+
+    async def go():
+        run = tracing.Trace()
+        tracing.TRACE.set(run)
+        out = await a.execute(PlayTitle(title="rebel mung"), "Pon Rebel Mung")
+        return out, [t for t in run.close()[0] if t["stage"] in ("title", "start")]
+    out, trace = asyncio.run(go())
     steps = [(t["stage"], t["step"], t.get("query")) for t in trace]
     assert steps[0] == ("title", "library", "rebel mung") and trace[0]["matched"] is False
     assert ("title", "search", "rebel mung") in steps and ("title", "sound-alikes", "rebel mung") in steps
@@ -270,10 +276,13 @@ def test_the_activity_entry_has_the_whole_trace_and_explain_finds_the_title(monk
     svc.token, svc.cfg = "agent-token", types.SimpleNamespace(tv_hosts=[], log_transcripts=True)
     svc.clients = None                   # only read by the phone routes, which this test doesn't call
     recorded = []
-    svc.record = lambda *args: recorded.append(args)
+    svc.settings = lambda: {"player": "tvplayer"}
+    monkeypatch.setattr(server.activity, "append", recorded.append)
+    monkeypatch.setattr(server.activity, "save_details", lambda t, data: f"{t:.3f}.json.gz")
 
     async def execute(action, heard=""):
-        return agent_mod.Outcome(True, "Playing Rebel Moon", {"trace": list(after), "stages": {"streams_ms": 2}})
+        agent_mod._step("title", "picked", title="Rebel Moon")
+        return agent_mod.Outcome(True, "Playing Rebel Moon", {"stages": {"streams_ms": 2}})
 
     async def trace_title(a, heard):
         return ("tt14998742", "movie", "Rebel Moon - Part One"), list(after)
@@ -286,8 +295,10 @@ def test_the_activity_entry_has_the_whole_trace_and_explain_finds_the_title(monk
     svc.maybe_reload = lambda: None
     d = asyncio.run(decide("pon rebel mung"))
     asyncio.run(svc.execute(d, "Pon Rebel Mung", "tv"))
-    extra = recorded[0][-1]
-    assert extra["trace"] == decided + after and extra["stages"] == {"streams_ms": 2}
+    entry = recorded[0]
+    assert entry["trace"][:2] == decided and entry["stages"] == {"streams_ms": 2}
+    assert [(t["stage"], t["step"]) for t in entry["trace"][2:]] == [("title", "picked"), ("done", "outcome")]
+    assert entry["settings"] == {"player": "tvplayer"}
     assert d.trace == decided                           # the decision itself is left as it was
 
     async def explain(title: bool):
@@ -311,8 +322,9 @@ def test_a_sound_alike_request_not_waited_for_is_in_the_trace(monkeypatch):
 
     async def run():
         agent_mod.START.set({"_t0": time.perf_counter()})
+        tracing.TRACE.set(trace := tracing.Trace())
         found = await a.resolve("rebel music", None, None)
-        return found, agent_mod.START.get()["trace"]
+        return found, trace.close()[0]
     found, trace = asyncio.run(run())
     asked = next(t for t in trace if t["step"] == "sound-alikes")
     assert found[2] == "Rebel Music" and asked["answered"] is False and asked["model"].startswith("deepseek")

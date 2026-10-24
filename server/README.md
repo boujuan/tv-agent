@@ -459,6 +459,28 @@ Tailscale address), for the [TV Agent phone app](https://github.com/boujuan/tv-a
 | the endpoints above, with that token (port 8768, HTTPS) | all but the stream link, the rules editor (`POST /v1/rules`, reset, reload, eval) and the client list; `GET /v1/clients/me` and `POST /v1/clients/me/forget` instead, and `GET /v1/updates` but not `POST /v1/updates/tv`. A phone's `X-App-Version` header (or `app_version` in its stream's first line) is kept as its app version for the panel |
 | port 8769, TLS | the TV app's audio stream protocol (`server.py`), with the phone's token in the first line |
 
+## The history and its traces
+
+`~/.local/share/tv-agent/activity.jsonl` (mode 600), one line per command when `log_transcripts` is on; the panel's
+Activity tab shows, exports, imports and erases it, and a double-click opens a command in Decisions as it happened.
+Each line has the whole trace (`tracing.py`): the speech to text (a negative time: before the command), the decision's
+steps, then every step after it, each with
+
+| Field | |
+|---|---|
+| `label`, `stage`, `step` | what it was ("Which episode fits", "Passages sent", "Title chosen") |
+| `at`, `ms` | when it ended, in ms from when the command began, and how long it took |
+| `method` | how: `rule` (its id), `llm` / `d1` / `stt` (the model), `local` (the algorithm), `addon`, `web`, `cache` |
+| `confidence`, `threshold` | how sure, against the bar it had to pass (d1's 0.40 for a title, a name match's 90) |
+| `verdict`, `why` | what came of it (played, listed, refused, agreed…) and why |
+| `detail` | the key of its big part in the command's own file |
+
+and `settings`: the versions of the agent (and its commit), TV app, player, phones and Kodi, and the settings that
+change the result (speech to text, decision steps and models, languages, playback). Never a secret, a key or a
+debrid link. The big parts (the plots it read, subtitle passages, each model's prompt and answer, the streams
+offered) are in `~/.local/share/tv-agent/traces/<t>.json.gz` (mode 600), named by the line's `details`; the newest
+500 are kept, Erase removes them, an exported history carries them (`details_data`) and an import puts them back.
+
 ## Security
 
 - **LAN listener** on one address only (`lan_host`, or the one the route to the TV uses, followed while the
@@ -519,6 +541,7 @@ rm -rf ~/.config/tv-agent ~/.local/share/tv-agent ~/.local/opt/llama.cpp ~/.loca
 | `src/tv_agent/decide/` | `router.py` (the decision path), `rules.py` + `default_rules.json` (the rules engine and defaults), `text.py`, `numbers.py`, `d1.py`, `evaluate.py` |
 | `src/tv_agent/actions.py`, `agent.py` | The closed action set and what each one does on the TV |
 | `src/tv_agent/decide/chain.py`, `chain.py` | Chains: reading one (rules, the LLM's checked proposal), running one (plan, proof of each step, stop, cancel) |
+| `src/tv_agent/tracing.py` | Each command's whole trace: its steps, timed and labelled, and its big parts |
 | `src/tv_agent/finding.py` | Finding an episode or a scene from a description: plots (TVmaze, Wikipedia), subtitles kept, ranking, the LLM's answers compared |
 | `src/tv_agent/tv/` | `adb.py` (the only shell path), `apps.py`, `media.py`, `kodi.py`, `justplayer.py` |
 | `src/tv_agent/stremio/` | `account.py` (API, link login), `cinemeta.py`, `streams.py`, `subtitles.py`, `library.py`, `progress.py` |

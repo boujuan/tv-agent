@@ -39,6 +39,7 @@ class Decision:
     ms: float = 0.0                   # how long deciding took (set by the server)
     cost: float = 0.0                 # what the model calls cost ($), from the trace
     note: str = ""                    # said after the outcome: what of the sentence wasn't done (a chain refused)
+    run: object = field(default=None, repr=False)   # the command's whole trace (tracing.Trace), from the server
 
 
 log = logging.getLogger(__name__)

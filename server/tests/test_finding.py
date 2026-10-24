@@ -155,7 +155,7 @@ def finder(monkeypatch, pick, lines=None, look=LOOK):
     async def plots(http, imdb, name, eps, wait_s=0):
         return {v["id"]: f"{v['name']} {v['overview']}" for v in eps}
     monkeypatch.setattr(finding, "plots", plots)
-    monkeypatch.setattr(finding, "track", track)
+    monkeypatch.setattr(finding, "track_", track)
     return me, llm
 
 
@@ -209,7 +209,7 @@ def place(line, at, how="words", shown=None):
 def scener(monkeypatch, answers, lines=None, look=SCENE_LOOK):
     llm = Llm(look_for=look, moment=answers)
     me, track = agent_with(llm, lines or {"tt2": CUES})
-    monkeypatch.setattr(finding, "track", track)
+    monkeypatch.setattr(finding, "track_", track)
     return me, llm
 
 

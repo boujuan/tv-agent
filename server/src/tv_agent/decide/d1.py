@@ -11,9 +11,12 @@ doesn't answer (stopped, crashed, busy, offline). The hosted one (`hosted_model`
 what it's sent for training: what you said, and the options.
 """
 import logging
+import time
 from dataclasses import dataclass
 
 import httpx
+
+from .. import tracing
 
 log = logging.getLogger(__name__)
 HOSTED = "https://api.liquid.ai/decisions/v1/systemone"
@@ -79,8 +82,15 @@ class D1:
         raise AssertionError("unreachable")
 
     async def choice(self, state, instructions: str, options: dict[str, str | None]) -> Choice:
+        t0 = time.perf_counter()
         a = (await self.ask(state, {"q": {"type": "choice", "instructions": instructions, "criteria": options}}))["q"]
-        return Choice(a["choice"], a.get("confidence", 0.0), a.get("probabilities", {}))
+        got = Choice(a["choice"], a.get("confidence", 0.0), a.get("probabilities", {}))
+        tracing.step("d1", "choice", label="d1's choice", ms=tracing.since(t0),
+                     method=tracing.method("d1", self.hosted_model if self.last_source == "hosted" else "local d1"),
+                     picked=got.key, confidence=round(got.confidence, 3), cost=self.last_usage.get("cost"),
+                     detail={"asked": state, "instructions": instructions, "options": options,
+                             "probabilities": got.probabilities})
+        return got
 
     async def yes(self, state, instructions: str) -> float:
         return (await self.ask(state, {"q": {"type": "noul", "instructions": instructions}}))["q"]["noul"]

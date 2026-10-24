@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from . import chain
+from . import chain, tracing
 from .config import DATA_DIR
 from .decide import text as T
 from .languages import matches
@@ -174,14 +174,20 @@ def _looking(llm, title: str, wanted: str, episode: bool) -> asyncio.Task | None
     return asyncio.create_task(run())
 
 
-async def _terms(task: asyncio.Task | None, wanted: str, wait_s: float) -> tuple[list[str], Look | None]:
+async def _terms(task: asyncio.Task | None, wanted: str, wait_s: float,
+                 stage: str = "episode") -> tuple[list[str], Look | None]:
     """The words to look for: the request's own, and the LLM's when it has answered (within wait_s)."""
-    got = None
+    got, t = None, time.perf_counter()
     if task is not None:
         try:
             got = await asyncio.wait_for(asyncio.shield(task), wait_s)
         except asyncio.TimeoutError:
             log.info("words to look for: not in %.1f s, the request's own", wait_s)
+    tracing.step(stage, "words", label="Words to look for", ms=tracing.since(t), method=tracing.method(
+        "llm" if got else "local", "the LLM's (look_for)" if got else "the request's own"), own=keys(wanted),
+        english=got.en if got else None, spanish=got.es if got else None,
+        remembered=[f"S{a}E{b}" for a, b in got.episodes] if got and got.episodes else None,
+        verdict="in time" if got else "not in time" if task is not None else "no LLM", waited_up_to_s=wait_s)
     return [wanted, *(got.terms if got else [])], got
 
 
@@ -338,13 +344,32 @@ async def plots(http: httpx.AsyncClient, imdb: str, name: str, eps: list[dict], 
         except Exception as e:
             log.info("plots of %s: %s", name, type(e).__name__)
     extra = (have[1].get("plots") or {}) if have else {}
+    tracing.step("episode", "plots", label="Episode plots", method=tracing.method(
+        "cache" if have and not job_started(imdb) else "web", "Cinemeta + TVmaze + Wikipedia"), episodes=len(eps),
+        with_summaries=len(extra), partial=bool(have and have[1].get("partial")) or None,
+        age_h=round((time.time() - have[0]) / 3600, 1) if have else None,
+        verdict="kept" if have else "not in time: Cinemeta's lines only")
     return {v["id"]: " ".join(x for x in (v.get("name") or "", v.get("overview") or v.get("description") or "",
                                           extra.get(f"{v['season']}:{v.get('episode')}", "")) if x)
             for v in eps}
 
 
+def job_started(imdb: str) -> bool:
+    """Whether this command fetched the plots (else they were kept)."""
+    return f"plots {imdb}" in _fetched
+
+
+_fetched: set[str] = set()
+
+
 async def _fetch_plots(http: httpx.AsyncClient, imdb: str, name: str, seasons: list[int]) -> tuple[float, dict]:
+    t = time.perf_counter()
     got = await asyncio.gather(_tvmaze(http, imdb), _wikipedia(http, name, seasons), return_exceptions=True)
+    _fetched.add(f"plots {imdb}")
+    tracing.step("episode", "plot sources", label="Plots fetched", ms=tracing.since(t),
+                 method=tracing.method("web", "TVmaze + English Wikipedia"),
+                 tvmaze=len(got[0]) if isinstance(got[0], dict) else type(got[0]).__name__,
+                 wikipedia=len(got[1]) if isinstance(got[1], dict) else type(got[1]).__name__)
     merged: dict[str, str] = {}
     for part in got:
         if isinstance(part, BaseException):
@@ -411,8 +436,25 @@ async def _listing(http, addons, video: str, wait_s: float, stream=None) -> list
     return _listings.get(video) or list(_partial.get(video, []))
 
 
-async def track(http, addons, video: str, lang: str, wait_s: float = SUBS_S,
-                sdh_wanted: bool = False, stream=None) -> tuple[list[tuple[int, str]], bool]:
+async def track(http, addons, video: str, lang: str, wait_s: float = SUBS_S, sdh_wanted: bool = False, stream=None,
+                label: str = "") -> tuple[list[tuple[int, str]], bool]:
+    """track_() into the trace when `label` says what for."""
+    t = time.perf_counter()
+    lines, sdh = await track_(http, addons, video, lang, wait_s, sdh_wanted, stream)
+    if label:
+        src = _source.get(f"{video}.{lang}.{'sdh' if sdh else 'plain'}", "none came in time")
+        tracing.step("scene", "subtitles", label=label, ms=tracing.since(t),
+                     method=tracing.method("cache" if src.startswith("kept") else "addon", src), video=video,
+                     language=lang, hearing_impaired=sdh, lines=len(lines),
+                     verdict="found" if lines else "none")
+    return lines, sdh
+
+
+_source: dict[str, str] = {}             # where each set of subtitles came from, for the trace
+
+
+async def track_(http, addons, video: str, lang: str, wait_s: float = SUBS_S,
+                 sdh_wanted: bool = False, stream=None) -> tuple[list[tuple[int, str]], bool]:
     """A video's subtitles in a language, as (start ms, words) lines, and whether they're for the hearing-impaired
     (those first: their [sound cues] tell what happens). Kept on disk; [] when none came in time. `sdh_wanted`:
     plain ones kept aren't enough while the addons may offer hearing-impaired ones (fetching ahead)."""
@@ -421,6 +463,7 @@ async def track(http, addons, video: str, lang: str, wait_s: float = SUBS_S,
         key = f"{video}.{lang}.{'sdh' if sdh else 'plain'}"
         if key not in _cues and isinstance(kept := _read(_path("subs", f"{key}.json.gz")), list):
             _cues[key] = [(int(ms), str(w)) for ms, w in kept]
+            _source.setdefault(key, "kept on disk")
         if _cues.get(key):
             if sdh:
                 return _cues[key], True
@@ -445,6 +488,7 @@ async def track(http, addons, video: str, lang: str, wait_s: float = SUBS_S,
             if len(_cues) > 300:
                 _cues.clear()
             _cues[key] = got
+            _source[key] = f"{sub.addon}: {sub.name[:80]}"
             _write(_path("subs", f"{key}.json.gz"), got)
             return got, sub.impaired
     return plain or [], False
@@ -490,11 +534,23 @@ class EpisodeFind:
 
 
 async def episode(agent, imdb: str, name: str, eps: list[dict], wanted: str) -> EpisodeFind:
+    found = await _episode(agent, imdb, name, eps, wanted)
+    tracing.step("episode", "verdict", label="Episode", method=tracing.method("local", "finding.py"),
+                 verdict="play" if found.episode else "list" if found.choices else "none", why=found.why,
+                 episode=found.episode["id"] if found.episode else None,
+                 choices=[v["id"] for v in found.choices] or None)
+    return found
+
+
+async def _episode(agent, imdb: str, name: str, eps: list[dict], wanted: str) -> EpisodeFind:
     t0 = time.perf_counter()
     want = fold(wanted.replace("&", " and "))
     named = sorted(((_ratio(want, fold((v.get("name") or "").replace("&", " and "))), i) for i, v in enumerate(eps)),
                    reverse=True)
     if named and named[0][0] >= 90 and (len(named) == 1 or named[1][0] < named[0][0]):
+        tracing.step("episode", "name", label="Matched by its name", ms=tracing.since(t0),
+                     method=tracing.method("local", "fuzzy name match"), confidence=named[0][0], threshold=90,
+                     episode=eps[named[0][1]]["id"], verdict="accepted")
         return EpisodeFind(eps[named[0][1]], why="its name")
     if agent.llm is None:
         return EpisodeFind(why="finding an episode by what happens in it needs the LLM")
@@ -509,16 +565,27 @@ async def episode(agent, imdb: str, name: str, eps: list[dict], wanted: str) -> 
     order = sorted(range(len(eps)), key=lambda i: -scores[i])
     picked = [eps[i] for i in order[:CANDIDATES]]
     by_number = {(v["season"], v.get("episode")): v for v in eps}
+    guessed = []
     for s, e in (got.episodes if got else []):
         if (v := by_number.get((s, e))) and v not in picked:
             picked.append(v)
+            guessed.append(v["id"])
+    tracing.step("episode", "ranking", label="Plots ranked", ms=tracing.since(t_look),
+                 method=tracing.method("local", "BM25 over the plots"), episodes=len(eps),
+                 top=[{"id": eps[i]["id"], "name": eps[i].get("name"), "score": round(scores[i], 2)}
+                      for i in order[:CANDIDATES]], added_from_memory=guessed or None,
+                 detail={"plots": {v["id"]: texts.get(v["id"], "") for v in picked}})
     addons = await agent.addons()
     ahead = {v["id"]: asyncio.create_task(_lines(agent.http, addons, v["id"], VERIFY_S)) for v in picked[:3]}
     try:
-        fits, sure = await _pick(agent.llm, name, wanted, picked, texts)
+        fits, sure, marks = await _pick(agent.llm, name, wanted, picked, texts)
     except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError) as e:
         log.info("episode choice unavailable (%s)", type(e).__name__)
+        tracing.step("episode", "choice", label="Which fit", verdict="failed", why=type(e).__name__)
         return EpisodeFind(choices=picked[:3], why="couldn't ask which")
+    tracing.step("episode", "choice", label="Which fit", method=tracing.method("llm", agent.llm.model),
+                 fits=marks or None, verdict="one exactly" if sure else "several" if fits else "none",
+                 why=None if sure else "sure only when exactly one fits exactly")
     log.info("episode %r of %s: %s%s (%d candidates; plots %.0f ms, words %.0f ms more, choice %.0f ms more)", wanted,
              name, [v["id"] for v in fits], " sure" if sure else "", len(picked), (t_plots - t0) * 1000,
              (t_look - t_plots) * 1000, (time.perf_counter() - t_look) * 1000)
@@ -526,7 +593,14 @@ async def episode(agent, imdb: str, name: str, eps: list[dict], wanted: str) -> 
         if got is None and looking is not None and looking.done():
             got = looking.result()
         job = ahead.get(fits[0]["id"]) or asyncio.create_task(_lines(agent.http, addons, fits[0]["id"], VERIFY_S))
-        said = await _said_in(job, [wanted, *(got.terms if got else [])], 0.4 if fits[0]["id"] in ahead else VERIFY_S)
+        t = time.perf_counter()
+        words = [wanted, *(got.terms if got else [])]
+        said = await _said_in(job, words, 0.4 if fits[0]["id"] in ahead else VERIFY_S)
+        have = set(keys(" ".join(w for _, w in job.result()))) if job.done() and not job.exception() else set()
+        tracing.step("episode", "subtitle check", label="Checked in its subtitles", ms=tracing.since(t),
+                     method=tracing.method("addon", "its subtitles"), episode=fits[0]["id"],
+                     found=sorted({k for w in words for k in keys(w)} & have) or None,
+                     verdict={True: "said in it", False: "none of the words", None: "no subtitles in time"}[said])
         if said is False:
             return EpisodeFind(choices=fits[:3] or picked[:3], why="its subtitles say nothing of it")
         return EpisodeFind(fits[0], why="its plot" + (" and subtitles" if said else ""))
@@ -557,7 +631,8 @@ async def _pick(llm, series: str, wanted: str, candidates: list[dict], texts: di
     fits = [f for f in got.get("fits") or [] if isinstance(f, dict) and f.get("id") in ids]
     exact = [f for f in fits if f.get("match") == "exactly"]
     # sure: exactly one episode has what was asked (the others only share some of it)
-    return [next(v for v in candidates if v["id"] == f["id"]) for f in fits], len(exact) == 1 and fits[0] in exact
+    return ([next(v for v in candidates if v["id"] == f["id"]) for f in fits], len(exact) == 1 and fits[0] in exact,
+            [{"id": f["id"], "match": f.get("match")} for f in fits])
 
 
 async def _lines(http, addons, video: str, wait_s: float) -> list[tuple[int, str]]:
@@ -600,9 +675,15 @@ async def corpus(agent, eps: list[dict], terms: list[str]) -> list[dict]:
             if lines:
                 found[v["id"]] = len(want & set(keys(" ".join(w for _, w in lines))))
     jobs = [asyncio.create_task(one(v)) for v in eps]
-    await asyncio.wait(jobs, timeout=CORPUS_S)
+    t = time.perf_counter()
+    if jobs:
+        await asyncio.wait(jobs, timeout=CORPUS_S)
     best = sorted((n, i) for i, n in found.items() if n >= 2)[::-1][:3]
     log.info("subtitles of %d of %d episodes searched: %s", len(found), len(eps), best)
+    tracing.step("episode", "subtitle search", label="Searched their subtitles", ms=tracing.since(t),
+                 method=tracing.method("addon", "subtitles of the likeliest episodes"), searched=len(found),
+                 of=len(eps), within_s=CORPUS_S, words=sorted(want), best=[{"id": i, "words": n} for n, i in best]
+                 or None, verdict="found" if best else "none says two of the words")
     return [v for _, i in best for v in eps if v["id"] == i]
 
 
@@ -676,15 +757,18 @@ async def scene(agent, video: str, title: str, wanted: str, heard: str = "", str
     langs = ["spa", "eng"] if spanish else ["eng", "spa"]
     looking = _looking(agent.llm, title, wanted, False)
     addons = await agent.addons()
-    first = asyncio.create_task(track(agent.http, addons, video, langs[0], stream=stream))
-    second = asyncio.create_task(track(agent.http, addons, video, langs[1], stream=stream))
-    terms, got = await _terms(looking, wanted, LOOK_S if spanish else LOOK_EXTRA_S)
+    first = asyncio.create_task(track(agent.http, addons, video, langs[0], stream=stream,
+                                      label=f"{'Spanish' if langs[0] == 'spa' else 'English'} subtitles (asked in it)"))
+    second = asyncio.create_task(track(agent.http, addons, video, langs[1], stream=stream,
+                                       label=f"{'Spanish' if langs[1] == 'spa' else 'English'} subtitles"))
+    terms, got = await _terms(looking, wanted, LOOK_S if spanish else LOOK_EXTRA_S, "scene")
     t_look = time.perf_counter()
     for lang, job in zip(langs, (first, second)):
         cues, sdh = await job
         log.info("scene: %s subtitles of %s in %.0f ms (%d lines)", lang, video, (time.perf_counter() - t0) * 1000,
                  len(cues))
-        hits, keep, _ = windows(cues, terms)
+        hits, keep, best = windows(cues, terms)
+        _passages(lang, sdh, cues, hits, keep, terms, best)
         if hits:
             found = await _place(agent.llm, title, wanted, cues, hits, keep, "Spanish" if spanish else "English")
             found.lang, found.cues = f"{lang}{' (hearing-impaired)' if sdh else ''}", cues
@@ -699,6 +783,25 @@ async def scene(agent, video: str, title: str, wanted: str, heard: str = "", str
         return SceneFind(why="No subtitles to search in this one")
     near = await _neighbours(agent, video, title, wanted, terms, langs, "Spanish" if spanish else "English")
     return near or SceneFind(why="it isn't in the subtitles (a moment without words can't be found this way)")
+
+
+def _passages(lang: str, sdh: bool, cues, hits: list[int], keep: list[int], terms: list[str], best: float):
+    """The passages chosen, into the trace (their lines in the record's details)."""
+    if not cues:
+        return
+    want = {k for t in terms for k in keys(t)}
+    matched = Counter(k for i in hits for k in set(keys(cues[i][1])) & want)
+    lines, last = [], None
+    for i in keep:
+        if last is not None and i != last + 1:
+            lines.append("…")
+        lines.append(f"{clock(cues[i][0])} {cues[i][1]}")
+        last = i
+    tracing.step("scene", "passages", label="Passages sent", method=tracing.method(
+        "local", "passages holding the most rare words"), language=lang, hearing_impaired=sdh, lines=len(cues),
+        sent=len(keep), lines_with_words=len(hits), words=dict(matched.most_common(12)) or None,
+        best_score=round(best, 2), verdict="sent" if hits else "no line has the words",
+        detail={"passages": "\n".join(lines)} if keep else None)
 
 
 async def _place(llm, title: str, wanted: str, cues, hits: list[int], keep: list[int], language: str) -> SceneFind:
@@ -725,6 +828,16 @@ async def _place(llm, title: str, wanted: str, cues, hits: list[int], keep: list
     for task in pending:
         task.cancel()
     got = [t.result() for t in asks if t in done and not t.cancelled() and t.exception() is None]
+    found = await _settle(llm, body, cues, hits, keep, got)
+    tracing.step("scene", "agreement", label="Answers compared", method=tracing.method(
+        "local", f"two at once, a third when they differ (same moment: within {AGREE_MS // 1000} s)"),
+        answers=[clock(f.ms) if f.ms is not None else f.why for f in got], verdict=(
+            "not placed" if found.ms is None else "listed to pick from" if found.others else "agreed"),
+        placed=clock(found.ms) if found.ms is not None else None)
+    return found
+
+
+async def _settle(llm, body: dict, cues, hits: list[int], keep: list[int], got: list[SceneFind]) -> SceneFind:
     placed = [f for f in got if f.ms is not None]
     if not placed:
         return got[0] if got else SceneFind(why="Couldn't search for that moment right now", lines_sent=len(keep))
@@ -745,6 +858,15 @@ async def _place(llm, title: str, wanted: str, cues, hits: list[int], keep: list
 
 
 async def _one_place(llm, body: dict, cues, hits: list[int], keep: list[int]) -> SceneFind:
+    found, got = await _one_place_(llm, body, cues, hits, keep)
+    tracing.step("scene", "answer", label="An answer", method=tracing.method("llm", llm.model),
+                 line=found.line or (got or {}).get("line") or None, listed_at=(got or {}).get("at"),
+                 how=(got or {}).get("how"), placed=clock(found.ms) if found.ms is not None else None,
+                 verdict="placed" if found.ms is not None else "refused", why=found.why or None)
+    return found
+
+
+async def _one_place_(llm, body: dict, cues, hits: list[int], keep: list[int]) -> tuple[SceneFind, dict | None]:
     t = time.perf_counter()
     try:
         data = await llm._post(dict(body), 12.0)
@@ -753,19 +875,20 @@ async def _one_place(llm, body: dict, cues, hits: list[int], keep: list[int]) ->
         got = json.loads(got) if isinstance(got, str) else got
     except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError) as e:
         log.info("scene search unavailable (%s)", type(e).__name__)
-        return SceneFind(why="Couldn't search for that moment right now", lines_sent=len(keep))
+        return SceneFind(why="Couldn't search for that moment right now", lines_sent=len(keep)), None
     line = re.sub(r"^\d+:\d\d(?::\d\d)?\s+", "", str(got.get("line") or ""))[:160]
     if not line and not got.get("at"):
-        return SceneFind(why="not in these lines", lines_sent=len(keep))
+        return SceneFind(why="not in these lines", lines_sent=len(keep)), got
     sent = [cues[i] for i in keep]
     ms, why = chain.place_scene(str(got.get("at") or ""), line, str(got.get("how") or ""), sent)
     if ms is None:
-        return SceneFind(why=why, line=line, lines_sent=len(keep))
+        return SceneFind(why=why, line=line, lines_sent=len(keep)), got
     at = next(i for i in keep if cues[i][0] == ms)
     if not any(abs(at - h) <= WINDOW for h in hits):
-        return SceneFind(why="nothing of what you said is near the line it found", line=line, lines_sent=len(keep))
+        return SceneFind(why="nothing of what you said is near the line it found", line=line,
+                         lines_sent=len(keep)), got
     shown = re.sub(r"^\d+:\d\d(?::\d\d)?\s+", "", str(got.get("shown") or ""))[:160] or line
-    return SceneFind(ms, line, shown, lines_sent=len(keep))
+    return SceneFind(ms, line, shown, lines_sent=len(keep)), got
 
 
 async def _neighbours(agent, video: str, title: str, wanted: str, terms, langs, language: str) -> SceneFind | None:
@@ -790,11 +913,16 @@ async def _neighbours(agent, video: str, title: str, wanted: str, terms, langs, 
             if (cues := (await track(agent.http, addons, v, lang, 2.0))[0]):
                 return cues
         return []
-    best = None
+    best, t = None, time.perf_counter()
+    scores = {}
     for v, cues in zip(near, await asyncio.gather(*(lines_of(v) for v in near))):
         hits, keep, score = windows(cues, terms)
+        scores[v] = round(score, 2) if hits else None
         if hits and (best is None or score > best[0]):
             best = (score, v, cues, hits, keep)
+    tracing.step("scene", "neighbours", label="The episodes before and after", ms=tracing.since(t),
+                 method=tracing.method("local", "the same search in their subtitles"), scores=scores or None,
+                 verdict=f"in {best[1]}" if best else "not there either")
     if best is None:
         return None
     found = await _place(agent.llm, title, wanted, best[2], best[3], best[4], language)

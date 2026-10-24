@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import time
+from collections import Counter
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
@@ -16,7 +17,7 @@ import httpx
 from rapidfuzz import fuzz
 
 from . import __version__, activity, languages, skips, twitch, youtube
-from . import chain, episode_check, finding
+from . import chain, episode_check, finding, tracing
 from .actions import (Action, AutoSkip, Binge, Cancel, ContinueWatching, FindScene, Help, Home, Info, LibraryEdit,
                       NextEpisode, OpenApp,
                       OpenInStremio, Pick, PlayTitle, Recommend, Replay, Sequence, ShowList, Skip, Timer, Tracks,
@@ -103,14 +104,10 @@ def _note_title(**fields):
 
 
 def _step(stage: str, step: str, ms: float | None = None, done: float | None = None, **fields):
-    """One step of the start being made, into its trace (START), as the panel draws it: what ran, what it found, how
-    long it took (`ms`) and when it ended (`at`: ms since the command began; `done` is that moment, if not now).
-    A start made later in the background (the next episode, another copy) runs in the context of the command that
-    made the first one, whose record is finished (no "_t0"): nothing is added to it."""
-    if (record := START.get()) is not None and "_t0" in record:
-        entry = {"stage": stage, "step": step, **({"ms": round(ms)} if ms is not None else {}),
-                 "at": round(((done or time.perf_counter()) - record["_t0"]) * 1000)}
-        record.setdefault("trace", []).append(entry | {k: v for k, v in fields.items() if v is not None})
+    """One step of the command, into its trace (tracing.py), as the panel draws it: what ran, what it found, how long
+    it took (`ms`) and when it ended (`done`, if not now). A start made later in the background (the next episode,
+    another copy) runs in the context of the command before, whose trace is recorded: nothing is added to it."""
+    tracing.step(stage, step, ms=ms, done=done, **fields)
 
 
 def _ms(since: float) -> int:
@@ -210,6 +207,15 @@ def _ago(when: datetime, now: datetime) -> str:
 
 def _episode_label(name: str, v: dict) -> str:
     return f"{name} · S{v['season']}E{v.get('episode', 0)}"
+
+
+def _stream_line(s: streams.Stream) -> dict:
+    """A stream as the trace tells it: what it is and where from, never its link."""
+    line = {"addon": s.addon, "name": " ".join(s.name.split())[:80], "file": s.filename or None,
+            "height": s.height or None, "gb": round(s.size / 1e9, 1) if s.size else None,
+            "release": streams.release(s) or None, "cached": s.cached, "in_library": s.library or None,
+            "score": s.aio_score or None}
+    return {k: v for k, v in line.items() if v is not None}
 
 
 def _title_screen(name: str, meta: dict, video: str) -> dict:
@@ -447,10 +453,14 @@ class Agent:
         """Finding the title of a play request as a start would (nothing is looked up for streams, nothing reaches
         the TV), with its trace: for the panel's Explain."""
         HEARD.set(heard)
-        record = {"_t0": time.perf_counter()}
-        START.set(record)
-        found = await self.resolve(a.title, a.kind, a.season, exact=a.guess) if a.title else None
-        return found, record.get("trace", [])
+        START.set({"_t0": time.perf_counter()})
+        trace = tracing.Trace()
+        token = tracing.TRACE.set(trace)
+        try:
+            found = await self.resolve(a.title, a.kind, a.season, exact=a.guess) if a.title else None
+        finally:
+            tracing.TRACE.reset(token)
+        return found, trace.close()[0]
 
     # ---- Stremio: addons, titles, streams ----
 
@@ -712,7 +722,10 @@ class Agent:
             """The pick, into the start's trace with the candidates it was made from (scores after popularity).
             `unsure`: the candidates to list instead, if this ends up being what plays (UNSURE)."""
             _step("title", "choice", _ms(t), query=title, picked=m.label, by=by, **more,
-                  candidates=[f"{c.label} {score:.0f}" for score, c in hits[:4]], sure=False if unsure else None)
+                  candidates=[f"{c.label} {score:.0f}" for score, c in hits[:4]], sure=False if unsure else None,
+                  label="Title chosen", method=tracing.method("d1", more.get("model")) if by == "d1" else
+                  tracing.method("local", by), threshold=TITLE_SURE if by == "d1" else None,
+                  verdict="listed (not sure)" if unsure else "accepted")
             if unsure and (asked := UNSURE.get()) is not None:
                 asked[m.id] = unsure
             return m
@@ -940,7 +953,13 @@ class Agent:
         if prepared is not None:            # found and checked while the previous episode played
             found = [prepared]
         else:
-            found = [s for s in await self.streams_for(kind, video, meta) if not s.why_dropped]
+            offered = await self.streams_for(kind, video, meta)
+            found = [s for s in offered if not s.why_dropped]
+            _step("start", "candidates", label="Streams ranked", method=tracing.method("local", "stream rules"),
+                  offered=len(offered), kept=len(found),
+                  dropped=dict(Counter(s.why_dropped for s in offered if s.why_dropped)) or None,
+                  best=[_stream_line(s) for s in found[:5]] or None,
+                  detail={"streams": [_stream_line(s) | {"dropped": s.why_dropped or None} for s in offered[:60]]})
         if self.cfg.player == "just":
             found = [s for s in found if not s.headers]     # Just Player can't send an addon's extra headers
         _step("start", "streams", _ms(t0), video=video, how=how, kept=len(found),
@@ -2359,11 +2378,17 @@ class Agent:
             return await self._offer_scene(np, found)
         if found.others:                                     # two answers, two places: which?
             return await self._which_moment(np, found)
-        secs = max(0, round((found.ms + self._subtitle_shift(np, found.cues)) / 1000))
+        shift = self._subtitle_shift(np, found.cues)
+        secs = max(0, round((found.ms + shift) / 1000))
+        _step("scene", "time shift", label="Matched to the file", method=tracing.method("local", "lines in common"),
+              shift_ms=shift, why=None if shift else "no measure of the file's subtitles, or too few lines in common")
         await self.notify(f"{_clock(secs * 1000)}: “{found.shown}”")   # the line it's placed by, shown before the jump
         await asyncio.sleep(chain.SCENE_SHOWN)
         target = max(0, secs - chain.SCENE_BEFORE)
+        t = time.perf_counter()
         out = await self._transport(Transport(op="seek_to", seconds=target))
+        _step("scene", "jump", _ms(t), label="Jump", method=tracing.method("player", self.cfg.player),
+              to=_clock(target * 1000), verdict="done" if out.ok else "failed", why=None if out.ok else out.say)
         if not out.ok:
             return out
         return Outcome(True, f"To {_clock(secs * 1000)}: “{found.shown}”", {"scene_ms": target * 1000})

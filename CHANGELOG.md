@@ -4,6 +4,34 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
+## server — unreleased
+
+### Added
+- Every command's whole trace in the history: after the speech to text and the decision, each step it took
+  (finding the title, the episode and the scene, the streams, the start, a chain's steps), timed (when it ended from
+  when the command began, how long), labelled, with how it was done (the rule, the LLM or d1 model, the speech model,
+  a local algorithm, an add-on, the web, what was kept), how sure against its bar, and what came of it and why. Each
+  LLM and d1 call with its model, time, tokens and cost. The episode search: the plots it read and where from, the
+  LLM's words in English and Spanish and its guesses, the BM25 ranking, the candidates marked exactly or partly, the
+  subtitle check, the verdict. The scene search: each set of subtitles (add-on or kept, language, hearing-impaired,
+  lines), the passages sent and the words they hold, each answer and its quoted line, the agreement or third vote,
+  the time shift to the file, the episodes before and after. The streams ranked and why each was dropped (never a
+  link). The settings each command ran with: the versions of the agent (with its commit), TV app, player, phones and
+  Kodi; speech to text, decision steps, models; languages; playback. What's too big for the history (plots, subtitle
+  passages, the models' prompts and answers) is in the command's own file, `traces/<t>.json.gz` (mode 600; the newest
+  500 kept; Erase removes them; an exported history carries them and an import puts them back).
+
+## panel — unreleased
+
+### Added
+- Decisions, for a command opened from the Activity tab: **the whole trace** under the diagram, each step at its
+  time with its duration, a badge for how it was done (rule, LLM and its model, d1, speech, local, add-on, web,
+  kept), its confidence against its bar (red when under), its verdict and what it found; **details** opens what's in
+  the command's own file (the plots, the subtitle passages, a model's prompt and answer); **Settings at the time**
+  (versions and settings; **all** for every one); a line on how the trace was made; **Copy as JSON** for the record
+  and its details. Older records show what they have.
+- Activity: an exported history carries each command's details; Erase removes them too.
+
 ## server 0.11.0 — 2026-10-24
 
 ### Added

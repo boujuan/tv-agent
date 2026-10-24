@@ -58,7 +58,9 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
   it's found, as a start would find it (your library, the title search and its candidates, the LLM's sound-alikes,
   the pick and by what: d1 with its confidence, drawn from its card, or popularity), and for a command from the
   Activity tab how it started too (streams, link check, the player, the load, the first frame), each with its
-  time; **Add as fixed phrase**; editors in the
+  time, and under it **the whole trace**: every step at its time, how it was done (rule, model, local, add-on…),
+  its confidence against its bar and its verdict, **details** for the plots, subtitle passages and model prompts
+  and answers it used, **Settings at the time**, **Copy as JSON**; **Add as fixed phrase**; editors in the
   order a command goes through them: **speech to text** (this laptop, hosted, or either first; the local and
   hosted models; the vocabulary the hosted model is sent, all of it in **Show all…**: your names to find, add or
   remove, then Twitch favourites and your library's titles; keep recordings for debugging), clean-up, fixed
@@ -91,6 +93,7 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
 | `tvpanel/app.py` | Window, tray icon, single instance, resource sampling |
 | `tvpanel/overview.py`, `activity_tab.py`, `commands_tab.py`, `decisions.py`, `settings_tab.py` | The five tabs |
 | `tvpanel/tv_card.py`, `speech_tab.py`, `about.py` | Overview's TV card; Decisions › Speech to text; About |
+| `tvpanel/timeline.py` | A recorded command's whole trace in Decisions (stdlib only: tested with the server's tests) |
 | `tvpanel/phones.py` | Settings › Phones: paired phones, pairing with a QR code |
 | `tvpanel/updates.py` | Settings › Updates: GitHub releases, updating the TV app and this checkout |
 | `tvpanel/mic.py` | The computer's microphone (`pw-record`, end-of-speech detection) |

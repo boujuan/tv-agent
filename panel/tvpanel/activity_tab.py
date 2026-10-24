@@ -533,8 +533,9 @@ class Activity(QWidget):
                     w.writerow({**e, "t": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(e["t"]))})
         else:
             with open(path, "w") as f:
-                for e in reversed(rows):
-                    f.write(json.dumps(e, ensure_ascii=False) + "\n")
+                for e in reversed(rows):                 # with each command's details (its trace's big parts)
+                    data = agent_activity.details(e)
+                    f.write(json.dumps({**e, "details_data": data} if data else e, ensure_ascii=False) + "\n")
         self.reply.setText(f"<span style='color:gray'>Exported {len(rows)} commands to {path}</span>")
 
     def import_(self):
@@ -558,8 +559,9 @@ class Activity(QWidget):
     def erase(self):
         kept = len(agent_stt.recordings())
         tests = len(list(agent_voicetests.DIR.glob("*.wav"))) if agent_voicetests.DIR.is_dir() else 0
-        if QMessageBox.question(self, "TV Agent", f"Delete all {len(self.rows)} commands from the history"
-                                + (f" and the {kept} recordings kept" if kept else "") + "?\n"
+        if QMessageBox.question(self, "TV Agent", f"Delete all {len(self.rows)} commands from the history, with "
+                                "their traces' details" + (f", and the {kept} recordings kept" if kept else "")
+                                + "?\n"
                                 "(Export first if you want a copy."
                                 + (f" The {tests} voice tests keep their own audio, in {agent_voicetests.DIR}."
                                    if tests else "") + ")") != QMessageBox.StandardButton.Yes:
