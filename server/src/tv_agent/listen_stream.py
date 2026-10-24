@@ -178,6 +178,12 @@ class StreamSession:
         if asyncio.iscoroutine(r):
             await r
 
+    def cancel(self):
+        """Back on the TV: no decision, and nothing still transcribing sends what it heard."""
+        for t in self._tasks:
+            if not t.done():
+                t.cancel()
+
     async def finish(self):
         """The audio ended (or broke off): decide on what there is, unless that's already done."""
         if not self.committed.is_set():

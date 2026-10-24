@@ -44,7 +44,8 @@ import java.util.Arrays;
  * recording for voice recognition (Phase 0). The audio streams to tv-agent on the laptop while you speak; it shows
  * what it has understood, decides during your pause and says when to stop. Then the pill shows what it will do and
  * closes. Nothing keeps running afterwards. Without the stream (an older agent, a broken connection) it records until
- * you stop talking and sends it all at once, as before.
+ * you stop talking and sends it all at once, as before. The mic button again stops listening and sends at once; Back
+ * while listening cancels, and nothing is done.
  */
 public class ListenActivity extends Activity {
     private static final int RATE = 16000;
@@ -56,34 +57,33 @@ public class ListenActivity extends Activity {
     private static final int GIVE_UP_FRAMES = 200;         // 4 s without speech
     private static final int MAX_FRAMES = 500;             // 10 s cap
 
-    private static final int TRACK_DP = 260;
-
     private final Handler ui = new Handler(Looper.getMainLooper());
+    private final Runnable close = this::finish;
     private TextView status, detail;
-    private View level;
-    private volatile boolean running, sendNow;
-    private double shownLevel = 0.02;
+    private ListenIndicator indicator;
+    private volatile boolean running, sendNow, cancelled;
+    private boolean listening;          // guarded by this: Back cancels only until the recording ends
     // Where tv-agent runs, the token it expects and its stream port, set by `tv-agent tv pair` (Pairing).
     private static volatile String agentUrl = "", agentToken = "";
     private static volatile int streamPort;
-    private int levelFrames;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         buildUi();
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            done("Microphone permission missing", "", 3000);
+            done("Microphone permission missing", "", false, 3000);
             return;
         }
         agentUrl = Pairing.url(this);
         agentToken = Pairing.token(this);
         streamPort = Pairing.streamPort(this);
         if (agentUrl.isEmpty() || agentToken.isEmpty()) {
-            done("Not paired with tv-agent", "On the computer: tv-agent tv pair", 3500);
+            done("Not paired with tv-agent", "On the computer: tv-agent tv pair", false, 3500);
             return;
         }
         running = true;
+        listening = true;
         if (streamPort <= 0) {
             new Thread(() -> post("/v1/listen/start", new byte[0], 1000), "listen-start").start();
         }
@@ -105,18 +105,43 @@ public class ListenActivity extends Activity {
         return super.onKeyDown(keyCode, event);
     }
 
-    // Closed when Back is let go, not pressed: closed on the press, the release went on to the app underneath,
+    // Handled when Back is let go, not pressed: closed on the press, the release went on to the app underneath,
     // which took it as its own Back (TV Agent Player closed, Stremio went back a screen).
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
             if (event.isTracking() && !event.isCanceled()) {
-                running = false;
-                finish();
+                if (cancelListening()) {
+                    status.setText("Cancelled");
+                    detail.setVisibility(View.GONE);
+                    indicator.cancelled();
+                    closeIn(700);
+                } else {        // already sent, or Back again: the reply (if any) stands, the pill goes
+                    running = false;
+                    finish();
+                }
             }
             return true;
         }
         return super.onKeyUp(keyCode, event);
+    }
+
+    /** Back while recording: the recording thread then tells the laptop to throw the audio away. */
+    private synchronized boolean cancelListening() {
+        if (!listening || cancelled) return false;
+        cancelled = true;
+        return true;
+    }
+
+    /** The recording is over; whether Back cancelled it first. */
+    private synchronized boolean endListening() {
+        listening = false;
+        return cancelled;
+    }
+
+    private void closeIn(long ms) {
+        ui.removeCallbacks(close);
+        ui.postDelayed(close, ms);
     }
 
     @Override
@@ -152,26 +177,14 @@ public class ListenActivity extends Activity {
         detail.setVisibility(View.GONE);
         status.setGravity(Gravity.CENTER);
         detail.setGravity(Gravity.CENTER);
-        // The level bar fills a fixed track, so the pill itself never changes size while you talk.
-        FrameLayout track = new FrameLayout(this);
-        GradientDrawable trackBg = new GradientDrawable();
-        trackBg.setColor(0x26FFFFFF);
-        trackBg.setCornerRadius(dp(2));
-        track.setBackground(trackBg);
-        level = new View(this);
-        GradientDrawable bar = new GradientDrawable();
-        bar.setColor(0xFF6EA8FF);
-        bar.setCornerRadius(dp(2));
-        level.setBackground(bar);
-        level.setPivotX(dp(TRACK_DP) / 2f);
-        level.setScaleX(0.02f);
-        track.addView(level, new FrameLayout.LayoutParams(dp(TRACK_DP), dp(4)));
+        // A fixed size, so the pill itself never changes size while it moves.
+        indicator = new ListenIndicator(this);
 
         pill.addView(status);
         pill.addView(detail);
-        LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(dp(TRACK_DP), dp(4));
-        tl.topMargin = dp(10);
-        pill.addView(track, tl);
+        LinearLayout.LayoutParams il = new LinearLayout.LayoutParams(dp(96), dp(32));
+        il.topMargin = dp(8);
+        pill.addView(indicator, il);
         // Over a list (ChoicesActivity), the pill goes bottom-right so the numbers stay in view.
         boolean besideList = ChoicesActivity.showing;
         pill.setMinimumWidth(dp(besideList ? 360 : 420));
@@ -184,31 +197,23 @@ public class ListenActivity extends Activity {
         setContentView(root);
     }
 
-    /** Fast rise, slow fall, drawn every third 20 ms frame: steady enough to read, no layout passes. */
-    private void showLevel(double db) {
-        double target = Math.max(0.02, Math.min(1.0, (db + 60) / 45));
-        shownLevel = target > shownLevel ? target : shownLevel * 0.8 + target * 0.2;
-        if (++levelFrames % 3 != 0) return;
-        float scale = (float) shownLevel;
-        ui.post(() -> level.setScaleX(scale));
-    }
-
     /** What the laptop has understood so far, under "Listening…". */
     private void showHeard(String text) {
         ui.post(() -> {
-            if (!running || text.isEmpty()) return;
+            if (!running || cancelled || text.isEmpty()) return;
             detail.setText("“" + text + "”");
             detail.setVisibility(View.VISIBLE);
         });
     }
 
-    private void done(String main, String sub, long closeAfterMs) {
+    private void done(String main, String sub, boolean ok, long closeAfterMs) {
+        endListening();     // nothing left for Back to cancel
         ui.post(() -> {
             status.setText(main);
             detail.setText(sub);
             detail.setVisibility(sub.isEmpty() ? View.GONE : View.VISIBLE);
-            ((View) level.getParent()).setVisibility(View.GONE);
-            ui.postDelayed(this::finish, closeAfterMs);
+            indicator.done(ok);
+            closeIn(closeAfterMs);
         });
     }
 
@@ -228,12 +233,12 @@ public class ListenActivity extends Activity {
             rec = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, RATE, AudioFormat.CHANNEL_IN_MONO,
                     AudioFormat.ENCODING_PCM_16BIT, Math.max(min, RATE));
         } catch (RuntimeException e) {
-            done("Microphone unavailable", "", 2500);
+            done("Microphone unavailable", "", false, 2500);
             return;
         }
         if (rec.getState() != AudioRecord.STATE_INITIALIZED) {
             rec.release();
-            done("Microphone unavailable", "", 2500);
+            done("Microphone unavailable", "", false, 2500);
             return;
         }
         AudioStream stream = openStream();
@@ -247,7 +252,7 @@ public class ListenActivity extends Activity {
         short[] frame = new short[FRAME];
         rec.startRecording();
         try {
-            while (running && frames < MAX_FRAMES && !sendNow && (stream == null || !stream.stop)) {
+            while (running && !cancelled && frames < MAX_FRAMES && !sendNow && (stream == null || !stream.stop)) {
                 int got = rec.read(frame, 0, FRAME);
                 if (got <= 0) break;
                 frames++;
@@ -259,7 +264,7 @@ public class ListenActivity extends Activity {
                     stream = null;      // really broken: record until you stop talking and send it all
                 }
                 double level = db(frame, got);
-                showLevel(level);
+                indicator.level(level);
                 // Background level from the first 200 ms that carry sound (the remote's mic opens a moment late).
                 if (earlyCount < early.length && level > -110) {
                     early[earlyCount++] = level;
@@ -290,13 +295,19 @@ public class ListenActivity extends Activity {
             rec.stop();
             rec.release();
         }
+        if (endListening()) {
+            // Back: the laptop throws the audio away. Unless it had decided just before; then that reply stands.
+            String reply = stream != null ? stream.cancel() : null;
+            if (reply != null) showReply(reply);
+            return;
+        }
         if (!running) {
             if (stream != null) stream.close();
             return;
         }
         ui.post(() -> {
-            status.setText("…");
-            ((View) level.getParent()).setVisibility(View.GONE);
+            status.setText("One moment…");
+            indicator.sent();
         });
         String reply = null;
         if (stream != null) {
@@ -306,28 +317,32 @@ public class ListenActivity extends Activity {
         }
         if (reply == null) {
             if (!speaking) {
-                done("Didn't hear anything", "", 1500);
+                done("Didn't hear anything", "", false, 1500);
                 return;
             }
             reply = post("/v1/utterance", speech.toByteArray(), 8000);
         }
         if (reply == null) {
-            done("Agent offline", "Is tv-agent running on the laptop?", 2500);
+            done("Agent offline", "Is tv-agent running on the laptop?", false, 2500);
             return;
         }
+        showReply(reply);
+    }
+
+    private void showReply(String reply) {
         try {
             JSONObject r = new JSONObject(reply);
             if (r.has("error")) {
                 boolean busy = "busy".equals(r.optString("error"));
                 done(busy ? "Still busy with the last one" : "Not paired with tv-agent",
-                        busy ? "" : "On the computer: tv-agent tv pair", 2500);
+                        busy ? "" : "On the computer: tv-agent tv pair", false, 2500);
                 return;
             }
             String heard = r.optString("transcript", "");
-            done(r.optString("say", "OK"), heard.isEmpty() ? "" : "“" + heard + "”",
-                    r.optBoolean("ok", false) ? 1400 : 2600);
+            boolean ok = r.optBoolean("ok", false);
+            done(r.optString("say", "OK"), heard.isEmpty() ? "" : "“" + heard + "”", ok, ok ? 1400 : 2600);
         } catch (Exception e) {
-            done("Agent error", "", 2500);
+            done("Agent error", "", false, 2500);
         }
     }
 
@@ -362,7 +377,8 @@ public class ListenActivity extends Activity {
 
     /**
      * Audio to tv-agent while you speak (protocol in the server's server.py): frames of a 2-byte length and PCM16,
-     * a 0 length to end; back come JSON lines: what it heard so far, "stop" once it has decided, then the reply.
+     * a 0 length to end, 0xFFFF to cancel; back come JSON lines: what it heard so far, "stop" once it has decided,
+     * then the reply (or "cancelled").
      */
     private final class AudioStream {
         private final Socket socket;
@@ -398,6 +414,23 @@ public class ListenActivity extends Activity {
             }
         }
 
+        /** Back: the laptop throws the audio away. Null once it has (or no answer), the reply if it had decided. */
+        String cancel() {
+            try {
+                out.writeShort(0xFFFF);
+                out.flush();
+            } catch (IOException ignored) {
+                // broken: the laptop has nothing to decide on either way
+            }
+            String r = awaitReply(1000);
+            close();
+            try {
+                return r == null || new JSONObject(r).has("cancelled") ? null : r;
+            } catch (Exception e) {
+                return null;
+            }
+        }
+
         void readReplies() {
             try (BufferedReader in = new BufferedReader(
                     new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8))) {
@@ -405,7 +438,7 @@ public class ListenActivity extends Activity {
                     JSONObject m = new JSONObject(line);
                     if (m.has("heard")) showHeard(m.optString("heard", ""));
                     if (m.optBoolean("stop", false)) stop = true;
-                    if (m.has("say") || m.has("error")) {
+                    if (m.has("say") || m.has("error") || m.has("cancelled")) {
                         synchronized (this) {
                             reply = line;
                             notifyAll();

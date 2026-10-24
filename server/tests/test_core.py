@@ -435,6 +435,45 @@ def test_stream_session_drops_an_early_result_when_you_keep_talking():
     assert text == "play the bear season 3 episode 2" and d.action.episode == 2   # "play" alone never ran
 
 
+def test_back_on_the_tv_cancels_the_stream_and_nothing_is_decided():
+    import asyncio
+    import types
+    import numpy as np
+    from tv_agent import server
+    from tv_agent.listen_stream import FRAME
+
+    room = (np.random.default_rng(3).normal(0, 30, FRAME)).astype("<i2").tobytes()
+    voice = (np.sin(np.arange(FRAME) / 5) * 8000).astype("<i2").tobytes()
+    done = []
+
+    async def transcribe(audio):
+        done.append("transcribed")
+        return "play the bear", {}
+
+    async def decide(text):
+        done.append("decided")
+
+    svc = types.SimpleNamespace(maybe_reload=lambda: None, agent=types.SimpleNamespace(rules=RULES),
+                                transcribe=transcribe, decide=decide, start=lambda *a: done.append("started"),
+                                record=lambda *a: done.append("recorded"))
+
+    async def go():
+        reader = asyncio.StreamReader()
+        for chunk in [room] * 12 + [voice] * 20 + [room] * 10:     # past the first checkpoint's 160 ms of quiet
+            reader.feed_data(len(chunk).to_bytes(2, "big") + chunk)
+        reader.feed_data(server.CANCEL.to_bytes(2, "big"))
+        reader.feed_eof()
+        sent = []
+
+        async def send(msg):
+            sent.append(msg)
+        await server.stream_session(svc, reader, send)
+        await asyncio.sleep(0.05)       # a checkpoint still running would answer by now
+        return sent
+
+    assert asyncio.run(go()) == [{"cancelled": True}] and done == []
+
+
 def test_d1_needs_a_clear_lead_to_act():
     import asyncio
     from tv_agent.decide.d1 import Choice

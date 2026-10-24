@@ -41,6 +41,10 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   - AIOStreams' own answer (2-8 s, every time) is now most of a start.
 
 ### Fixed
+- Back on the TV's pill cancels (TV app 0.9.0): the app ends its audio with 0xFFFF in place of a frame's length,
+  and the agent throws it away, even just after deciding, as long as nothing was done yet; it answers
+  `{"cancelled": true}`. Before, the app closed the connection, which the agent took as the end of what you said, so
+  it acted on it anyway.
 - "Pon Rebel Mung" played "Rebelde (2022)": the LLM's "Rebel Moon" was found (Part One, by d1) and thrown away
   because its full name has a subtitle, so the search's pick for the misheard words won, after three d1 calls in a
   row. A sound-alike now counts by its name before a subtitle: Rebel Moon - Part One, 6 times in 6 (before: Part Two
@@ -49,6 +53,21 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   sound-alike of a series asked for by season must have that season, a title heard whole in what was said counts
   ("The Boys" sounds less like "paul the boys" than Polo Boys), the LLM's own order is kept, and d1 sees the whole
   sentence. The Boys 6 times in 6.
+
+## android 0.9.0 — 2026-10-24
+
+Back's cancel needs an agent newer than server 0.5.0 (main from 2026-10-24); an older one still acts on what it
+had heard.
+
+### Added
+- The pill shows it's hearing you: seven bars move with your voice (a slow ripple in silence) where the level bar
+  was. When listening ends (the agent decided in your pause, or you pressed the mic button again) they gather into a
+  dot, then three dots while the agent works ("One moment…"), then a tick for done or a cross for not done, with
+  the reply. Drawn at 30 fps at most and only while it moves; over 4K Dolby Vision in TV Agent Player no video frame
+  was dropped (5 pills in 43 s, the same 2:3 cadence as without).
+- Back while it's listening cancels: the bars drop away, "Cancelled", and nothing is done. It used to close the
+  pill and the agent still acted on what it had heard, since it takes a closed connection as the end of what you
+  said. Once the agent has decided, Back only closes the pill.
 
 ## server 0.5.0 — 2026-10-24
 

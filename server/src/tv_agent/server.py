@@ -9,9 +9,10 @@ LAN, on this computer's address on the TV's network only (lan_address(), port 87
 
 LAN, port 8767 (stream_port): the same, streamed while you speak, so it's decided in your pause (listen_stream.py).
   app -> laptop  a JSON line {"token": "…", "rate": 16000}, then frames: a 2-byte big-endian length and PCM16 LE
-                 audio; a frame of length 0 ends the audio (mic pressed again, the 10 s cap, the app's own limit)
+                 audio; a frame of length 0 ends the audio (mic pressed again, the 10 s cap, the app's own limit),
+                 a length of 0xFFFF cancels it (Back): nothing is decided
   laptop -> app  JSON lines: {"heard": "…"} as it understands, {"stop": true} when it has decided (stop recording),
-                 then {"transcript", "say", "ok"} as /v1/utterance answers; then it closes
+                 then {"transcript", "say", "ok"} as /v1/utterance answers, or {"cancelled": true}; then it closes
   Same address check and token; at most 12 s of audio; one at a time.
 
 Paired phones (the TV Agent phone app, clients.py): HTTPS on phone_port (8768) with the local API's panel endpoints
@@ -77,6 +78,7 @@ from .stt import model_dir as stt_model_dir
 
 log = logging.getLogger("tv_agent")
 MAX_BODY = 400_000          # 12 s of 16 kHz PCM16
+CANCEL = 0xFFFF             # in place of a frame's length: throw the audio away (stream protocol above)
 SOURCES = ("tv", "laptop", "text", "mcp", "phone")
 # Seconds a stop waits for open connections. A phone that went to sleep never answers the TLS close, and Python
 # waits 30 s for it, past systemd's 10 s: the stop timed out and the agent was killed (found 2026-10-23)
@@ -533,6 +535,12 @@ async def stream_session(svc: "Service", reader: asyncio.StreamReader, send, sou
             if n == 0:
                 ended = True
                 break
+            if n == CANCEL:
+                # Even when it has just decided: nothing has been done yet, and the app hasn't seen "stop"
+                sess.cancel()
+                log.info("%s cancelled after %.1f s of audio: nothing decided", source, len(sess.pcm) / 32000)
+                await send({"cancelled": True})
+                return
             if n > 8192 or total + n > MAX_BODY:
                 break
             data = await asyncio.wait_for(reader.readexactly(n), 3)
@@ -561,7 +569,8 @@ async def stream_session(svc: "Service", reader: asyncio.StreamReader, send, sou
     # Read (and drop) what the app sent meanwhile until its end marker: closing with unread audio would reset the
     # connection, and the app could lose the reply above and send the recording again.
     try:
-        while not ended and (n := int.from_bytes(await asyncio.wait_for(reader.readexactly(2), 2), "big")):
+        while not ended and (n := int.from_bytes(await asyncio.wait_for(reader.readexactly(2), 2), "big")) and \
+                n != CANCEL:        # Back after the decision: too late, the reply above stands
             await asyncio.wait_for(reader.readexactly(n), 2)
     except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionError):
         pass
