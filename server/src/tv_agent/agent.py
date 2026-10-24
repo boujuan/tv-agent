@@ -73,6 +73,20 @@ CERTAIN_GAP = 15
 CHECK_AFTER = 5.0           # the episode check waits this long after the file opens: the start has the network first
 ERROR_SHOWN = 3.0           # a start that fails says why on the loading screen this long before going Home
 HEARD: ContextVar[str] = ContextVar("heard", default="")    # what the command being run was, as transcribed
+# What a start command found and how long each part took, for the activity history (execute() adds it to the
+# outcome's details): the title's candidates and how one was picked, the stages, the stream. Never a link.
+START: ContextVar[dict | None] = ContextVar("start", default=None)
+FIRST_FRAME_WAIT = 10.0     # how long a start waits for TV Agent Player's first frame, to report it
+
+
+def _note_title(**fields):
+    """Into the record of the start being made (START): how its title was found."""
+    if (record := START.get()) is not None:
+        record.setdefault("title", {}).update(fields)
+
+
+def _ms(since: float) -> int:
+    return round((time.perf_counter() - since) * 1000)
 
 
 @dataclass
@@ -343,15 +357,20 @@ class Agent:
         """`heard`: the command as transcribed, for the loading screen and the title choice."""
         handler = getattr(self, "_" + action.type.replace("none", "unclear"))
         HEARD.set(heard)
+        record = {} if action.type in STARTS else None
+        START.set(record)
         if action.type in STARTS and self._closing is not None:
             self._closing.cancel()              # the screen stays up for this start
         if action.type not in ("volume", "none", "binge", "timer", "auto_skip", "wrong") and not self.dry_run:
             asyncio.create_task(self._wake())
         try:
-            return await handler(action)
+            out = await handler(action)
         except Exception as e:
             log.exception("action %s failed", action.type)
-            return Outcome(False, f"That didn't work ({type(e).__name__})")
+            out = Outcome(False, f"That didn't work ({type(e).__name__})")
+        if record:
+            out.details = {**record, **(out.details or {})}
+        return out
 
     # ---- Stremio: addons, titles, streams ----
 
@@ -580,30 +599,41 @@ class Agent:
     async def _choose_title(self, title: str, kind: str | None, hits: list[tuple[float, cinemeta.Meta]],
                             utterance: str | None = None,
                             expect: Callable[[str, str], None] | None = None) -> cinemeta.Meta:
+        t = time.perf_counter()
+
+        def chose(m: cinemeta.Meta, by: str, **more) -> cinemeta.Meta:
+            """The pick, noted in the start's record with the candidates it was made from."""
+            if (record := START.get()) is not None:
+                record.setdefault("title", {}).setdefault("choices", []).append(
+                    {"for": title, "picked": m.label, "by": by, "ms": _ms(t), **more,
+                     "candidates": [f"{m_.label} {score:.0f}" for score, m_ in hits[:4]]})
+            return m
         if self._decisive(title, hits):
-            return hits[0][1]
+            return chose(hits[0][1], "the search")
         # A close call: Cinemeta's popularity of the leading few tells a famous title from its namesakes.
         pops = await self._popularity([m for _, m in hits[:4]])
         hits = cinemeta.ranked(title, [m for _, m in hits], kind, pops)
         if self._decisive(title, hits) or (title_search.said_exactly(title, hits[0][1]) and len(hits) > 1
                                            and hits[0][0] - hits[1][0] >= CERTAIN_GAP):
-            return hits[0][1]
+            return chose(hits[0][1], "popularity")
         # Candidates: each source's top hit of each kind (Cinemeta's search knows alternate titles: "la casa de
         # papel" is Money Heist) plus the best name matches. Those top hits go first, since d1 leans to the first.
         firsts = [h for h in hits if h[1].rank == 0 or h[1].extra_rank == 0]
         top = (firsts + [h for h in hits if h not in firsts])[:self.rules.title_candidates]
         if "d1" in self.cfg.decide_off:
-            return top[0][1]
+            return chose(top[0][1], "the search (d1 off)")
         if expect:
             expect(top[0][1].id, top[0][1].type)
+        t_d1 = time.perf_counter()
         try:
             pick = await self.d1.choice(utterance or f"play {title}", self.rules.title_question,
                                         {f"c{i}": m.label for i, (_, m) in enumerate(top)})
             log.info("d1 title choice %s (confidence %.2f)", pick.key, pick.confidence)
-            return top[int(pick.key[1:])][1]
+            return chose(top[int(pick.key[1:])][1], "d1", confidence=round(pick.confidence, 2), d1_ms=_ms(t_d1),
+                         d1=self.d1.last_source)
         except (httpx.HTTPError, KeyError, ValueError, IndexError) as e:
             log.warning("d1 unavailable for title choice (%s); using the best match", type(e).__name__)
-            return top[0][1]
+            return chose(top[0][1], f"the search (d1: {type(e).__name__})")
 
     @staticmethod
     def _decisive(title: str, hits: list[tuple[float, cinemeta.Meta]]) -> bool:
@@ -630,25 +660,34 @@ class Agent:
         that search found."""
         if kind is None and season is not None:
             kind = "series"
+        t = time.perf_counter()
+
+        def picked(got: tuple[str, str, str] | None, by: str) -> tuple[str, str, str] | None:
+            if got:
+                _note_title(picked=got[2], imdb=got[0], by=by)
+            return got
         item = await self.library.find(title, kind)
+        _note_title(said=title, library_ms=_ms(t))
         if item and (not exact or library_mod.bare(item.get("name", "")) == library_mod.bare(title)):
-            return item["_id"], item["type"], item.get("name", title)
+            return picked((item["_id"], item["type"], item.get("name", title)), "your library")
         utterance = HEARD.get() or None        # d1 sees the whole sentence ("…season four")
         if exact or not self.llm_on():         # exact: a sentence nothing understood; only a title said exactly
             m = await self.find_title(title, kind, season, utterance, expect=expect)
-            return (m.id, m.type, m.name) if m and (not exact or title_search.said_exactly(title, m)) else None
+            return picked((m.id, m.type, m.name), "the search") \
+                if m and (not exact or title_search.said_exactly(title, m)) else None
         found = asyncio.Event()
         fix = asyncio.create_task(self._sounds_like(title))
         heard = asyncio.create_task(self._title_hits(title, kind, enough=found))
         looks: dict[str, asyncio.Task] = {}
+        how: dict[str, str] = {}                # where each sound-alike was found
         decided = False                        # once it has: nothing more is looked up
 
         async def look(name: str) -> tuple[str, str, str] | None:
             if item := await self.library.find(name, kind):
-                got = item["_id"], item["type"], item.get("name", name)
+                got, how[name] = (item["_id"], item["type"], item.get("name", name)), "your library"
             elif (hit := await self.find_title(name, kind, season, utterance, with_addons=False)) \
                     and title_search.said_as(name, hit):
-                got = hit.id, hit.type, hit.name
+                got, how[name] = (hit.id, hit.type, hit.name), "Cinemeta"
             else:
                 return None
             if not await self._has_season(got[0], got[1], season):
@@ -663,17 +702,19 @@ class Agent:
                 if name not in looks and not decided:
                     looks[name] = asyncio.create_task(look(name))
 
-        def answered(t: asyncio.Task):          # looked up as soon as the LLM answers, while the search goes on
-            if not t.cancelled() and not t.exception():
-                looking(t.result())
+        def answered(task: asyncio.Task):       # looked up as soon as the LLM answers, while the search goes on
+            if not task.cancelled() and not task.exception():
+                _note_title(sounds_like=task.result(), llm_ms=_ms(t))
+                looking(task.result())
         fix.add_done_callback(answered)
         m = choosing = None
         try:
             hits = await heard
+            _note_title(search_ms=_ms(t), candidates=[f"{h.label} {score:.0f}" for score, h in hits[:4]])
             if any(title_search.said_exactly(title, h) for _, h in hits):
                 m = await self._choose_title(title, kind, hits, utterance, expect)
                 if title_search.said_exactly(title, m):
-                    return m.id, m.type, m.name
+                    return picked((m.id, m.type, m.name), "said exactly")
             elif hits:                          # what the search found, in case no sound-alike is: chosen meanwhile
                 choosing = asyncio.create_task(self._choose_title(title, kind, hits, utterance))
             try:
@@ -685,14 +726,16 @@ class Agent:
             for name in names:
                 named = [h for _, h in hits if title_search.said_exactly(name, h)]
                 got = (named[0].id, named[0].type, named[0].name) if len(named) == 1 else None
-                if not (got and await self._has_season(got[0], got[1], season)):
-                    got = await looks[name]
+                if got and await self._has_season(got[0], got[1], season):
+                    where = "the search for what was heard"
+                else:
+                    got, where = await looks[name], how.get(name, "")
                 if got:
                     log.info("title %r: sounds like %r (LLM): %s", title, name, got[2])
-                    return got
+                    return picked(got, f"sounds like {name!r}, in {where}")
             if m is None and choosing is not None:
                 m = await choosing
-            return (m.id, m.type, m.name) if m else None
+            return picked((m.id, m.type, m.name), "the search") if m else None
         finally:
             for t in (fix, heard, choosing, *looks.values()):
                 if t is not None and not t.done():
@@ -744,16 +787,23 @@ class Agent:
         if not self.account:
             return Outcome(False, "Stremio isn't signed in (tv-agent setup stremio)")
         t0 = time.perf_counter()
+        done_at: dict[str, float] = {}           # when the player's screen was up and the link check done
+
+        async def stamped(key: str, coro):
+            try:
+                return await coro
+            finally:
+                done_at[key] = time.perf_counter()
         if not jump:
             asyncio.create_task(self.notify(f"Finding {label}…"))
-        kodi_ready = player_ready = kodi_open = loading = None
+        kodi_ready = player_ready = kodi_open = loading = first_frame = None
         if self.cfg.player == "kodi" and not self.dry_run:
             kodi_ready = asyncio.create_task(self._start_kodi())   # Kodi gets ready (or cold-starts) during the search
         elif self.cfg.player == "tvplayer" and not self.dry_run:
             # The player's screen comes up and connects during the search (~0.3 s), so the link goes to a ready player,
             # and shows the loading screen meanwhile. Whether Kodi plays too (it's stopped first: one player at a
             # time) is asked meanwhile as well: a Kodi frozen in the background answers only by its 1.5 s timeout.
-            player_ready = asyncio.create_task(self.tvplayer.ready(self.adb))
+            player_ready = asyncio.create_task(stamped("screen", self.tvplayer.ready(self.adb)))
             kodi_open = asyncio.create_task(self._kodi_player())
             if not jump:
                 loading = Loading(self.tvplayer, video, _title_screen(name, meta, video) | {"heard": HEARD.get()},
@@ -774,7 +824,7 @@ class Agent:
                      and self._preloaded[:2] == (video, prepared.url) else None)
         chosen, link, checking = found[0], preloaded or found[0].url, None
         if self.cfg.probe_streams and not preloaded:      # runs while the player gets ready; finds where the link leads
-            checking = asyncio.create_task(self._first_playable(found[:3]))
+            checking = asyncio.create_task(stamped("link", self._first_playable(found[:3])))
             if loading is not None:
                 loading.at("Checking the link…")
         # A file in your debrid library, or one checked while the last episode played, is opened even if the
@@ -836,12 +886,19 @@ class Agent:
                 if kind == "series" and self.cfg.auto_skip:
                     self._start_skip_watch(self.state.now_playing)
                 self._started(imdb, name, kind, video, meta)
+            # The first frame, as the player measured it from the load's arrival (~1.3 s; 0.1 s preloaded)
+            item = self.tvplayer.item
+            frame = self.tvplayer.last.get("first_frame") or await self.tvplayer.wait_for(
+                lambda m: m.get("t") == "first_frame" and m.get("item") == item, FIRST_FRAME_WAIT)
+            first_frame = frame.get("ms") if frame else None
             stages = (("streams", t0, t_streams), ("player", t_streams, t_ready), ("open", t_ready, t_open))
             for stage, a, b in stages:
                 self.state.timings.add(f"start:{stage}", (b - a) * 1000)
-            log.info("start %s: streams %.0f ms, then the link checked and the player ready %.0f ms, open %.0f ms%s",
-                     video, (t_streams - t0) * 1000, (t_ready - t_streams) * 1000, (t_open - t_ready) * 1000,
-                     " (preloaded)" if preloaded else "")
+            if first_frame is not None:
+                self.state.timings.add("start:first_frame", first_frame)
+            log.info("start %s: streams %.0f ms, then the link checked and the player ready %.0f ms, open %.0f ms, "
+                     "first frame %s ms%s", video, (t_streams - t0) * 1000, (t_ready - t_streams) * 1000,
+                     (t_open - t_ready) * 1000, first_frame, " (preloaded)" if preloaded else "")
         elif self.cfg.player == "just":
             if not await checked():
                 return Outcome(False, f"The links for {label} didn't answer")
@@ -916,10 +973,21 @@ class Agent:
                      video, (t_streams - t0) * 1000, (t_kodi - t_streams) * 1000, (t_check - t_kodi) * 1000,
                      (t_open - t_check) * 1000)
         quality = f" · {'4K' if chosen.height >= 2160 else f'{chosen.height}p'}" if chosen.height else ""
-        # The start's stages and the stream played, for the activity history (`tv-agent stats` has them too)
-        details = {f"{stage}_ms": round((b - a) * 1000) for stage, a, b in stages} | {
-            "stream": {"source": chosen.source or chosen.addon, "height": chosen.height, "size": chosen.size,
-                       "release": streams.release(chosen), "preloaded": bool(preloaded)}}
+        # The start's stages and the stream played, for the activity history (`tv-agent stats` has the stages too).
+        # link_check: the check alone, from the streams; screen: the player's screen up and connected, from the start.
+        timed = {f"{stage}_ms": round((b - a) * 1000) for stage, a, b in stages}
+        if "link" in done_at:
+            timed["link_check_ms"] = round((done_at["link"] - t_streams) * 1000)
+        if "screen" in done_at:
+            timed["screen_ms"] = round((done_at["screen"] - t0) * 1000)
+        if first_frame is not None:
+            timed["first_frame_ms"] = first_frame
+        stream = {"addon": chosen.addon, "source": chosen.source, "name": " ".join(chosen.name.split()),
+                  "filename": chosen.filename, "size": chosen.size or None, "height": chosen.height or None,
+                  "release": streams.release(chosen), "debrid": streams.debrid(chosen), "cached": chosen.cached,
+                  "in_debrid_library": chosen.library, "aio_score": chosen.aio_score, "of": len(found),
+                  "preloaded": bool(preloaded)}
+        details = {"stages": timed, "stream": {k: v for k, v in stream.items() if v not in (None, "")}}
         return Outcome(True, f"Playing {label}{quality}" + (f" · from {_clock(resume_ms)}" if resume_ms else ""),
                        details)
 
@@ -1669,15 +1737,13 @@ class Agent:
         else:
             t = time.perf_counter()
             found = await self.resolve(a.title, a.kind, a.season, exact=a.guess, expect=self._expecting(a))
-            ms = (time.perf_counter() - t) * 1000
+            ms = _ms(t)
             self.state.timings.add("start:title", ms)
-            log.info("title %r: %s (%.0f ms)", a.title, found[2] if found else "not found", ms)
+            _note_title(ms=ms)
+            log.info("title %r: %s (%d ms)", a.title, found[2] if found else "not found", ms)
             if not found:
                 return Outcome(False, f"Didn't get that: “{a.title}”" if a.guess else f"Couldn't find “{a.title}”")
             imdb, kind, name = found
-            out = await self._play_found(a, imdb, kind, name, playing_video)
-            out.details = {"title_ms": round(ms), **(out.details or {})}
-            return out
         return await self._play_found(a, imdb, kind, name, playing_video)
 
     def _expecting(self, a: PlayTitle) -> Callable[[str, str], None]:

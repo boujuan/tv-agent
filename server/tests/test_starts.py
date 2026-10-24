@@ -63,6 +63,8 @@ def title_agent(monkeypatch, catalog: dict[str, list[C.Meta]], sounds_like: list
             return list(sounds_like)
 
     class D1:
+        last_source = "hosted"
+
         async def choice(self, state, question, options):
             asked.append((state, dict(options)))
             key = next((k for want in prefer for k, label in options.items() if label.startswith(want)), "c0")
@@ -220,3 +222,23 @@ def test_the_episode_check_waits_for_the_file_to_open_and_reads_the_link_found(m
     asyncio.run(a._switch_if_wrong(object(), s, None, ("tt1", "series", "X", "tt1:1:1", "X · S1E1", {}),
                                    "https://cdn/resolved"))
     assert did == [("wait", agent_mod.CHECK_AFTER), ("check", "https://cdn/resolved")]
+
+
+def test_a_starts_record_says_how_its_title_was_found(monkeypatch):
+    """For the activity history: the candidates, how each choice was made (d1 with its confidence), the LLM's
+    sound-alikes and which one won, and the times."""
+    a, _ = title_agent(monkeypatch, {"rebel mung": [REBELDE, PART_TWO], "Rebel Moon": [PART_ONE, PREQUEL, PART_TWO]},
+                       ["Rebel Moon"], prefer=["Rebelde", "Rebel Moon - Part One"])
+    a.dry_run, a._closing, a.state = True, None, agent_mod.State()
+
+    async def play_found(play, imdb, kind, name, playing_video=None):
+        return agent_mod.Outcome(True, f"Playing {name}", {"stages": {"streams_ms": 2100}})
+    a._play_found = play_found
+    out = asyncio.run(a.execute(PlayTitle(title="rebel mung"), "Pon Rebel Mung"))
+    title = out.details["title"]
+    assert title["said"] == "rebel mung" and title["picked"] == PART_ONE.name and title["imdb"] == PART_ONE.id
+    assert title["by"] == "sounds like 'Rebel Moon', in Cinemeta" and title["sounds_like"] == ["Rebel Moon"]
+    assert any(c.startswith("Rebelde (2022)") for c in title["candidates"])
+    moon = next(c for c in title["choices"] if c["for"] == "Rebel Moon")
+    assert moon["by"] == "d1" and moon["confidence"] == 0.5 and moon["picked"].startswith(PART_ONE.name)
+    assert {"ms", "library_ms", "search_ms", "llm_ms"} <= set(title) and out.details["stages"] == {"streams_ms": 2100}

@@ -241,11 +241,21 @@ def test_play_brings_the_player_up_during_the_search_and_loads_in_place():
         a._replace_session = lambda video, resume_ms, exact=False: resume_ms
         a._player_subs, a._started, a._preloaded = nothing, lambda *args: None, None
         a.state.timings = types.SimpleNamespace(add=lambda *args: None)
+        async def first_frame(pred, timeout):
+            return {"t": "first_frame", "item": player.item, "ms": 1280, "after": "load"}
+        player.wait_for = first_frame
         agent_mod.HEARD.set("Play X season one episode two")
         out = await Agent.play(a, "tt1", "series", "X", "tt1:1:2", "X S1E2", META, resume_ms=90_000)
         return out, player.did, seen, a.state.now_playing
 
     out, did, seen, np = asyncio.run(run())
+    # the activity history's record of the start: its stages, up to the player's first frame, and the stream
+    assert out.details["stages"]["first_frame_ms"] == 1280 and "screen_ms" in out.details["stages"]
+    assert out.details["stream"] == {"addon": "AIOStreams", "source": "Torrentio", "name": "4K",
+                                     "filename": "X.S01E02.2160p.REMUX-TRiNiTY.mkv", "size": 62_000_000_000,
+                                     "release": "TRiNiTY", "debrid": "Real-Debrid", "in_debrid_library": True,
+                                     "of": 1, "preloaded": False}
+    assert "https://" not in json.dumps(out.details)
     assert out.ok and [d[0] for d in seen[0]] == ["ready", "loading"]     # up, and saying so, during the search
     screens = [d[2] for d in did if d[0] == "loading"]
     assert [x["step"] for x in screens] == ["Finding streams…", "Starting…"]

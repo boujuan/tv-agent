@@ -16,8 +16,12 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   service, size, release group, and the badges the file's header can't give the player (Atmos, DTS:X, HDR10+, IMAX,
   remux). A player without these screens answers "unknown command" once and isn't sent them again; it starts as
   before.
-- Each start's stages are in the activity history (`title_ms`, `streams_ms`, `player_ms`, `open_ms`, the stream
-  played) and `tv-agent stats` has `start:title`.
+- Each start's record in the activity history (`details`), for debugging and fine-tuning later: how the title was
+  found (what was said, the search's candidates with their scores, the LLM's sound-alikes, each choice with how it
+  was made, d1's confidence and time, the time of each step), the stages (streams, the link check, the player's
+  screen up, the load, and the first frame as the player measured it) and the stream played (addon and its source,
+  name, file name, size, resolution, release, debrid, AIOStreams' score, how many there were). Never a link.
+  `tv-agent stats` has `start:title` and `start:first_frame` too.
 
 ### Changed
 - Faster starts. Measured without the TV from the decision to the streams `load` waits for (the link check ~0.7 s
