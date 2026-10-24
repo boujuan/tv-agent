@@ -4,7 +4,7 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
-## server — unreleased
+## server 0.12.0 — 2026-10-24
 
 ### Added
 - Every command's whole trace in the history: after the speech to text and the decision, each step it took
@@ -21,7 +21,7 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   passages, the models' prompts and answers) is in the command's own file, `traces/<t>.json.gz` (mode 600; the newest
   500 kept; Erase removes them; an exported history carries them and an import puts them back).
 
-## panel — unreleased
+## panel 0.10.0 — 2026-10-24
 
 ### Added
 - Decisions, for a command opened from the Activity tab: **the whole trace** under the diagram, each step at its
