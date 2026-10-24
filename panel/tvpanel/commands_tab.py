@@ -1,6 +1,7 @@
 """Commands tab: everything you can say, by section, as patterns with ‹placeholders› (tv_agent/commands.py, the same
-list the TV shows for "what can you do?"), in English or Spanish. Type to filter; "try" fills a pattern in with an
-example you can edit, then explains it (nothing sent) or does it on the TV."""
+list the TV shows for "what can you do?"), in English or Spanish; the ones the LLM step decides are marked. Type to
+filter; "try" fills a pattern in with an example you can edit, then explains it (nothing sent) or does it on the
+TV."""
 import html
 import re
 
@@ -8,7 +9,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QButtonGroup, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QTextBrowser, QVBoxLayout, QWidget)
 
-from .common import BLUE, GREEN, GREY, RED, api, card, dim
+from .common import BLUE, GREEN, GREY, PURPLE, RED, api, card, dim
 
 try:
     from tv_agent.commands import LEGEND, SECTIONS, expand
@@ -87,9 +88,14 @@ class Commands(QWidget):
         self.view.setOpenLinks(False)
         self.view.anchorClicked.connect(self.try_it)
         v.addWidget(self.view, 1)
-        v.addWidget(dim("Say it after pressing the remote's mic button. Spanish needs a multilingual speech model "
-                        "(Settings › Voice). Other phrasings often work too: the LLM and d1 steps decide what the rules "
-                        "don't (Decisions). On the TV: “what can you do?” shows this list in the language you ask in."))
+        footer = dim("Say it after pressing the remote's mic button, or the phone's. Spanish needs a speech model "
+                     "that knows it: a hosted one, or Parakeet v3 on this laptop (<a href='stt'>Decisions › Speech to "
+                     "text</a>). Other phrasings often work too: the LLM and the decision model decide what the rules "
+                     f"don't; <span style='color:{PURPLE}'>LLM</span> marks the ones only the LLM decides (it needs "
+                     "the OpenRouter key). On the TV, “what can you do?” shows this list in the language you ask in.")
+        footer.setTextFormat(Qt.TextFormat.RichText)
+        footer.linkActivated.connect(lambda _link: self.open_speech())
+        v.addWidget(footer)
         self.reply = QLabel("")
         self.reply.setTextFormat(Qt.TextFormat.RichText)
         v.addWidget(self.reply)
@@ -114,6 +120,8 @@ class Commands(QWidget):
                 if want and want not in words:
                     continue
                 does = html.escape(c.does(lang))
+                if getattr(c, "by", "rules") == "llm":
+                    does += f" <span style='color:{PURPLE}'>LLM</span>"
                 shown.append(f"<tr><td style='padding:3px 18px 3px 0'>{pattern_html(c.say(lang))}</td>"
                              f"<td style='padding:3px 12px 3px 0; color:{GREY}'>{does}</td>"
                              f"<td style='padding:3px 0'><a href='try:{si}:{ci}'>try</a></td></tr>")
@@ -122,6 +130,14 @@ class Commands(QWidget):
                             f"</b></td></tr>" + "".join(shown))
         body = "".join(rows) or f"<tr><td style='color:{GREY}'>Nothing matches “{html.escape(want)}”.</td></tr>"
         self.view.setHtml(f"<table cellspacing='0' width='100%'>{body}</table>")
+
+    def open_speech(self):
+        """Decisions › Speech to text, where the speech models are chosen."""
+        d = self.panel.decisions
+        self.panel.tabs.setCurrentWidget(d)
+        if not d.loaded:
+            d.load()
+        d.node_clicked("stt")
 
     def try_it(self, url):
         _, si, ci = url.toString().split(":")

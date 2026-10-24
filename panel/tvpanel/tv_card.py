@@ -86,14 +86,14 @@ class TvCard(QFrame):
         self.app = QLabel("")
         self.app.setTextFormat(Qt.TextFormat.RichText)
         app.addWidget(self.app, 1)
-        self.install = QPushButton("Install")
-        self.install.setToolTip("Builds the TV app from this copy (android/build-and-install.sh), installs it, "
-                                "grants the microphone and pairs it")
+        self.install = QPushButton("Build and install")
+        self.install.setToolTip("Builds the TV app from this copy's code (android/build-and-install.sh), installs "
+                                "it, grants the microphone and pairs it. Releases from GitHub: Settings › Updates")
         self.install.clicked.connect(self.install_app)
         self.uninstall = QPushButton("Uninstall")
         self.uninstall.clicked.connect(self.uninstall_app)
         pair = QPushButton("Pair again")
-        pair.setToolTip("Sends the app this computer's address and the token")
+        pair.setToolTip("Sends the TV app and TV Agent Player this computer's addresses and their tokens")
         pair.clicked.connect(lambda: self.run_cli(["tv", "pair"], "Pairing…"))
         for b in (self.install, self.uninstall, pair):
             app.addWidget(b)
@@ -193,14 +193,15 @@ class TvCard(QFrame):
         app, here = i.get("app") or {}, android_version()
         if not app.get("installed"):
             self.app.setText(f"<span style='color:{AMBER}'>⚠</span> <b>TV app not installed</b>"
-                             + (f" (this copy: {here})" if here else ""))
-            self.install.setText("Install")
+                             + (f" (this copy's code: {here})" if here else ""))
+            self.install.setText("Build and install")
         else:
             newer = here and _version(here) > _version(app.get("version") or "0")
-            state = (f"<span style='color:{AMBER}'>update available: {here}</span>" if newer else
-                     f"<span style='color:{GREEN}'>up to date</span>")
+            state = (f"<span style='color:{AMBER}'>this copy's code is {here}</span>" if newer else
+                     f"<span style='color:{GREEN}'>the same as this copy's code</span>" if here == app.get("version")
+                     else f"<span style='color:gray'>this copy's code is {here or '?'}</span>")
             self.app.setText(f"<b>TV app {app.get('version')}</b> · {state} · installed {app.get('updated') or '?'}")
-            self.install.setText("Update" if newer else "Reinstall")
+            self.install.setText(f"Build and install {here}" if newer else "Build and reinstall")
         self.uninstall.setEnabled(bool(app.get("installed")))
 
     def show_link(self, res, err):

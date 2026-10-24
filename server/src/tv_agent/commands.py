@@ -1,11 +1,12 @@
 """Everything you can say, by section, as patterns: ‹placeholders› for what you fill in, [optional words], “/” between
-single-word alternatives (“on/off”) and “ · ” between whole ones. In English and Spanish (Spanish needs the
-multilingual speech model). Shown by the panel's Commands tab and by the TV's "what can you do?" screen, in the
-language it was asked in.
+single-word alternatives (“on/off”) and “ · ” between whole ones. In English and Spanish (Spanish needs a speech
+model that knows it: a hosted one, or Parakeet v3 on this laptop). Shown by the panel's Commands tab and by the TV's
+"what can you do?" screen, in the language it was asked in.
 
 A test (tests/test_core.py) expands every pattern into the sentences it stands for, with the placeholders filled
-from EXAMPLES, and checks the rules give each one the action listed here: this list can't drift from what works.
-Other phrasings often work too (the LLM and d1 steps). Stdlib only: the panel imports it.
+from EXAMPLES, and checks the rules give each one the action listed here: this list can't drift from what works. A
+command the LLM step decides (`by="llm"`: an episode described) is checked to be left to it by the rules. Other
+phrasings often work too (the LLM and the decision model). Stdlib only: the panel imports it.
 """
 import re
 from typing import NamedTuple
@@ -17,6 +18,7 @@ class Command(NamedTuple):
     does_en: str
     does_es: str
     type: str                 # the action every sentence of the pattern gives
+    by: str = "rules"         # "llm": the rules leave it to the LLM step (it needs the OpenRouter key)
 
     def say(self, lang: str) -> str:
         return self.es if lang == "es" else self.en
@@ -37,8 +39,9 @@ class Section(NamedTuple):
 SECTIONS = [
     Section("Films and series", "Películas y series", [
         Command("play ‹title›", "pon ‹título›",
-                "Finds it by its name, in English or Spanish, and plays it where you stopped",
-                "Lo busca por su nombre, en español o en inglés, y lo pone donde lo dejaste", "play_title"),
+                "Finds it by its name, in English or Spanish, and plays it where you stopped; not sure which: a list",
+                "Lo busca por su nombre, en español o en inglés, y lo pone donde lo dejaste; si duda, te da a elegir",
+                "play_title"),
         Command("play ‹title› season ‹n› [episode ‹n›]", "pon ‹título› temporada ‹n› [capítulo ‹n›]",
                 "That season or episode", "Esa temporada o capítulo", "play_title"),
         Command("play ‹title› from the start", "pon ‹título› desde el principio",
@@ -52,6 +55,9 @@ SECTIONS = [
                 "Of the series that's on", "De la serie que está puesta", "next_episode"),
         Command("go to season ‹n› episode ‹n› · episode ‹n›", "ve a la temporada ‹n› capítulo ‹n› · capítulo ‹n›",
                 "Another episode of the series that's on", "Otro capítulo de la serie que está puesta", "play_title"),
+        Command("play the episode of ‹title› where ‹moment›", "pon el capítulo de ‹título› en el que ‹momento›",
+                "Found by its plot; when several fit, up to 3 to pick from",
+                "Lo busca por su argumento; si encajan varios, hasta 3 para elegir", "play_title", by="llm"),
         Command("show ‹title› in Stremio", "enséñame ‹título› en Stremio",
                 "Its page in Stremio, without playing", "Su página en Stremio, sin ponerlo", "open_in_stremio"),
     ]),
@@ -71,28 +77,30 @@ SECTIONS = [
         Command("recommend ‹something› · something like ‹title›", "recomiéndame ‹algo› · algo como ‹título›",
                 "Suggestions that fit, from what you like, to pick from",
                 "Sugerencias que encajan, según lo que te gusta, para elegir", "recommend"),
-        Command("number ‹n› · the ‹first, second…› one", "número ‹n› · el ‹primero, segundo…›",
-                "Plays that one from the list (or OK, or a number key)",
-                "Pone ese de la lista (o OK, o una tecla numérica)", "pick"),
+        Command("number ‹n› · the ‹first, second…› one · yes", "número ‹n› · el ‹primero, segundo…› · sí",
+                "Plays that one from the list on the TV (“yes”: the first; or OK, or a number key)",
+                "Pone ese de la lista de la tele («sí»: el primero; o OK, o una tecla numérica)", "pick"),
         Command("what can you do?", "¿qué puedes hacer?", "This list", "Esta lista", "help"),
     ]),
     Section("Playback", "Reproducción", [
         Command("pause · resume · stop", "pausa · sigue · para",
                 "Stop goes back to Home", "Parar vuelve al inicio", "transport"),
         Command("skip forward ‹time› · go back ‹time›", "adelanta ‹tiempo› · atrasa ‹tiempo›",
-                "Exact in Kodi", "Exacto en Kodi", "transport"),
+                "Exact in TV Agent Player and Kodi", "Exacto en TV Agent Player y Kodi", "transport"),
         Command("go to ‹time›", "ve al minuto ‹n›", "Jumps to that point", "Salta a ese punto", "transport"),
         Command("go to the middle · start over", "ve a la mitad · desde el principio",
                 "Half way, or the beginning", "La mitad, o el principio", "transport"),
-        Command("go to the part where ‹moment›", "ve a la parte en la que ‹momento›",
-                "Finds that moment in the subtitles and jumps there", "Busca ese momento en los subtítulos y salta",
-                "find_scene"),
+        Command("go to the part where ‹moment› · jump to when ‹moment›",
+                "ve a la parte en la que ‹momento› · salta a cuando ‹momento›",
+                "Finds it in the subtitles, shows the line, then jumps; not sure: the places to pick from",
+                "Lo busca en los subtítulos, enseña la frase y salta; si duda, los sitios para elegir", "find_scene"),
         Command("what did they say?", "¿qué ha dicho?",
                 "Back 10 s, with subtitles for a moment", "Atrás 10 s, con subtítulos un momento", "replay"),
     ]),
     Section("Intros, recaps and credits", "Intros, resúmenes y créditos", [
         Command("skip the intro/recap", "salta la intro · salta el resumen",
-                "To its end, when you're in it", "Hasta su final, si estás en ella", "skip"),
+                "To its end, when you're in it; with no times for it, 90 s ahead",
+                "Hasta su final, si estás en ella; si no se conocen sus tiempos, 90 s adelante", "skip"),
         Command("skip the credits", "salta los créditos",
                 "The next episode in binge mode, else Home", "El siguiente capítulo en modo maratón; si no, al inicio",
                 "skip"),
@@ -133,8 +141,8 @@ SECTIONS = [
         Command("cancel the sleep timer", "cancela el temporizador", "", "", "timer"),
     ]),
     Section("Apps", "Apps", [
-        Command("open ‹app›", "abre ‹app›", "An app on the list (Decisions › Apps)",
-                "Una app de la lista (Decisiones › Apps)", "open_app"),
+        Command("open ‹app›", "abre ‹app›", "An app on the agent's list (panel: Decisions › Apps & hooks)",
+                "Una app de la lista del agente (panel: Decisions › Apps & hooks)", "open_app"),
         Command("go home", "inicio", "The TV's home screen", "La pantalla de inicio", "home"),
         Command("‹search› on YouTube", "busca ‹búsqueda› en YouTube",
                 "The top result, in TizenTube", "El primer resultado, en TizenTube", "youtube"),
@@ -156,13 +164,14 @@ SECTIONS = [
         Command("play ‹title› with ‹language› subtitles · play ‹title› in ‹language›",
                 "pon ‹título› con subtítulos en ‹idioma› · pon ‹título› en ‹idioma›",
                 "“in ‹language›” is the audio", "«en ‹idioma›» es el audio", "sequence"),
-        Command("cancel", "cancela", "Stops what's left of it (Back too)", "Para lo que falta (Atrás también)",
-                "cancel"),
+        Command("cancel · never mind", "cancela · olvídalo",
+                "Stops a start on its way, or what's left of a chain (Back too)",
+                "Para lo que se está poniendo, o lo que falta (Atrás también)", "cancel"),
     ]),
     Section("When it gets it wrong", "Si se equivoca", [
         Command("that's wrong", "eso está mal",
-                "Marks the last command: teach it in the panel (Activity)",
-                "Marca la última orden: enséñale la buena en el panel (Actividad)", "wrong"),
+                "Marks the last command: teach it the right one in the panel (Activity)",
+                "Marca la última orden: enséñale la buena en el panel (Activity)", "wrong"),
     ]),
 ]
 

@@ -1,6 +1,7 @@
 """About TV Agent: each part's version in this copy, running or on the TV, and the latest on GitHub, with
 checksums that tell a release from a local build (each folder's git tree against its release tag, the TV app's APK
-against the release's); the pinned downloads (llama.cpp, the models), the models in use, and where things live."""
+against the release's); TV Agent Player and the phone app (their own repositories) as the agent sees them; the pinned
+downloads (llama.cpp, the models), the models in use, and where things live."""
 import html
 import json
 import platform
@@ -13,12 +14,14 @@ from PySide6.QtGui import QGuiApplication, QTextDocument
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QPushButton, QScrollArea, QVBoxLayout
 
 from . import __version__
-from .common import AMBER, GREEN, REPO, agent_config, agent_stt, android_version, api
+from .common import AMBER, GREEN, PLAYER_NAMES, REPO, WHERE, agent_config, agent_stt, android_version, api
 
 AUTHOR = "boujuan"
 GITHUB = "https://github.com/boujuan/tv-agent"
 SLUG = "boujuan/tv-agent"
 PARTS = (("panel", "Panel"), ("server", "Voice agent"), ("android", "TV app"))
+APPS = (("tvplayer", "TV Agent Player", "https://github.com/boujuan/tv-agent-player"),      # their own repositories
+        ("phone", "Phone app", "https://github.com/boujuan/tv-agent-phone"))
 
 
 def git(*args: str) -> str | None:
@@ -111,7 +114,8 @@ def collect() -> dict:
     info = {"versions": v, "source": {p: source_state(p, ver) for p, ver in v.items() if ver},
             "describe": git("describe", "--tags", "--always", "--dirty"), "branch": git("branch", "--show-current"),
             "pinned": pinned()}
-    for key, path, timeout in (("agent", "/v1/about", 3), ("tv", "/v1/tv/packages", 25)):
+    for key, path, timeout in (("agent", "/v1/about", 3), ("tv", "/v1/tv/packages", 25), ("updates", "/v1/updates", 5),
+                               ("clients", "/v1/clients", 5)):
         try:
             info[key] = api(path, timeout=timeout)
         except Exception as e:                   # the agent or the TV not answering: said in the dialog
@@ -122,8 +126,8 @@ def collect() -> dict:
 
 def render(info: dict | None) -> str:
     """The dialog's text (HTML)."""
-    head = (f"<h2 style='margin-bottom:2px'>TV Agent</h2>Voice control for an Android TV: the remote's mic button → "
-            f"this laptop (speech to text, decisions) → the TV.<br>By <b>{AUTHOR}</b> · "
+    head = (f"<h2 style='margin-bottom:2px'>TV Agent</h2>Voice control for an Android TV: the remote's mic button or "
+            f"a phone → this laptop (speech to text, decisions) → the TV.<br>By <b>{AUTHOR}</b> · "
             f"<a href='{GITHUB}'>{GITHUB.removeprefix('https://')}</a> · MIT License")
     if info is None:
         return head + "<p style='color:gray'>Checking the TV and GitHub…</p>"
@@ -162,6 +166,19 @@ def render(info: dict | None) -> str:
             latest = "<span style='color:gray'>none yet</span>"
         rows.append(f"<tr><td><b>{name}</b></td><td>{here}<br><span style='color:gray'>"
                     f"{html.escape(info['source'].get(part, ''))}</span></td><td>{now}</td><td>{latest}</td></tr>")
+    comps = (info.get("updates") or {}).get("components") or {}
+    phones = [d for d in (info.get("clients") or {}).get("devices") or [] if d.get("app_version")]
+    for key, name, url in APPS:
+        if key == "tvplayer":
+            app = tv.get("tvplayer") or {}
+            now = (f"<span style='color:{AMBER}'>the TV isn't answering</span>" if "error" in tv else
+                   f"{app['version']} on the TV" if app.get("installed") else "not on the TV")
+        else:
+            now = (", ".join(f"{html.escape(d['app_version'])} on {html.escape(d['name'])}" for d in phones)
+                   or "<span style='color:gray'>no phone has said its version</span>")
+        latest = (comps.get(key) or {}).get("latest") or "<span style='color:gray'>not checked</span>"
+        rows.append(f"<tr><td><b>{name}</b></td><td><a href='{url}'>{url.removeprefix('https://github.com/')}</a>"
+                    f"</td><td>{now}</td><td>{latest}</td></tr>")
     table = ("<table cellspacing=0 cellpadding=5><tr style='color:gray'><td></td><td>This copy</td>"
              "<td>Running / on the TV</td><td>Latest on GitHub</td></tr>" + "".join(rows) + "</table>")
     git_line = (f"git <code>{html.escape(info.get('describe') or '?')}</code> on {info.get('branch') or '?'}"
@@ -170,11 +187,15 @@ def render(info: dict | None) -> str:
     models = ""
     if "version" in agent:
         stt = agent_stt.MODELS.get(agent["stt_model"])
+        where = dict(WHERE)
         models = ("<h4>In use</h4>"
-                  f"Speech to text: {agent['stt_where']} · {stt.label if stt else agent['stt_model']} · hosted "
+                  f"Speech to text: {where.get(agent['stt_where'], agent['stt_where'])} · "
+                  f"{stt.label if stt else agent['stt_model']} · hosted "
                   f"{agent_stt.HOSTED.get(agent['stt_hosted_model'], agent['stt_hosted_model'])}<br>"
-                  f"Decision model: {agent['d1_where']} · {html.escape(agent['d1_model'].rsplit('/', 1)[-1])} · "
-                  f"hosted {agent['hosted_d1_model']}<br>LLM: {agent['llm_model']} · player: {agent['player']}")
+                  f"Decision model: {where.get(agent['d1_where'], agent['d1_where'])} · "
+                  f"{html.escape(agent['d1_model'].rsplit('/', 1)[-1])} · hosted {agent['hosted_d1_model']}<br>"
+                  f"LLM: {agent['llm_model']} · films and series play in "
+                  f"{PLAYER_NAMES.get(agent['player'], agent['player'])}")
         players = [f"{n} {tv[k]['version']}" for k, n in (("tvplayer", "TV Agent Player"), ("kodi", "Kodi"),
                                                              ("just", "Just Player"))
                    if tv.get(k, {}).get("installed")]

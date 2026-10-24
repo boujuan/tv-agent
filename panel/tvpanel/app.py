@@ -210,8 +210,9 @@ class Panel(QMainWindow):
         self.unsaved.setText(f"<span style='color:{AMBER}'>● unsaved: {', '.join(parts)}</span>" if parts else "")
         self.save_btn.setEnabled(bool(parts))
         self.revert_btn.setEnabled(bool(parts))
-        self.save_btn.setToolTip("Rules save live; settings restart the voice agent (what's playing carries on)"
-                                 if parts else "Nothing to save: the speech, model and step choices save at once")
+        self.save_btn.setToolTip("Rules and most settings apply live; ports and the like restart the voice agent "
+                                 "(what's playing carries on)" if parts else
+                                 "Nothing to save: the speech, model and step choices save at once")
         for w, name in ((self.settings, "Settings"), (self.decisions, "Decisions")):
             self.tabs.setTabText(self.tabs.indexOf(w), f"{name} ●" if w.dirty else name)
 

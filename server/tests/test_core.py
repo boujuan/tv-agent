@@ -1098,7 +1098,8 @@ def test_a_start_whose_links_fail_leaves_what_plays_alone():
 
 
 def test_every_command_in_the_list_is_understood_in_english_and_spanish():
-    """Each pattern of commands.py, expanded and filled in, gets its action from the rules alone (no model)."""
+    """Each pattern of commands.py, expanded and filled in, gets its action from the rules alone (no model); one the
+    LLM step decides (an episode described) is left to it, not taken for a title."""
     import asyncio
     from tv_agent.commands import SECTIONS, expand
 
@@ -1115,8 +1116,9 @@ def test_every_command_in_the_list_is_understood_in_english_and_spanish():
             for lang in ("en", "es"):
                 for text in expand(c.say(lang), lang):
                     got = asyncio.run(r.decide(text)).action
-                    if got.type != c.type:
-                        wrong.append((text, c.type, got.type))
+                    want = c.type if c.by == "rules" else "none"
+                    if got.type != want:
+                        wrong.append((text, want, got.type))
     assert not wrong, wrong
 
 

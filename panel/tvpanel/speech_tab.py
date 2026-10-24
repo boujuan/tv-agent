@@ -99,9 +99,10 @@ class SpeechToText(QWidget):
         for code, label in (("native", "Your native language"), ("", "None: the model guesses"), ("es", "Spanish"),
                             ("en", "English")):
             self.language.addItem(label, code)
-        self.language.setToolTip("The language the hosted model expects. A Spanish hint still gets English commands "
-                                 "right; an English one garbles Spanish; with none it often writes short Spanish "
-                                 "commands in another language")
+        self.language.setToolTip("The language the hosted model expects; each has its own vocabulary. On 190 of "
+                                 "your recorded commands (2026-10-24, AssemblyAI) the action was right for 86% with no "
+                                 "hint (8.0% of words misheard), 85% with Spanish (8.1%), 84% with English (10.8%): "
+                                 "an English hint garbles Spanish")
         self.language.activated.connect(lambda _i: self.decisions.set_pipeline(
             {"stt_language": self.language.currentData()}))
         form.addRow("Language hint", self.language)
@@ -339,7 +340,7 @@ class VocabularyDialog(QDialog):
     def __init__(self, speech: SpeechToText):
         super().__init__(speech)
         self.speech, self.panel = speech, speech.panel
-        self.setWindowTitle("Speech-to-text vocabulary")
+        self.setWindowTitle("Speech to text vocabulary")
         self.resize(720, 780)
         self.saved: dict = {}                   # as the agent (or config.toml) has it
         self.own: list[str] = []
@@ -356,7 +357,7 @@ class VocabularyDialog(QDialog):
         self.groups: dict[str, tuple] = {}      # key: (header item, note item, name items)
         self.saving = self.closed = False
         v = QVBoxLayout(self)
-        v.addWidget(dim("Names the hosted speech-to-text should hear as they're written (AssemblyAI models use "
+        v.addWidget(dim("Names the hosted speech model should hear as they're written (AssemblyAI models use "
                         "them, the first 100). Each language hint has its own list: the names' language leans how "
                         "borderline words come out. What's playing and Continue Watching go first, then yours, what "
                         "you watched, Twitch and the rest of the library; few and distinctive works best."))

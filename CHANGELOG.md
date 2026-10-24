@@ -4,6 +4,36 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
+## panel — unreleased
+
+### Changed
+- Settings › **Save** writes only what you changed (a binge mode or language said by voice meanwhile stays), and the
+  running voice agent takes it live from the next command, as the phones' changes, instead of always restarting:
+  player, quality, languages, binge mode, auto skip, the episode check, history, Twitch favourites and updates live;
+  the addresses are read again by the agent; only ports, ADB, Kodi, phones on or off and the decision model's server
+  restart it.
+- Settings › Advanced has every setting left: phones on or off, the ports of TV Agent Player and of the phones and
+  their audio, and more addresses for the phones and the player (Tailscale's is offered by itself). A test checks
+  every setting of the agent has a control here or in Decisions.
+- Settings: TV Agent Player is the recommended player and the choices say what each can't do (Just Player: no track
+  changes or intro skips); Native language comes first under Languages; "Pair the TV apps again" pairs TV Agent Player
+  too.
+- The computer's microphone ends a command by the TV app's rule (0.9.2): quiet measured against the sound around you
+  once you've spoken, up to 15 s (was 10, and a TV on behind you kept it listening to the end).
+- About: TV Agent Player on the TV and each phone's app against their latest releases; "In use" in words (Hosted, this
+  laptop if it fails) and the player by name.
+- Commands: the ones only the LLM decides are marked; the footer's link goes to Decisions › Speech to text (it
+  pointed at a "Settings › Voice" that no longer exists).
+- Activity: chains are named as such (how it was decided, the response times); results over a second in seconds.
+- Decisions: a hosted decision model is named in the explanation (it said "Liquid's hosted d1" for any); the title
+  choice's help says a pick under 40% is listed on the TV instead; the diagram's input and action say phone and
+  chain.
+- Decisions › Speech to text: the language hint's tooltip gives the measured results on 190 of your commands
+  (2026-10-24) instead of the first 30's.
+- Overview › TV: the TV app's button says it builds from this copy's code (releases install from Settings ›
+  Updates).
+- "Speech to text" and "decision model" said the same way on every tab.
+
 ## server — unreleased
 
 ### Added
@@ -39,6 +69,14 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   JSON in Decisions): the words said, what it should have done (taught unless unticked), the right episode or
   moment; it becomes a voice test, or one of your sentences, and an episode or scene case. They replace "Add to
   voice tests…", "Teach the right action…" and "Mark as wrong".
+
+### Changed
+- "What can you do?" (the TV's and the panel's list): finding an episode by what happens in it ("play the episode of
+  The Bear where …", decided by the LLM, marked so in the panel), "jump to when …", "yes" for the first of a list,
+  "cancel" also stopping a start on its way, "skip the intro" going 90 s ahead with no intro times, jumps exact in TV
+  Agent Player too (it said Kodi only), and a title it isn't sure of being listed.
+- Replies that pointed at old places now point at the panel's: "Update the TV app to see the list" (Settings ›
+  Updates, not `android/build-and-install.sh`), the history being off (Settings › Other), the LLM's key.
 
 ## server 0.12.0 — 2026-10-24
 

@@ -1,7 +1,8 @@
 """Decisions tab: how a command becomes an action, drawn as a diagram whose decision steps can be dragged into another
-order and switched on or off (live, /v1/pipeline); a tester that lights up the path a sentence takes; and editors
-for every rule (clean-up, fixed phrases, patterns, the LLM, the d1 model, apps and hooks). Saving sends the rules to
-the agent, which checks them and uses them at once (no restart)."""
+order and switched on or off (live, /v1/pipeline); a tester that lights up the path a sentence takes (and, for a
+command from the history, its whole trace); and editors for every rule (speech to text, clean-up, fixed phrases,
+patterns, the LLM, the decision model, apps and hooks). Saving sends the rules to the agent, which checks them and
+uses them at once (no restart)."""
 import copy
 import html
 import json
@@ -262,9 +263,9 @@ class FlowDiagram(QWidget):
         self.clear()
 
     def set_counts(self, counts: dict):
-        self.sub.update({"input": "remote · laptop mic · typed", "stt": "Parakeet, on this laptop",
-                         "clean": "fillers, mishearing fixes", "unclear": "nothing happens",
-                         "action": "one typed action (or two)", "tv": "player · app · volume"})
+        self.sub.update({"input": "remote · phone · laptop mic · typed", "clean": "fillers, mishearing fixes",
+                         "unclear": "nothing happens", "action": "one action, or a chain of 3",
+                         "tv": "player · app · volume"})
         self.update()
 
     def show_trace(self, path: list[str], walked: list[str], states: dict[str, str], hit: str, notes: dict,
@@ -955,9 +956,11 @@ class Decisions(QWidget):
         mf.addRow("Title-choice question", self.title_q)
         mf.addRow("Candidates for a title choice", self.cands)
         mf.addRow("", dim("When a title search finds several close names and none clearly wins (“the office”: the US "
-                          "or the UK series), the decision model picks among the top ones, with your sentence. More "
-                          "candidates give it more chance to include the right one but a harder choice; your library "
-                          "is checked first and Cinemeta's popularity settles most ties before it's asked."))
+                          "or the UK series), the decision model picks among the top ones, with your sentence. Under "
+                          "40% sure, or when it can't be asked, they're listed on the TV instead, its likeliest first "
+                          "(“number 2” plays that one). More candidates give it more chance to include the right one "
+                          "but a harder choice; your library is checked first and Cinemeta's popularity settles most "
+                          "ties before it's asked."))
         ml.addLayout(mf)
         ml.addWidget(dim("Intents are the options the decision model chooses between; it reads only their "
                          "descriptions. Built-in intents use code to pull out titles and numbers; your own intents do "
@@ -1376,7 +1379,7 @@ class Decisions(QWidget):
         if step == "d1" and on and where != "hosted":
             then = self._offer_local
         elif step == "d1" and not on:
-            then = lambda: self._offer_stop("The d1 step is off.")        # noqa: E731
+            then = lambda: self._offer_stop("The decision model step is off.")        # noqa: E731
         self.set_pipeline({"off": sorted(off)}, then)
 
     def where_changed(self, where: str):
@@ -1546,8 +1549,8 @@ class Decisions(QWidget):
             if st == "fallback":
                 if t.get("accepted"):
                     hit = "fallback"
-                    lines.append(f"No model answered: treated as <b>{t['intent']}</b> (the d1 tab's “When no model "
-                                 "answers”)")
+                    lines.append(f"No model answered: treated as <b>{t['intent']}</b> (Decision model › “When no "
+                                 "model answers”)")
                 continue
             step = step_of.get(st)
             if not step:
@@ -1608,11 +1611,12 @@ class Decisions(QWidget):
             elif st == "model":
                 if t.get("available") is False:
                     states[step], notes[step] = "out", "didn't answer"
-                    lines.append(f"{n} <span style='color:{AMBER}'>d1 didn't answer</span> "
+                    lines.append(f"{n} <span style='color:{AMBER}'>The decision model didn't answer</span> "
                                  f"({dict(WHERE).get(t.get('where'), '').lower()})")
                     continue
                 top = " · ".join(f"{k} {p:.2f}" for k, p in t.get("top", []))
-                who = "Liquid's hosted d1" if t.get("source") == "hosted" else "the local d1"
+                who = (f"The hosted decision model ({html.escape(str(t.get('model') or 'd1'))})"
+                       if t.get("source") == "hosted" else "The local d1")
                 lines.append(f"{n} {who} picked <b>{t.get('intent')}</b> with confidence "
                              f"{t.get('confidence', 0):.2f} (needs ≥ {t.get('threshold', 0):.2f}) — top: {top}")
                 if t.get("accepted"):

@@ -36,9 +36,10 @@ ICON = PANEL / "tv-agent.svg"
 TV_AGENT = Path(shutil.which("tv-agent") or REPO / "server" / ".venv" / "bin" / "tv-agent")
 GREEN, AMBER, RED, GREY, BLUE, PURPLE = "#2fb170", "#e0a030", "#e05555", "#8a8f98", "#4c8dff", "#9b6cf5"
 SERVICES = [
-    ("tv-agent", "Voice agent", "Speech-to-text, decisions and TV control. The remote's mic button talks to it."),
-    ("llama-d1", "Decision model", "Liquid AI d1-3B on this laptop's GPU: the local d1 step (Decisions tab). Not "
-                                   "needed when that step is off or uses Liquid's hosted d1."),
+    ("tv-agent", "Voice agent", "Speech to text, decisions and TV control: the remote's mic button, the phones and "
+                                "this panel talk to it."),
+    ("llama-d1", "Decision model", "Liquid AI d1-3B on this laptop's GPU: the local decision model (Decisions tab). "
+                                   "Not needed when that step is off or only a hosted model is asked."),
 ]
 STYLE = """
 QFrame#card { border: 1px solid palette(midlight); border-radius: 12px; background: palette(base); }

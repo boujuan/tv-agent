@@ -116,8 +116,8 @@ class Phones(QWidget):
             self.pair_button.setEnabled(False)
             return
         if not res.get("enabled"):
-            self.status.setText(f"<span style='color:{AMBER}'>⚠ Phones are off (<code>phones = false</code> in "
-                                "config.toml)</span>")
+            self.status.setText(f"<span style='color:{AMBER}'>⚠ Phones are off (Settings › Advanced › Phones)"
+                                "</span>")
         elif not res.get("listening"):
             self.status.setText(f"<span style='color:{RED}'>✗ The phones' listener isn't running (port "
                                 f"{res.get('port')} taken? see the voice agent's log)</span>")
@@ -150,7 +150,8 @@ class Phones(QWidget):
             elif newer(res.get("latest_app"), version):
                 issues.append(f"{html.escape(res['latest_app'])} is out (the app updates itself: More › About)")
             if last and ip.startswith("100.") and not any(a.startswith("100.") for a in res.get("addresses") or []):
-                issues.append("it last came over Tailscale, which the agent isn't listening on now (phone_hosts)")
+                issues.append("it last came over Tailscale, which the agent isn't listening on now (is Tailscale "
+                              "running here?)")
             label = QLabel(f"📱 <b>{html.escape(d['name'])}</b> {link}<br><span style='color:gray'>app "
                            f"{html.escape(version or '?')} · paired {ago(d['paired'])}</span>"
                            + "".join(f"<br><span style='color:{AMBER}'>⚠ {i}</span>" for i in issues))

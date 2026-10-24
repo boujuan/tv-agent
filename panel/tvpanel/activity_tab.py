@@ -1,7 +1,7 @@
 """Activity tab: give a command (typed, or spoken into the laptop's mic), see what was said and done, and
 export, import or erase that history (~/.local/share/tv-agent/activity.jsonl). Commands marked “that's wrong” (by
 voice or here) can be taught the right action: that sentence then does it (learned.json). Each command's timings
-(speech-to-text, deciding, after your last word, doing it) and model costs are drawn below; with recordings kept,
+(speech to text, deciding, after your last word, doing it) and model costs are drawn below; with recordings kept,
 a command's audio can be played and transcribed again by another model."""
 import csv
 import html
@@ -27,16 +27,21 @@ FIELDS = ["t", "source", "heard", "type", "via", "rule", "confidence", "ok", "sa
 
 
 def describe_how(e: dict) -> str:
-    via = {"phrase": "fixed phrase", "pattern": "pattern", "d1": "d1 model", "grammar": "fixed phrase",
-           "cue": "pattern", "llm": "LLM", "split": "two commands"}.get(e.get("via", ""), e.get("via", ""))
+    via = {"phrase": "fixed phrase", "pattern": "pattern", "d1": "decision model", "grammar": "fixed phrase",
+           "cue": "pattern", "llm": "LLM", "chain": "chain", "split": "two commands"}.get(e.get("via", ""),
+                                                                                       e.get("via", ""))
     rule = f" {e['rule']}" if e.get("rule") and e.get("via") != "d1" else ""
     conf = f" {e.get('confidence', 0):.2f}" if e.get("via") == "d1" else ""
     return f"{str(e.get('type', '')).replace('_', ' ')} · {via}{rule}{conf}"
 
 
 def via_label(e: dict) -> str:
-    return {"phrase": "rules", "pattern": "rules", "llm": "LLM", "d1": "decision model", "split": "two commands",
-            "remote": "remote", "none": "nothing"}.get(e.get("via", ""), e.get("via", ""))
+    return {"phrase": "rules", "pattern": "rules", "llm": "LLM", "d1": "decision model", "chain": "a chain",
+            "split": "two commands", "remote": "remote", "none": "nothing"}.get(e.get("via", ""), e.get("via", ""))
+
+
+def took(ms: int) -> str:
+    return f"{ms / 1000:.1f} s" if ms >= 1000 else f"{ms} ms"
 
 
 def stt_name(stt: str | None) -> str:
@@ -44,7 +49,7 @@ def stt_name(stt: str | None) -> str:
 
 
 class TimingChart(QWidget):
-    """Each command as two bars: understanding it (speech-to-text, deciding, waiting for your pause; from your last
+    """Each command as two bars: understanding it (speech to text, deciding, waiting for your pause; from your last
     word when spoken) and doing it. Newest on the right; hover one for its numbers."""
     PARTS = (("stt", GREEN, "speech to text"), ("decide", BLUE, "deciding"), ("wait", GREY, "waiting for your pause"))
 
@@ -140,7 +145,7 @@ class TimingChart(QWidget):
                     if e.get("stt_ms"):
                         lines.append(f"speech to text {e['stt_ms']} ms ({stt_name(e.get('stt'))})")
                     if e.get("stt_error"):
-                        lines.append(f"hosted speech-to-text failed after {e.get('stt_failed_ms', '?')} ms")
+                        lines.append(f"hosted speech to text failed after {e.get('stt_failed_ms', '?')} ms")
                     if e.get("after_speech_ms"):
                         lines.append(f"{e['after_speech_ms']} ms after your last word")
                     if e.get("ms") is not None:
@@ -173,7 +178,8 @@ class Activity(QWidget):
                            "microphone: it does the same as the remote's mic button</span>"))
         row = QHBoxLayout()
         self.cmd = QLineEdit()
-        self.cmd.setPlaceholderText("e.g. pause · volume 15 · play the bear season 3 episode 2 · go home")
+        self.cmd.setPlaceholderText("e.g. pause · volume 15 · play the bear season 3 episode 2 and go to minute 12 · "
+                                    "go home")
         self.cmd.returnPressed.connect(self.send)
         send = QPushButton("Send")
         send.clicked.connect(self.send)
@@ -239,9 +245,10 @@ class Activity(QWidget):
                                   QHeaderView.ResizeMode.Stretch)):
             hh.setSectionResizeMode(c, mode)
         h.addWidget(self.table)
-        h.addWidget(dim("Double-click a line to see in Decisions what happened: how it was decided, how its title "
-                        "was found and how it started, step by step. Right-click to decide it again now, mark it "
-                        "wrong or teach it the right action (saying “that's wrong” marks the last one)."))
+        h.addWidget(dim("Double-click a line to see in Decisions what happened: how it was decided, then each step "
+                        "it took (its title, episode or scene found, the streams, the start), as recorded. Right-click "
+                        "to decide it again now, mark it wrong or teach it the right action (saying “that's wrong” "
+                        "marks the last one)."))
         lay.addWidget(hist, 3)
 
         lat = card()
@@ -318,7 +325,7 @@ class Activity(QWidget):
             self.table.setRowCount(len(shown))
             for i, e in enumerate(shown):
                 when = time.strftime("%a %d %b %H:%M:%S", time.localtime(e["t"]))
-                result = (e.get("say") or "") + (f"  ({e['ms']} ms)" if e.get("ms") else "")
+                result = (e.get("say") or "") + (f"  ({took(e['ms'])})" if e.get("ms") else "")
                 heard = e.get("heard", "")
                 if e.get("recording"):
                     heard = f"🔊 {heard}"
@@ -362,7 +369,7 @@ class Activity(QWidget):
         out = [line("After your last word", [e.get("after_speech_ms") for e in spoken]),
                line("Speech to text, this laptop", [e.get("stt_ms") for e in spoken if e.get("stt") == "local"]),
                line("Speech to text, hosted", [e.get("stt_ms") for e in spoken if e.get("stt") not in (None, "local")])]
-        for who in ("rules", "LLM", "decision model", "two commands"):
+        for who in ("rules", "LLM", "decision model", "a chain"):
             out.append(line(f"Deciding: {who}", [e.get("decide_ms") or 0.1 for e in rows if via_label(e) == who
                                                  and e.get("decide_ms") is not None]))
         kinds: dict[str, list] = {}

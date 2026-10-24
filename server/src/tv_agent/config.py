@@ -58,7 +58,8 @@ class Config:
     stt_where: str = "local"                # "local", "hosted" (OpenRouter), or "local-first" / "hosted-first" (the other if it fails)
     stt_hosted_model: str = "mistralai/voxtral-mini-transcribe-3-0"   # an OpenRouter transcription model
     # The hosted model's language hint: "native" (native_language: a Spanish hint keeps English commands intact, an
-    # English one garbles Spanish), "" (it guesses, and gets short commands wrong), or an ISO 639-1 code
+    # English one garbles Spanish), "" (it guesses: on the first 30 recorded commands it got short ones wrong, on 190
+    # it did as well as a Spanish hint, 2026-10-24), or an ISO 639-1 code
     stt_language: str = "native"
     # Names the hosted model should hear (AssemblyAI's keyterms: "Stremio", not "este remedio"), and whether your
     # library's titles and Twitch favourites are added to them

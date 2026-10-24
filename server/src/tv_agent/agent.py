@@ -2408,7 +2408,7 @@ class Agent:
         if np is None:
             return Outcome(False, "Nothing of yours is playing to search")
         if self.llm is None:
-            return Outcome(False, "Finding a moment needs the LLM (Settings › API keys: OpenRouter)")
+            return Outcome(False, "Finding a moment needs the LLM (the panel: Settings › API keys, OpenRouter)")
         if chain.cut_off(a.what) or chain.cut_off(HEARD.get()):          # "… where Paul rides the"
             return Outcome(False, f"“{a.what}” sounds cut off: say it again")
         m = re.match(r"^tt\d+:(\d+):(\d+)$", np.video_id)
@@ -2580,7 +2580,7 @@ class Agent:
         title = "Lo que puedes decir" if lang == "es" else "What you can say"
         if not await self._screen({"title": title, "mode": "help", "items": items, "legend": LEGEND[lang],
                                    "hint": TV_HINT[lang]}):
-            return Outcome(False, "Update the TV app to see the list (android/build-and-install.sh)")
+            return Outcome(False, "Update the TV app to see the list (the panel: Settings › Updates)")
         return Outcome(True, title)
 
     async def _info(self, a: Info) -> Outcome:
@@ -2844,7 +2844,7 @@ class Agent:
     async def _wrong(self, a: Wrong) -> Outcome:
         """"That's wrong": the last command is marked in the history, to be taught in the panel."""
         if not self.cfg.log_transcripts:
-            return Outcome(False, "The history is off, so there's nothing to mark (panel: Settings)")
+            return Outcome(False, "The history is off, so there's nothing to mark (panel: Settings › Other)")
         e = await asyncio.to_thread(activity.mark_last_wrong)
         if not e:
             return Outcome(False, "Nothing to mark yet")

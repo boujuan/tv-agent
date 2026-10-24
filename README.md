@@ -27,7 +27,7 @@ CachyOS (KDE Plasma). Anything it doesn't understand does nothing ("Didn't get t
 | Folder | What it is | Runs on | Release tags |
 |---|---|---|---|
 | [`server/`](server/README.md) | The daemon (`tv-agent serve`), the CLI, the decision rules and the MCP server for Claude | Linux (systemd user services) | `server-vX.Y.Z` |
-| [`panel/`](panel/README.md) | Desktop app with a tray icon: status, services, resource use, activity, decision rules, settings, laptop mic | Linux (Qt 6 / PySide6) | `panel-vX.Y.Z` |
+| [`panel/`](panel/README.md) | Desktop app with a tray icon: status, services, resource use, activity and traces, decision rules, settings, updates, phones, laptop mic | Linux (Qt 6 / PySide6) | `panel-vX.Y.Z` |
 | [`android/`](android/README.md) | The TV app the mic button opens (streams the mic, shows the reply) and its on-screen lists | Android TV 14 (API 34) | `android-vX.Y.Z` |
 | [`packaging/`](packaging/README.md) | Package recipes (AUR drafts for now) | | |
 | `docs/` | [Phase 0](docs/phase0/README.md) measurements (mic path, models); [research and decisions, 2026-10-22](docs/research-2026-10-22.md) (players, decision model, speech-to-text, add-on data, roadmap) | | |

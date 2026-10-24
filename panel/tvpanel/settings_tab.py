@@ -1,6 +1,6 @@
-"""Settings tab: the agent's settings (config.toml; the window's Save writes them and restarts the agent) and this
-panel's own behaviour (tray, notifications, start at login; applied at once). Also export/import of everything, the
-checks, and whether the chosen player is on the TV."""
+"""Settings tab: the agent's settings (config.toml; the window's Save writes them, live in the running agent where it
+takes them, else it restarts) and this panel's own behaviour (tray, notifications, start at login; applied at once).
+Also export/import of everything, and whether the chosen player is on the TV."""
 import json
 import os
 import subprocess
@@ -25,6 +25,34 @@ SUBTITLES_WHEN = [("Only when the audio isn't in my native language", "foreign")
 SUBTITLES = [("English", "eng"), ("Spanish", "spa"), ("Chinese (Simplified · 简体)", "chs"),
              ("Chinese (Traditional · 繁體)", "cht"), ("Chinese (either)", "chi"), ("French", "fre"),
              ("Italian", "ita"), ("German", "ger"), ("Portuguese", "por"), ("Japanese", "jpn"), ("Korean", "kor")]
+# The settings the running agent changes live (remote.py's SETTINGS, POST /v1/settings: from the next command), and
+# the ones it reads again when config.toml changes (server.py's ADDRESS_SETTINGS); the rest need it restarted
+LIVE = ("player", "max_height", "max_mbps", "probe_streams", "binge", "auto_skip", "audio_language",
+        "subtitle_languages", "subtitles", "native_language", "twitch_favorites", "log_transcripts", "updates",
+        "check_episodes")
+REREAD = ("lan_host", "tv_hosts", "phone_hosts")
+ADVANCED = (   # key, label, tooltip; a port is a number box, phone_hosts a list, phones a switch
+    ("lan_host", "This computer on the TV's network", "Empty: worked out (never 0.0.0.0)"),
+    ("phone_hosts", "More addresses for phones and the player",
+     "Besides the one on the TV's network, comma-separated: an address the phones and TV Agent Player reach this "
+     "computer at elsewhere. Its Tailscale address is offered by itself while Tailscale runs"),
+    ("lan_port", "Port for the TV app", ""), ("stream_port", "Port for the TV app's audio", ""),
+    ("player_port", "Port for TV Agent Player", "Its TLS connection to the agent"),
+    ("phones", "Phones", "Off: no listener for the phones; the paired ones stay paired"),
+    ("phone_port", "Port for the phones", "Their HTTPS listener"),
+    ("phone_stream_port", "Port for the phones' audio", "TLS"),
+    ("local_port", "Local API port (panel, CLI)", ""), ("adb_port", "TV's ADB port", ""),
+    ("adb_key", "ADB key file", ""), ("kodi_port", "Kodi web port", ""), ("kodi_user", "Kodi web user", ""),
+    ("d1_url", "Local decision model server", "llama.cpp's address (llama-d1)"),
+    ("llama_server", "llama-server program", "Empty: on PATH or under ~/.local/opt; after changing it: "
+                                             "tv-agent setup services"))
+
+
+def how_to_apply(changed: dict) -> tuple[dict, list[str]]:
+    """The changed settings the running agent takes live (sent over /v1/settings), and the ones it needs a restart
+    for (the addresses it reads again from config.toml need neither)."""
+    live = {k: v for k, v in changed.items() if k in LIVE}
+    return live, sorted(k for k in changed if k not in LIVE and k not in REREAD)
 
 
 def toml(v) -> str:
@@ -94,6 +122,7 @@ class Settings(QScrollArea):
         self.panel = panel
         self.dirty = False
         self._loading = False
+        self.shown: dict = {}                       # the values as loaded
         self.note = Say(panel)                      # messages go to the window's status bar
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -108,9 +137,12 @@ class Settings(QScrollArea):
         f1.setContentsMargins(16, 14, 16, 14)
         f1.addRow(QLabel("<b>Playback</b>"))
         self.player = QComboBox()
-        self.player.addItem("TV Agent Player · fastest; exact jumps, tracks by name, add-on subtitles", "tvplayer")
-        self.player.addItem("Kodi · full control (exact seeks, per-file languages)", "kodi")
-        self.player.addItem("Just Player · simple screen, media-key control", "just")
+        self.player.addItem("TV Agent Player (recommended) · fastest starts, exact jumps with previews", "tvplayer")
+        self.player.addItem("Kodi · exact jumps, tracks, add-on subtitles; slower to start", "kodi")
+        self.player.addItem("Just Player · simple: no track changes or intro skips", "just")
+        self.player.setToolTip("TV Agent Player also has loading and pause screens, and Back on its loading screen "
+                               "cancels a start. Just Player can't change tracks, skip intros or switch to another "
+                               "copy for a language")
         self.height_ = QComboBox()
         for label, v in (("4K (2160p)", 2160), ("1440p", 1440), ("1080p", 1080), ("720p", 720)):
             self.height_.addItem(label, v)
@@ -156,8 +188,9 @@ class Settings(QScrollArea):
         f2.setContentsMargins(16, 14, 16, 14)
         f2.addRow(QLabel("<b>Languages</b>"))
         f2.addRow(dim("Titles made in your native language play in it; everything else in this audio when the file "
-                      "has it (streams with it come first), with the first available subtitles in the order below. "
-                      "Also by voice: “from now on, audio in Spanish”, “a partir de ahora sin subtítulos”."))
+                      "has it (streams with it come first; a file without it gives way to a copy that has it), with "
+                      "the first available subtitles in the order below. Also by voice: “from now on, audio in "
+                      "Spanish”, “a partir de ahora sin subtítulos”."))
         self.audio = QComboBox()
         self.audio.addItem("Original language (the one it was made in)", "original")
         self.native = QComboBox()
@@ -168,12 +201,12 @@ class Settings(QScrollArea):
         for label, code in SUBTITLES_WHEN:
             self.subs_when.addItem(label, code)
         self.subs = OrderedChecklist(SUBTITLES)
+        f2.addRow("Native language", self.native)
         f2.addRow("Audio", self.audio)
         f2.addRow("Subtitles show", self.subs_when)
         f2.addRow("Subtitles, in order", self.subs)
-        f2.addRow("Native language", self.native)
-        f2.addRow(dim("Kodi tells Simplified and Traditional Chinese apart by the track's name; Just Player only "
-                      "knows “Chinese” and shows the first Chinese track."))
+        f2.addRow(dim("TV Agent Player and Kodi tell Simplified and Traditional Chinese apart by the track's name; "
+                      "Just Player only knows “Chinese” and shows the first Chinese track."))
         outer.addWidget(lang)
 
         self.keys_card = card()
@@ -182,7 +215,7 @@ class Settings(QScrollArea):
         f5.addRow(QLabel("<b>API keys</b> <span style='color:gray'>· checked with the service, then kept in "
                          "secrets.toml (never shown)</span>"))
         self.key_lines = {}
-        for what, name, used in (("openrouter", "OpenRouter", "the LLM step, hosted speech-to-text and decision "
+        for what, name, used in (("openrouter", "OpenRouter", "the LLM step, hosted speech to text and decision "
                                                               "models"),
                                  ("liquid", "Liquid", "d1 and d1-ultra through Liquid's own API")):
             line = QHBoxLayout()
@@ -195,7 +228,7 @@ class Settings(QScrollArea):
             line.addWidget(b)
             self.key_lines[what] = (status, name, used)
             f5.addRow(line)
-        f5.addRow(dim("Which steps decide a command, their order and models, and speech-to-text: the Decisions tab, "
+        f5.addRow(dim("Which steps decide a command, their order and models, and speech to text: the Decisions tab, "
                       "live at once. OpenRouter and Liquid may keep what they're sent (what you said)."))
         outer.addWidget(self.keys_card)
 
@@ -205,8 +238,8 @@ class Settings(QScrollArea):
         f3.addRow(QLabel("<b>Other</b>"))
         self.twitch = QLineEdit()
         self.twitch.setPlaceholderText("ibai, auronplay")
-        self.twitch.setToolTip("Matched first when you say a streamer's name (speech-to-text spells names freely)")
-        self.log = QCheckBox("Keep a history of what you say (Activity tab)")
+        self.twitch.setToolTip("Matched first when you say a streamer's name (speech to text spells names freely)")
+        self.log = QCheckBox("Keep a history of what you say (Activity tab, each with its trace)")
         self.hosts = QLineEdit()
         self.hosts.setToolTip("The TV's addresses (Ethernet, Wi-Fi); also the only ones the agent accepts audio from")
         f3.addRow("Twitch favourites", self.twitch)
@@ -219,25 +252,20 @@ class Settings(QScrollArea):
         self.phones = Phones(panel)                 # its own API calls, applied at once (not the window's Save)
         outer.addWidget(self.phones)
 
-        self.show_advanced = QCheckBox("Show advanced settings (addresses, ports, Kodi login, pairing)")
+        self.show_advanced = QCheckBox("Show advanced settings (addresses, ports, phones, Kodi login, pairing)")
         outer.addWidget(self.show_advanced)
         self.advanced = card()
         f6 = QFormLayout(self.advanced)
         f6.setContentsMargins(16, 14, 16, 14)
-        f6.addRow(QLabel("<b>Advanced</b> <span style='color:gray'>· a wrong value can stop the voice agent from "
-                         "starting; “Run checks” tells</span>"))
+        f6.addRow(QLabel("<b>Advanced</b> <span style='color:gray'>· saving these (but the addresses) restarts the "
+                         "voice agent; a wrong value can stop it from starting: “Run checks” tells</span>"))
         self.adv: dict[str, QWidget] = {}
-        for key, label, tip in (
-                ("lan_host", "This computer on the TV's network", "Empty: worked out (never 0.0.0.0)"),
-                ("lan_port", "Port for the TV app", ""), ("stream_port", "Port for the TV app's audio", ""),
-                ("local_port", "Local API port (panel, CLI)", ""), ("adb_port", "TV's ADB port", ""),
-                ("adb_key", "ADB key file", ""), ("kodi_port", "Kodi web port", ""), ("kodi_user", "Kodi web user", ""),
-                ("d1_url", "Local decision model server", "llama.cpp's address (llama-d1)"),
-                ("llama_server", "llama-server program", "Empty: on PATH or under ~/.local/opt; after changing it: "
-                                                         "tv-agent setup services")):
+        for key, label, tip in ADVANCED:
             if key.endswith("_port"):
                 w = QSpinBox()
                 w.setRange(1, 65535)
+            elif key == "phones":
+                w = QCheckBox("Let paired phones connect (Settings › Phones)")
             else:
                 w = QLineEdit()
             w.setToolTip(tip)
@@ -246,8 +274,8 @@ class Settings(QScrollArea):
         more = QHBoxLayout()
         for label, tip, fn in (("Set Kodi password…", "Kodi › Settings › Services › Control: the web password",
                                 self.set_kodi_password),
-                               ("Pair the TV app again", "Sends the app this computer's address and the token",
-                                self.pair_app)):
+                               ("Pair the TV apps again", "Sends the TV app and TV Agent Player this computer's "
+                                "addresses and their tokens", self.pair_app)):
             b = QPushButton(label)
             b.setToolTip(tip)
             b.clicked.connect(fn)
@@ -286,7 +314,8 @@ class Settings(QScrollArea):
         self.subs.list.itemChanged.connect(self.mark_dirty)
         self.subs.list.model().rowsInserted.connect(self.mark_dirty)
         for w in self.adv.values():
-            (w.valueChanged if isinstance(w, QSpinBox) else w.textEdited).connect(self.mark_dirty)
+            (w.valueChanged if isinstance(w, QSpinBox) else w.toggled if isinstance(w, QCheckBox) else
+             w.textEdited).connect(self.mark_dirty)
         self.load()
 
     def showEvent(self, event):
@@ -382,6 +411,7 @@ class Settings(QScrollArea):
             self._fill(cfg)
         finally:
             self._loading = False
+        self.shown = self.values()                  # what Save compares with: only what's changed here is written
         if self.dirty:
             self.dirty = False
             self.panel.dirty_changed()
@@ -407,8 +437,10 @@ class Settings(QScrollArea):
             value = getattr(cfg, key)
             if isinstance(w, QSpinBox):
                 w.setValue(int(value))
+            elif isinstance(w, QCheckBox):
+                w.setChecked(bool(value))
             else:
-                w.setText(str(value))
+                w.setText(", ".join(value) if isinstance(value, list) else str(value))
         for what, (status, name, used) in self.key_lines.items():
             ok = bool(cfg.secret(f"{what}_api_key"))
             status.setText((f"<span style='color:{GREEN}'>✔</span>&nbsp; <b>{name}</b> key set" if ok else
@@ -433,11 +465,20 @@ class Settings(QScrollArea):
             "auto_skip": self.auto_skip.isChecked(),
             "check_episodes": self.check_episodes.isChecked(),
             "updates": self.updates.mode.currentData(),
-            **{k: (w.value() if isinstance(w, QSpinBox) else w.text().strip()) for k, w in self.adv.items()},
+            **{k: (w.value() if isinstance(w, QSpinBox) else w.isChecked() if isinstance(w, QCheckBox) else
+                   split(w.text()) if k == "phone_hosts" else w.text().strip()) for k, w in self.adv.items()},
         }
 
     def save(self, values: dict | None = None):
-        values = values or self.values()
+        """What was changed here (or `values`: the tray's player) into config.toml, checked as the daemon checks it;
+        the rest of the file is kept, so a binge mode said meanwhile stays. The running agent then takes it live
+        (/v1/settings, as the phones do), or restarts for what it can't (ports and the like)."""
+        from_window = values is None
+        values = values or {k: v for k, v in self.values().items() if self.shown.get(k) != v}
+        if not values:
+            self.note.setText("Nothing to save: the settings are as they were")
+            self.load()
+            return True
         path = agent_config.CONFIG_FILE
         old = path.read_text() if path.exists() else None
         try:
@@ -468,17 +509,28 @@ class Settings(QScrollArea):
             QMessageBox.warning(self, "TV Agent", f"Not saved: {e}")
             return False
         agent = self.panel.overview.cards["tv-agent"]
-        if agent.active:
-            self.note.setText(f"<span style='color:{GREEN}'>✓ Settings saved</span> · restarting the voice agent "
-                              "to apply them (what's playing carries on)…")
+        live, restart = how_to_apply(values)
+        saved = f"<span style='color:{GREEN}'>✓ Settings saved</span>"
+
+        def restart_agent(why: str):
+            self.note.setText(f"{saved} · restarting the voice agent {why} (what's playing carries on)…")
             agent.act("restart")
+
+        if not agent.active:
+            self.note.setText(f"{saved} · they apply the next time the voice agent starts")
+        elif restart:
+            restart_agent("to use them")
         else:
-            self.note.setText(f"<span style='color:{GREEN}'>✓ Settings saved</span> · they apply the next time the "
-                              "voice agent starts")
-        if self.dirty and set(values) != set(self.values()):      # the tray's player only: other edits stay
+            self.note.setText(f"{saved} · live now")
+            if live:                                # the running agent's own copy, from the next command
+                self.panel.bg.run(lambda: api("/v1/settings", live, timeout=10),
+                                  lambda _r, err: err and restart_agent(f"to apply them (it didn't take them live: "
+                                                                        f"{err})"))
+        if not from_window and self.dirty:          # the tray's player only: other edits stay
             self._loading = True
             self._select(self.player, values.get("player", self.player.currentData()))
             self._loading = False
+            self.shown.update(values)
         else:
             self.load()
         return True

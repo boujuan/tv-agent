@@ -1,8 +1,9 @@
 # tv-agent panel
 
 Desktop app for [tv-agent](../README.md) with a system-tray icon: is voice control on, what's playing, both
-services with live CPU / memory / GPU graphs, the history of commands, the decision rules as an editable diagram,
-the agent's settings, and the computer's microphone as a second remote. Native Qt (PySide6 and psutil from your
+services with live CPU / memory / GPU graphs, the history of commands with each one's whole trace, the decision rules
+as an editable diagram, the agent's settings, updates of every part, the paired phones, and the computer's microphone
+as a second remote. Native Qt (PySide6 and psutil from your
 distribution, follows the desktop theme), no network listener of its own, ~125 MB and <1% of a core while open.
 
 ## Install (from a checkout)
@@ -15,7 +16,9 @@ Needs Python 3 with PySide6 (Qt 6, including QtNetwork) and psutil, `pw-record` 
 `qrencode` for the QR code that pairs a phone (optional: the code can be typed instead),
 `systemctl --user` for the services, and the tv-agent server running on this computer (it reads
 `~/.config/tv-agent/` and talks to `127.0.0.1:8766`). It uses the installed `tv_agent` Python package if there is
-one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--tray` starts hidden).
+one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--tray` starts hidden). Its tests run
+offscreen with the same Python, on a temporary home (nothing real is read, written or restarted):
+`/usr/bin/python3 -m pytest panel/tests`.
 
 ## What's in it
 
@@ -26,19 +29,22 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
 - **Beside the tabs** (on every tab): **Save** / **Revert** for what Settings and Decisions have unsaved (a ● on
   their tab), **Run checks** (tv-agent doctor and the rules on the labelled sentences), **Files** (export / import
   everything, open the settings file, the rules or the folder, reset the rules) and **ⓘ About** (versions here,
-  running, on the TV and on GitHub, with checksums; the pinned downloads; the models in use). Messages from every
-  tab show in the status bar.
+  running, on the TV and on GitHub, with checksums; TV Agent Player on the TV and each phone's app against their
+  latest releases; the pinned downloads; the models in use). Messages from every tab show in the status bar.
 - **Overview:** is voice control on, the TV, what's playing (title, position, player); the **TV** card: model,
   Android, uptime and screen state, Wi-Fi or Ethernet with signal and link speed, the laptop's link and ping, a
   speed test, the TV's CPU and memory, the busiest processes and the app in front, the TV app's version against
-  this copy's (Install / Update / Uninstall / Pair again), **Diagnose** (each ADB step with what to do) and
+  this copy's code (**Build and install** from this copy, Uninstall, Pair again; releases install from Settings ›
+  Updates), **Diagnose** (each ADB step with what to do) and
   Reconnect, shortcut keys and a screenshot, the agent's stream link (open or copy) and a field to send any video
   link to the TV; both services with Start/Stop/Restart, Start at boot, live CPU, memory and (for the model) GPU
   memory and GPU busy; every process; Start all / Stop all · free resources; a warning if the rules have an
   error.
-- **Activity:** give a command typed or **spoken into the computer's microphone** (stops when you stop talking;
-  press again to send at once); the history of everything said from the remote, the computer, typed or via
-  Claude, with how it was decided and what happened; **Export** (JSON lines or CSV), **Import** (merges, skipping
+- **Activity:** give a command typed or **spoken into the computer's microphone** (stops when you stop talking, by
+  the TV app's rule: quiet measured against the sound around you once you've spoken, up to 15 s; press again to send
+  at once); the history of everything said from the remote, a phone, the computer, typed or via Claude, with how it
+  was decided (rules, the LLM, the decision model, a chain) and what happened; **Export** (JSON lines or CSV, each
+  command with its trace's details), **Import** (merges, skipping
   duplicates), **Erase**; double-click a line to see in Decisions what happened, as recorded (how it was decided,
   then how its title was found and how it started, step by step), or right-click it to decide it again now, or
   say **This was right** or **This was wrong, it should be…** (what it should have done, the words said, the right
@@ -46,7 +52,7 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
   kept, else one of your sentences, and an episode or scene case when it searched for one (for
   `server/scripts/bench_voice.py`, `bench_chains.py`, `bench_finding.py`; also in Decisions, beside Copy as JSON). With
   **Keep recordings** on, right-click a spoken command (🔊) to play it or transcribe it again with another model. **Response times**: a chart of the
-  last commands (speech-to-text, deciding, waiting for your pause; doing it) with typical and slowest times by
+  last commands (speech to text, deciding, waiting for your pause; doing it) with typical and slowest times by
   step, model and action, and the cloud cost. History lives in `~/.local/share/tv-agent/activity.jsonl`, recordings
   in `recordings/` beside it (mode 600; nothing is written with "Keep a history" off).
 - **Quality:** how well the agent does, from the history (today, the last 7 or 30 days, all; from the TV, the
@@ -56,8 +62,10 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
   Decisions). The **nightly check** (04:30; **Set up the nightly check** if it isn't): each night's run of the voice
   tests, sentences and chains, episodes and scenes against the baseline, its regressions and fixes, its cost; **Run
   it now**; **Accept as the baseline** after a change made on purpose. A regression notifies you once.
-- **Commands:** everything you can say, as patterns with ‹placeholders›, by section, in English or Spanish, with a
-  filter; **try** fills one in with an example you can edit, then explains it (nothing sent) or does it on the TV.
+- **Commands:** everything you can say, as patterns with ‹placeholders›, by section, in English or Spanish (the list
+  the TV shows for "what can you do?"), with a filter; the ones only the LLM decides (an episode described) are
+  marked **LLM**; **try** fills one in with an example you can edit, then explains it (nothing sent) or does it on
+  the TV.
 - **Decisions:** how a command is decided, as a diagram whose decision steps (fixed phrases, pattern rules, the
   LLM, the decision model) you drag into another order (or ▲▼) and switch on or off, live at once; drag the
   divider up to give the editors room, or fold the diagram to its header (▲ at its top right) or give it the whole
@@ -78,11 +86,17 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
   start or stop the local server to match, a local GGUF file and a hosted model, question, threshold, what happens
   when no model answers, title choice, intents) and apps & hooks; each tab shows whether the key it needs is set,
   with a link to it in Settings. Rule edits are saved with Save (live at once).
-- **Settings:** player (and whether it's installed on the TV), resolution, bitrate (or no limit), link check, languages (audio, or the original
-  language; when subtitles show; subtitles as an ordered list, including Chinese Simplified 简体 / Traditional 繁體), binge mode, auto skip, the Liquid and OpenRouter keys,
-  Twitch favourites, history on/off, TV addresses, and advanced addresses, ports, the Kodi login and pairing the TV
-  app again (Save restarts the agent; what's playing carries on); and the panel's own behaviour: close to tray, open hidden in the
-  tray, details on hover, notifications, start at login. Panel settings live in `~/.config/tv-agent/panel.conf`.
+- **Settings:** player (TV Agent Player recommended; whether it's installed on the TV), resolution, bitrate (or no
+  limit), link check, binge mode, auto skip, the episode check; languages (your native language; the audio, or the
+  original language; when subtitles show; subtitles as an ordered list, including Chinese Simplified 简体 /
+  Traditional 繁體); the Liquid and OpenRouter keys; Twitch favourites, history on/off, TV addresses; and advanced:
+  this computer's address and more for the phones and the player, the ports (the TV app, its audio, TV Agent Player,
+  the phones and their audio, the local API, ADB, Kodi), phones on or off, the ADB key, the Kodi login, the local
+  decision model's server, pairing the TV apps again. **Save** writes only what you changed (a binge mode said
+  meanwhile stays) and the running agent takes it live, as the phones' changes, from the next command; ports, ADB,
+  Kodi, phones on or off and the model server restart it (what's playing carries on). And the panel's own
+  behaviour: close to tray, open hidden in the tray, details on hover, notifications, start at login. Panel settings
+  live in `~/.config/tv-agent/panel.conf`.
   **Updates:** a row per part (the voice agent, the panel, the TV app, TV Agent Player, the phones) with what runs
   against the latest GitHub release, and a button for what to do now: *Update to X* (this computer's copy is
   fast-forwarded to the release tag, never over uncommitted or unpushed work; the TV's apps over ADB), *Restart to
@@ -109,3 +123,4 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
 | `tvpanel/mic.py` | The computer's microphone (`pw-record`, end-of-speech detection) |
 | `tvpanel/common.py` | systemd, the agent's API, small widgets, preferences |
 | `tv-agent-panel.desktop.in`, `install.sh`, `tv-agent.svg` | Desktop entry template, installer, icon |
+| `tests/` | Offscreen tests (`/usr/bin/python3 -m pytest panel/tests`): every tab builds and draws, a control for every setting, live saving, the microphone's end of speech, About, Commands |
