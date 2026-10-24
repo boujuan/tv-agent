@@ -42,7 +42,8 @@ def agent_with(llm, lines: dict | None = None):
     """An agent whose subtitles are `lines` (video -> [(ms, words)]), plots patched by the test."""
     async def addons():
         return []
-    me = types.SimpleNamespace(llm=llm, http=None, addons=addons)
+    me = types.SimpleNamespace(llm=llm, http=None, addons=addons, looked=[])
+    me.prefetch = lambda kind, video: me.looked.append(video)
 
     async def track(http, addons_, video, lang, wait_s=0, sdh_wanted=False, stream=None):
         got = (lines or {}).get((video, lang)) or ((lines or {}).get(video) if lang == "eng" else None) or []
@@ -172,6 +173,7 @@ def test_one_episode_that_fits_exactly_and_is_said_in_its_subtitles_plays(monkey
     got = asyncio.run(finding.episode(me, "tt1", "Community", EPS, "Mr. Chang dances with his ex-wife"))
     assert got.episode["id"] == "tt1:1:10" and got.why == "its plot and subtitles"
     assert llm.asked == ["look_for", "episodes"]
+    assert me.looked[0] == "tt1:1:10"          # its streams looked up from the plots' ranking on, before the answer
 
 
 def test_several_that_fit_are_listed_not_guessed(monkeypatch):

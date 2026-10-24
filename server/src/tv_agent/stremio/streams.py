@@ -16,13 +16,14 @@ AIOStreams describes each stream in machine-readable `streamData` when asked by 
 import asyncio
 import logging
 import re
+import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import httpx
 
-from .. import __version__
+from .. import __version__, tracing
 from ..languages import code as language_code
 from ..tv import thumbs
 from .account import Addon
@@ -284,22 +285,40 @@ async def fetch(http: httpx.AsyncClient, addons: list[Addon], kind: str, video_i
                 enough: Callable[[list[Stream]], bool] | None = None, grace: float = 0.5) -> list[Stream]:
     """All playable streams from every addon that serves this id, in addon order. With `enough`: once the answers in
     have a stream it takes, the addons still asking get `grace` seconds more, then are left out (one that hangs
-    would hold the start for its 8 s timeout, twice)."""
+    would hold the start for its 8 s timeout, twice). Each addon's answer and time go into the command's trace."""
+    t0 = time.perf_counter()
+    answers: dict[str, dict] = {}
+
     async def one(addon: Addon) -> list[dict]:
-        for attempt in (1, 2):    # one retry a second later when the addon has a hiccup (5xx, rate limit)
+        t = time.perf_counter()
+        for attempt in (1, 2):
             try:
                 r = await http.get(f"{addon.base}/stream/{kind}/{video_id}.json", timeout=timeout,
                                    headers={"User-Agent": USER_AGENT})
                 r.raise_for_status()
-                return r.json().get("streams") or []
+                got = r.json().get("streams") or []
+                answers[addon.name] = {"addon": addon.name, "ms": round(tracing.since(t)), "streams": len(got),
+                                       **({"tries": 2} if attempt == 2 else {})}
+                return got
             except httpx.HTTPStatusError as e:
+                # One retry a second later when the addon has a hiccup (5xx, rate limit)
                 code = e.response.status_code
                 log.warning("addon %s: HTTP %d%s", addon.name, code, ", trying again" if attempt == 1 else "")
+                answers[addon.name] = {"addon": addon.name, "ms": round(tracing.since(t)), "error": f"HTTP {code}"}
                 if attempt == 2 or not (code >= 500 or code == 429):
                     return []
                 await asyncio.sleep(1.0)
+            except httpx.TransportError as e:
+                # Timed out or cut off: asked again at once. AIOStreams keeps working on an answer it was too slow
+                # with (a title nobody asked it for lately: 7-9 s, more when it's busy), so the second ask is
+                # shorter (2-5 s); a reused connection the server had just closed fails the same way
+                log.warning("addon %s: %s%s", addon.name, type(e).__name__, ", trying again" if attempt == 1 else "")
+                answers[addon.name] = {"addon": addon.name, "ms": round(tracing.since(t)), "error": type(e).__name__}
+                if attempt == 2:
+                    return []
             except (httpx.HTTPError, ValueError) as e:
                 log.warning("addon %s: %s", addon.name, type(e).__name__)
+                answers[addon.name] = {"addon": addon.name, "ms": round(tracing.since(t)), "error": type(e).__name__}
                 return []
         return []
 
@@ -327,21 +346,31 @@ async def fetch(http: httpx.AsyncClient, addons: list[Addon], kind: str, video_i
     finally:
         for task in pending:
             task.cancel()
-    return parsed()
+    found = parsed()
+    left = [a.name for a, t in zip(serving, tasks) if t in pending]
+    tracing.step("start", "addons", label="Addons asked", ms=tracing.since(t0), method=tracing.method("addon"),
+                 video=video_id, playable=len(found), left_out=left or None,
+                 addons=[answers.get(a.name) or {"addon": a.name, "ms": round(tracing.since(t0)), "left_out": True}
+                         for a in serving])
+    return found
 
 
-async def resolve(http: httpx.AsyncClient, s: Stream) -> str | None:
+async def resolve(http: httpx.AsyncClient, s: Stream, hops: list[dict] | None = None) -> str | None:
     """Where the link leads when it plays, else None. A one-byte range request: the link answers with file bytes,
     not an error page. Redirects are followed by hand, because AIOStreams redirects a link that can't play (not
     cached after all, failed, rate-limited) to a short explanatory video that would otherwise look fine. Debrid
     services label files loosely (Premiumize: application/force-download), so anything but a web page or JSON
     counts. The player is given the final address: each of its range requests (header, index, the resume point)
-    then skips the addon's redirect."""
+    then skips the addon's redirect. `hops`: each request's host, answer and time are added to it (no paths: they
+    carry keys)."""
     url = s.url
     try:
         for _ in range(4):
+            t = time.perf_counter()
             async with http.stream("GET", url, headers={"Range": "bytes=0-0", **s.headers}, timeout=5,
                                    follow_redirects=False) as r:
+                if hops is not None:
+                    hops.append({"host": r.url.host, "status": r.status_code, "ms": round(tracing.since(t))})
                 if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location"):
                     url = str(r.url.join(r.headers["location"]))
                     if PROBLEM_VIDEO.search(httpx.URL(url).path):
@@ -349,12 +378,26 @@ async def resolve(http: httpx.AsyncClient, s: Stream) -> str | None:
                                  httpx.URL(url).path.rsplit("/", 1)[-1])
                         return None
                     continue
-                ctype = r.headers.get("content-type", "").lower()
-                ok = r.status_code in (200, 206) and not ctype.startswith(("text/", "application/json"))
-                return url if ok else None
+                return url if _file_bytes(r) else None
     except httpx.HTTPError:
         return None
     return None
+
+
+async def recheck(http: httpx.AsyncClient, link: str, headers: dict | None = None) -> bool:
+    """Whether a link resolve() found a while ago still answers with file bytes: one range request to the file's own
+    address (~0.2 s), not the addon's redirect again (0.5-1.5 s: its debrid service is asked for the file anew)."""
+    try:
+        async with http.stream("GET", link, headers={"Range": "bytes=0-0", **(headers or {})}, timeout=4,
+                               follow_redirects=False) as r:
+            return _file_bytes(r)
+    except httpx.HTTPError:
+        return False
+
+
+def _file_bytes(r: httpx.Response) -> bool:
+    ctype = r.headers.get("content-type", "").lower()
+    return r.status_code in (200, 206) and not ctype.startswith(("text/", "application/json"))
 
 
 async def playable(http: httpx.AsyncClient, s: Stream) -> bool:

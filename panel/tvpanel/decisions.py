@@ -123,7 +123,7 @@ def after_steps(trace: list[dict], recorded: bool) -> tuple[dict[str, tuple[str,
             lines.append(f"{at}Link check: " + ("answered" if ok else "no answer" + ("; opened anyway (in your debrid "
                                                                                      "library, or checked before)"
                                                                                      if t.get("trusted") else ""))
-                         + took)
+                         + (f" ({html.escape(t['how'])})" if t.get("how") else "") + took)
             after[key] = ("visited" if ok or t.get("trusted") else "out", _secs(t.get("ms", 0)))
         elif step == "player":
             lines.append(f"{at}{html.escape(t.get('app', 'The player'))} up{took}")

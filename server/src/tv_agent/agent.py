@@ -8,7 +8,7 @@ import os
 import re
 import time
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -71,6 +71,13 @@ PLOTS_AHEAD = 8             # the shows of Continue Watching whose episode plots
 STARTS = {"play_title", "continue_watching", "next_episode", "pick"}     # actions that start playback
 LIST_TTL = 300              # "number 2" refers to a list shown in the last 5 minutes
 STREAMS_TTL = 1800          # an addon's answer for a video is reused for 30 minutes (links resolve when played)
+STREAMS_STALE = 12 * 3600   # after that, an answer whose best stream fits your rules is used at once, asked again meanwhile
+SETTLED_DAYS = 14           # ...as is any answer for what came out longer ago than this: its copies have stopped changing
+LINK_TTL = 1200             # where a stream's link led is reused this long, after one request to that address (recheck)
+LINK_TRUSTED = 90           # ...and given to the player as it is when it answered this recently
+PRECONNECT_OPENROUTER = "https://openrouter.ai/api/v1/models"
+KEEP_ALIVE = 300.0          # idle connections are kept this long (httpx's 5 s dropped them between two commands: a new
+                            # TLS handshake each to OpenRouter, Cinemeta and Stremio, ~0.3 s)
 NOW_PLAYING_FILE = CONFIG_DIR / "now-playing.json"
 WARM_ITEMS = 2              # Continue Watching's first items: their streams looked up when the mic opens
 EXPECT_AT_MOST = 2          # stream lookups started on a guess while a title is still being decided
@@ -177,6 +184,16 @@ def load_failed_text(msg: dict) -> str:
     return "The TV is having trouble loading this file"
 
 
+def _settled(meta: dict | None, video_id: str) -> bool:
+    """Whether the film or episode came out more than SETTLED_DAYS ago, by Cinemeta's dates (False when it can't say)."""
+    v = next((x for x in (meta or {}).get("videos") or [] if x.get("id") == video_id), None) if ":" in video_id \
+        else meta
+    when = cinemeta.released(v or {})
+    if when is not None and when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when is not None and datetime.now(timezone.utc) - when > timedelta(days=SETTLED_DAYS)
+
+
 def _watched_some(item: dict) -> bool:
     """A library item you've watched (some of): not only added to your list."""
     st = item.get("state") or {}
@@ -279,7 +296,9 @@ class Agent:
         self.dry_run = dry_run
         self.adb = DryAdb() if dry_run else Adb(cfg)
         self.state = State()
-        self.http = httpx.AsyncClient(headers={"User-Agent": f"tv-agent/{__version__}"}, follow_redirects=True)
+        self.http = httpx.AsyncClient(headers={"User-Agent": f"tv-agent/{__version__}"}, follow_redirects=True,
+                                      limits=httpx.Limits(keepalive_expiry=KEEP_ALIVE))
+        self.look_ahead = not dry_run            # stream lookups and link checks made before they're needed
         key = cfg.secret("stremio_auth_key")
         self.account = Account(self.http, key) if key else None
         self.library = Library(self.account)
@@ -311,6 +330,9 @@ class Agent:
         self._shown: Shown | None = None         # the list on the TV, for "number 2"
         self._streams: dict[tuple[str, str], tuple[float, list[streams.Stream]]] = {}
         self._stream_jobs: dict[tuple[str, str], asyncio.Task] = {}
+        # stream url: (when found, where it led, when it last answered) (secrets: memory only)
+        self._links: dict[str, tuple[float, str, float]] = {}
+        self._link_jobs: dict[str, asyncio.Task] = {}
         self._segments: dict[tuple[str, int], list[skips.Segment]] = {}
         self._skip_task: asyncio.Task | None = None
         self._starting = asyncio.Lock()          # one start at a time replaces the previous session
@@ -480,8 +502,10 @@ class Agent:
 
     async def warm(self):
         """Refresh what a play needs before it's asked for (your addons, your library: ~0.4 s each when stale), and
-        look up the streams of what Continue Watching would play first (3-6 s each, kept 30 minutes). Run when the mic
-        opens and at startup."""
+        look up the streams of what Continue Watching would play first (3-6 s each, kept 30 minutes) and check the
+        link each would start with. Run when the mic opens and at startup. The connections a command is about to
+        need are opened meanwhile (_preconnect)."""
+        connecting = asyncio.create_task(self._preconnect())
         try:
             await self.addons(max_age=3000)
             if time.monotonic() - self.library._at > 480:
@@ -496,6 +520,17 @@ class Agent:
                                                    if i.get("type") == "series"][:PLOTS_AHEAD])
         except Exception as e:
             log.info("warming up: %s", type(e).__name__)
+        await connecting
+
+    async def _preconnect(self):
+        """While you speak: a connection to OpenRouter (the speech to text, the LLM) and to Cinemeta (the title's
+        details), so neither waits for a TLS handshake (~0.3 s each) once you've said it. One request to each that
+        answers at once; KEEP_ALIVE keeps them for the next commands."""
+        try:
+            urls = [f"{cinemeta.BASE}/manifest.json", *([PRECONNECT_OPENROUTER] if self.llm is not None else [])]
+            await asyncio.gather(*(self.http.head(u, timeout=3) for u in urls), return_exceptions=True)
+        except Exception as e:
+            log.info("opening connections: %s", type(e).__name__)
 
     def _fits(self, meta: dict | None) -> Callable[[list[streams.Stream]], bool]:
         """Whether an addon's answer is enough to start without the slower ones: a stream your rules keep, at the
@@ -508,35 +543,62 @@ class Agent:
                 and (plan is None or plan.audio is None or ranked[0].rank_key[1] == 2)
         return fits
 
-    async def fetch_streams(self, kind: str, video_id: str, meta: dict | None = None) -> list[streams.Stream]:
-        """Your addons' streams for a video (3-6 s from AIOStreams), reused for 30 minutes, with one lookup in
+    async def fetch_streams(self, kind: str, video_id: str, meta: dict | None = None,
+                            fresh: bool = False) -> list[streams.Stream]:
+        """Your addons' streams for a video (2-9 s from AIOStreams), reused for 30 minutes, with one lookup in
         flight per video: a lookup started early (prefetch) is the one the play then waits for. It doesn't wait for
-        a slow addon once one has answered with a stream that fits (_fits)."""
+        a slow addon once one has answered with a stream that fits (_fits). An answer older than 30 minutes is used
+        at once, up to STREAMS_STALE, when its best stream fits too (nothing better is to be had by your rules) or
+        the film or episode came out more than SETTLED_DAYS ago (no better copy is coming), and asked for again
+        meanwhile for the next time; otherwise, or with `fresh`, the new answer is waited for (and the old one used
+        if the addons have nothing now: they failed)."""
         key = (kind, video_id)
-        if (hit := self._streams.get(key)) and time.monotonic() - hit[0] < STREAMS_TTL:
+        hit = self._streams.get(key)
+        age = time.monotonic() - hit[0] if hit else 0.0
+        if hit and age < STREAMS_TTL:
             return [replace(s) for s in hit[1]]       # copies: ranking marks them
         job = self._stream_jobs.get(key)
         if job is None or (job.done() and (job.cancelled() or job.exception())):
-            job = self._stream_jobs[key] = asyncio.create_task(
-                streams.fetch(self.http, await self.addons(), kind, video_id, enough=self._fits(meta)))
+            job = self._stream_jobs[key] = asyncio.create_task(self._look_up(kind, video_id, meta))
+            job.add_done_callback(lambda t: t.cancelled() or t.exception())   # a refresh nobody waits for may fail
+        if hit and age < STREAMS_STALE and not fresh and (self._fits(meta)(hit[1]) or _settled(meta, video_id)):
+            return [replace(s) for s in hit[1]]
         found = await asyncio.shield(job)                  # a replaced command doesn't waste the lookup
-        self._stream_jobs.pop(key, None)
+        return [replace(s) for s in (found or (hit[1] if hit and age < STREAMS_STALE else []))]
+
+    async def _look_up(self, kind: str, video_id: str, meta: dict | None) -> list[streams.Stream]:
+        key = (kind, video_id)
+        try:
+            found = await streams.fetch(self.http, await self.addons(), kind, video_id, enough=self._fits(meta))
+        finally:
+            if self._stream_jobs.get(key) is asyncio.current_task():
+                self._stream_jobs.pop(key)
         if original := streams.original_language(found):
             self._originals[video_id.split(":")[0]] = original
         if found:
             if len(self._streams) > 40:
                 self._streams.pop(min(self._streams, key=lambda k: self._streams[k][0]))
             self._streams[key] = (time.monotonic(), found)
-        return [replace(s) for s in found]
+        return found
 
     def prefetch(self, kind: str, video_id: str):
-        """Start the stream lookup for a video about to be played, while the rest (metadata, Kodi) gets ready."""
-        if not (self.account and not self.dry_run):
+        """Start the stream lookup for a video about to be played, while the rest (metadata, Kodi) gets ready, then
+        the link check of the stream it would start with (link): a start that comes after both goes straight to
+        the player."""
+        if not (self.account and self.look_ahead):
             return
 
         async def run():
             try:
-                await self.fetch_streams(kind, video_id)
+                lookup = asyncio.ensure_future(self.fetch_streams(kind, video_id))
+                try:
+                    meta = await cinemeta.meta(self.http, kind, video_id.split(":")[0])    # meanwhile; usually kept
+                finally:
+                    await lookup
+                ranked = [s for s in await self.streams_for(kind, video_id, meta) if not s.why_dropped
+                          and not (self.cfg.player == "just" and s.headers)]
+                if ranked and self.cfg.probe_streams:
+                    await self.link(ranked[0])
             except Exception as e:
                 log.info("stream prefetch for %s: %s", video_id, type(e).__name__)
         asyncio.create_task(run())
@@ -561,11 +623,12 @@ class Agent:
         if len(self._asked) > 50:
             self._asked.pop(min(self._asked, key=lambda k: self._asked[k][0]))
 
-    async def streams_for(self, kind: str, video_id: str, meta: dict | None = None) -> list[streams.Stream]:
+    async def streams_for(self, kind: str, video_id: str, meta: dict | None = None,
+                          fresh: bool = False) -> list[streams.Stream]:
         meta = meta or {}
         # Files numbered as a neighbour that are this episode (episode_check): looked up at the same time
         named = self.checks.playing_as(video_id)[:4] if kind == "series" else []
-        found, *others = await asyncio.gather(self.fetch_streams(kind, video_id, meta),
+        found, *others = await asyncio.gather(self.fetch_streams(kind, video_id, meta, fresh),
                                               *(self.fetch_streams(kind, n) for _, _, n in named),
                                               return_exceptions=True)
         if isinstance(found, BaseException):
@@ -955,11 +1018,18 @@ class Agent:
         how = ("found while the last episode played" if prepared is not None else
                "kept from earlier" if hit and time.monotonic() - hit[0] < STREAMS_TTL else
                "already being looked up" if (kind, video) in self._stream_jobs else "looked up now")
+        again = None                        # the new answer, if the one kept from earlier has no link that answers
         if prepared is not None:            # found and checked while the previous episode played
             found = [prepared]
         else:
             offered = await self.streams_for(kind, video, meta)
             found = [s for s in offered if not s.why_dropped]
+            if hit and how != "kept from earlier" and self._streams.get((kind, video)) is hit:
+                how = "kept from earlier, asked again meanwhile"        # older than STREAMS_TTL, but it fits
+
+                async def again() -> list[streams.Stream]:
+                    return [s for s in await self.streams_for(kind, video, meta, fresh=True) if not s.why_dropped
+                            and not (self.cfg.player == "just" and s.headers)]
             _step("start", "candidates", label="Streams ranked", method=tracing.method("local", "stream rules"),
                   offered=len(offered), kept=len(found),
                   dropped=dict(Counter(s.why_dropped for s in offered if s.why_dropped)) or None,
@@ -977,9 +1047,9 @@ class Agent:
         # The next episode, already open in TV Agent Player (preload): its link as it was opened, nothing to check.
         preloaded = (self._preloaded[2] if self.cfg.player == "tvplayer" and prepared is not None and self._preloaded
                      and self._preloaded[:2] == (video, prepared.url) else None)
-        chosen, link, checking = found[0], preloaded or found[0].url, None
+        chosen, link, checking, about = found[0], preloaded or found[0].url, None, {}
         if self.cfg.probe_streams and not preloaded:      # runs while the player gets ready; finds where the link leads
-            checking = asyncio.create_task(stamped("link", self._first_playable(found[:3])))
+            checking = asyncio.create_task(stamped("link", self._first_playable(found[:3], again, about)))
             if loading is not None:
                 loading.at("Checking the link…")
         # A file in your debrid library, or one checked while the last episode played, is opened even if the
@@ -994,7 +1064,7 @@ class Agent:
             if got is not None:
                 chosen, link = got
             _step("start", "link check", (done_at["link"] - t_streams) * 1000, done=done_at["link"], ok=got is not None,
-                  of=len(found[:3]), trusted=True if got is None and trusted else None)
+                  of=len(found[:3]), trusted=True if got is None and trusted else None, **about)
             return got is not None or trusted
 
         if self.dry_run:   # nothing reaches the player either
@@ -1071,6 +1141,8 @@ class Agent:
             log.info("start %s: streams %.0f ms, then the link checked and the player ready %.0f ms, open %.0f ms, "
                      "first frame %s ms%s", video, (t_streams - t0) * 1000, (t_ready - t_streams) * 1000,
                      (t_open - t_ready) * 1000, first_frame, " (preloaded)" if preloaded else "")
+            if item is not None:
+                asyncio.create_task(self._player_timing(item))
         elif self.cfg.player == "just":
             if not await checked():
                 return Outcome(False, f"The links for {label} didn't answer")
@@ -1168,6 +1240,22 @@ class Agent:
         return Outcome(True, f"Playing {label}{quality}" + (f" · from {_clock(resume_ms)}" if resume_ms else ""),
                        details)
 
+    async def _player_timing(self, item: str):
+        """The player's own account of a start (its `timing` event, once it plays: the first byte, the file prepared,
+        the first frame, playing), into the log and /v1/stats: where its part of a start goes."""
+        msg = self.tvplayer.last.get("timing") if self.tvplayer.item == item else None
+        msg = msg or await self.tvplayer.wait_for(lambda m: m.get("t") == "timing" and m.get("item") == item, 10)
+        ms = (msg or {}).get("ms")
+        if not isinstance(ms, dict):
+            return
+        for key in ("first_byte", "prepared", "ready"):
+            if isinstance(ms.get(key), (int, float)) and ms[key] >= 0:
+                self.state.timings.add(f"player:{key}", ms[key])
+        log.info("player timing %s: first byte %s ms, prepared %s ms, first frame %s ms, playing %s ms; %s requests, "
+                 "%.1f MB%s", item.split("#")[0], ms.get("first_byte"), ms.get("prepared"), ms.get("first_frame"),
+                 ms.get("ready"), msg.get("requests"), (msg.get("bytes") or 0) / 1e6,
+                 " (preloaded)" if msg.get("preloaded") else "")
+
     def _replace_session(self, video: str, resume_ms: int, exact: bool = False) -> int:
         """Right before a new file opens, what belonged to the previous start stops: its follower (it would read
         the new file's position; its last progress write finishes on its own), its track fixes, intro watch and
@@ -1229,18 +1317,71 @@ class Agent:
         except Exception as e:
             log.info("back to Home: %s", type(e).__name__)
 
-    async def _first_playable(self, top: list[streams.Stream]) -> tuple[streams.Stream, str] | None:
+    async def _first_playable(self, top: list[streams.Stream],
+                              again: Callable[[], Awaitable[list[streams.Stream]]] | None = None,
+                              about: dict | None = None) -> tuple[streams.Stream, str] | None:
         """The best of these whose link answers, and where its link leads: all are checked at once, and the best
-        one's answer is enough."""
-        checks = [asyncio.create_task(streams.resolve(self.http, s)) for s in top]
+        one's answer is enough (the best's link found a moment ago: nothing to ask). `again`: more streams to try
+        when none answers (the new answer to a list kept from earlier). `about`: how the link was found, for the
+        trace."""
+        about = {} if about is None else about
+        if top and (hit := self._links.get(top[0].url)) and time.monotonic() - hit[2] < LINK_TRUSTED:
+            about["how"] = "answered a moment ago"
+            return top[0], hit[1]
+        notes = [{} for _ in top]
+        checks = [asyncio.create_task(self.link(s, note)) for s, note in zip(top, notes)]
         try:
-            for s, check in zip(top, checks):
+            for s, check, note in zip(top, checks, notes):
                 if link := await check:
+                    about.update(note)
                     return s, link
-            return None
         finally:
             for check in checks:
                 check.cancel()
+        tried = {s.url for s in top}
+        if again is not None and (more := [s for s in await again() if s.url not in tried][:3]):
+            about["asked_again"] = True
+            return await self._first_playable(more, None, about)
+        return None
+
+    async def link(self, s: streams.Stream, about: dict | None = None) -> str | None:
+        """Where the stream's link leads when it plays (streams.resolve), or None when it doesn't answer. Kept
+        LINK_TTL from when it was found: the file's own address on the debrid service, given as it is when it
+        answered in the last LINK_TRUSTED seconds, else after one request to it (streams.recheck, ~0.2 s, where the
+        addon's redirect takes 0.5-1.5 s). One check at a time per link: one started ahead (prefetch, the next
+        episode) is the one a start then waits for. `about`: how it was found, for the trace (hosts and times of
+        each request, never a path)."""
+        about = {} if about is None else about
+        if hit := self._links.get(s.url):
+            found_at, link, answered = hit
+            if time.monotonic() - answered < LINK_TRUSTED:
+                about["how"] = "answered a moment ago"
+                return link
+            t, age = time.perf_counter(), time.monotonic() - found_at
+            if age < LINK_TTL and await streams.recheck(self.http, link, s.headers):
+                self._links[s.url] = (found_at, link, time.monotonic())
+                about.update(how=f"found {age / 60:.0f} min ago, checked at its address", recheck_ms=_ms(t))
+                return link
+            if self._links.get(s.url) is hit:
+                self._links.pop(s.url)
+        job = self._link_jobs.get(s.url)
+        about["how"] = "being checked already" if job else "asked the addon"
+        if job is None:
+            job = self._link_jobs[s.url] = asyncio.create_task(self._resolve(s, about.setdefault("hops", [])))
+        return await asyncio.shield(job)               # a start that moves on doesn't waste it
+
+    async def _resolve(self, s: streams.Stream, hops: list[dict]) -> str | None:
+        try:
+            found = await streams.resolve(self.http, s, hops)
+        finally:
+            if self._link_jobs.get(s.url) is asyncio.current_task():
+                self._link_jobs.pop(s.url)
+        if found:
+            if len(self._links) > 200:
+                self._links.pop(min(self._links, key=lambda k: self._links[k][0]))
+            now = time.monotonic()
+            self._links[s.url] = (now, found, now)
+        return found
 
     async def _start_kodi(self) -> bool:
         """Kodi.start() that reports failure instead of raising (it runs ahead of time, before it's certain to be
@@ -1470,8 +1611,8 @@ class Agent:
             if self.cfg.player == "just":
                 found = [s for s in found if not s.headers]
             top = found[:3]
-            ok = (await asyncio.gather(*(streams.playable(self.http, s) for s in top)) if self.cfg.probe_streams
-                  else [True] * len(top))
+            ok = ([link is not None for link in await asyncio.gather(*(self.link(s) for s in top))]
+                  if self.cfg.probe_streams else [True] * len(top))
             chosen = None
             for s, good in zip(top, ok):            # the first that answers and is that episode
                 if good and (not self.cfg.check_episodes or (await self._verify(s, nxt["id"], meta)).ok is not False):
@@ -1499,7 +1640,7 @@ class Agent:
                     return
                 if now[1] and now[0] >= now[1] - PRELOAD_BEFORE:
                     break
-            link = await streams.resolve(self.http, s) or s.url
+            link = await self.link(s) or s.url
             plan = self.track_plan(meta)
             await self.tvplayer.preload(link, item=video, headers=s.headers or None, audio=plan.audio,
                                         subs=plan.subs_for(plan.audio),
@@ -1728,7 +1869,7 @@ class Agent:
             ids = [v["id"] for v in cinemeta.episodes(meta)]
             try:
                 # Resolved once: each read would follow the addon's redirect
-                resolved = link if link and link != s.url else await streams.resolve(self.http, s) or s.url
+                resolved = link if link and link != s.url else await self.link(s) or s.url
                 verdict = await asyncio.wait_for(episode_check.check(resolved, video, self.episode_subs, ids), 45)
             except (asyncio.TimeoutError, OSError, ValueError, httpx.HTTPError) as e:
                 log.info("checking %s is %s: %s", s.filename, video, type(e).__name__)
@@ -2062,7 +2203,7 @@ class Agent:
         its link doesn't answer."""
         key = (s.filename or s.url, s.size)
         if key not in self._probed:
-            link = await streams.resolve(self.http, s)
+            link = await self.link(s)
             if link is None:
                 return False
             if len(self._probed) > 200:
@@ -2194,7 +2335,7 @@ class Agent:
 
         def expect(imdb: str, kind: str):
             if imdb not in tried and len(tried) < EXPECT_AT_MOST and not a.episode_name and self.account \
-                    and not self.dry_run:
+                    and self.look_ahead:
                 tried.add(imdb)
                 asyncio.create_task(self._expect(a, imdb, kind))
         return expect
@@ -2216,11 +2357,17 @@ class Agent:
         """Play a title found: a film, or a series at the season/episode asked, else where you were, else its first
         episode."""
         state = ((await self.library.get(imdb)) or {}).get("state") or {}
-        # The stream lookup (3-6 s) starts now when the video is already known; the metadata comes meanwhile.
+        # The stream lookup (2-9 s) starts now when the video is already known, or can be told from its number
+        # (Cinemeta's ids are tt…:season:episode); the metadata comes meanwhile and says which it is.
+        on = playing_video or state.get("video_id") or ""
         if kind == "movie":
             self.prefetch(kind, imdb)
         elif a.season is not None and a.episode is not None:
             self.prefetch(kind, f"{imdb}:{a.season}:{a.episode}")
+        elif a.episode is not None and on.startswith(f"{imdb}:") and on.count(":") == 2:
+            self.prefetch(kind, f"{imdb}:{on.split(':')[1]}:{a.episode}")     # "episode 3": of the season you're on
+        elif a.season is not None and not (a.episode_name or a.latest):
+            self.prefetch(kind, f"{imdb}:{a.season}:1")                        # "season 2": its first episode
         elif a.season is None and a.episode is None and not (a.restart or a.latest) and state.get("video_id"):
             self.prefetch(kind, playing_video or state["video_id"])
         meta = await cinemeta.meta(self.http, kind, imdb)

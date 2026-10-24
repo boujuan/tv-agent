@@ -212,6 +212,59 @@ Also measured and set aside: Stremio's own player accepts an agent-chosen stream
 (`stremio:///player/<stream>/<addon>/<cinemeta>/<type>/<id>/<video>`) and keeps Continue Watching itself, but took
 15-20 s to start cold and only takes media keys.
 
+## Starting fast
+
+Where a start's time went (33 starts on the TV, 2026-10-24, TV Agent Player 0.6.2, from the log): from your last
+word, 1.3 s to the decision (the speech to text ~1 s of it), 0.4-0.7 s for the title and its details, then the
+stream lookup (AIOStreams: ~2 s for a title it was asked for lately, 7-9 s for one it wasn't, up to its 8 s
+timeout), 0.8 s to check the link and ~2 s for the player's first frame. 10.4 s p50 when the streams had to be looked
+up, 4.6 s when they were known.
+
+What the agent does about it:
+
+- **Lookups start as soon as the video can be told.** A film; an episode by season and number; "episode 3" (of the
+  season you're on) and "season 2" (its first episode) before Cinemeta's episode list is in; where you were; the
+  episode the plots point to while an episode is found from what happens in it; the title the search leans to while
+  d1 decides; Continue Watching's first two when the mic opens. One lookup per video at a time: a start waits for the
+  one already running.
+- **Answers are kept.** 30 minutes as they are. Up to 12 hours, an answer whose best stream already fits your rules
+  (the top resolution allowed, the language wanted) or that is for a film or episode out for more than two weeks is
+  used at once and asked for again meanwhile, for the next time; if none of its links answers, the new answer is
+  waited for, and if the addons fail, the kept one is used.
+- **A link is checked once.** As soon as a lookup made ahead is in, the link of the stream a start would pick is
+  followed to the file on the debrid service (the addon's redirect: 0.5-1.5 s). That address is kept 20 minutes:
+  given as it is right after it answered (90 s), else after one request to it (~0.2 s).
+- **An addon that times out or drops the connection is asked again at once.** AIOStreams goes on with an answer it
+  was too slow with, so the second ask is shorter (2-5 s measured); before, the start said "No playable stream".
+- **Connections stay open 5 minutes, and open while you speak** (OpenRouter for the speech to text and the LLM,
+  Cinemeta): no TLS handshake (~0.3 s each) after your last word.
+- **The trace says where it went:** each addon's time and answer ("Addons asked"), how the link was found (kept,
+  checked at its address, asked the addon, with each request's host and time, never its path), and in the log the
+  player's own account of each start (`player timing …`: first byte, file prepared, first frame, playing).
+
+`scripts/bench_starts.py` times starts from a decided request to the link the player would get, with your addons and
+debrid service and nothing sent to the TV, in four cases: nothing kept (cold), the same start again, the same start
+31 minutes later, and a start whose lookup began 4 s before (as when the mic opens).
+
+Measured 2026-10-24 (8 titles and episodes, the code before and after these changes taking turns title by title,
+p50 / p95 in seconds, from the decided request to the link):
+
+| Case | Before | After | Waiting for the streams | The link check | Addon lookups |
+|---|---|---|---|---|---|
+| Nothing kept | 3.86 / 8.48 | 4.49 / 14.02 | 2.42 / 6.86 → 2.94 / 12.84 | 0.44 / 1.61 → 0.53 / 1.08 | 8 → 8 |
+| The same start again | 0.70 / 1.58 | **0.00 / 0.23** | 0 → 0 | 0.70 / 1.06 → 0 | 0 → 0 |
+| 10 minutes later | 1.13 / 1.42 | **0.22 / 0.22** | 0 → 0 | 0.80 / 1.09 → 0.20 / 0.20 | 0 → 0 |
+| 31 minutes later | 4.60 / 7.66 | **0.87 / 1.57** | 3.69 / 5.90 → 0 | 0.54 / 1.43 → 0.83 / 1.54 | 8 → 0 |
+| Looked up 4 s ahead | 0.97 / 5.26 | **0.00 / 0.19** | 0 / 3.48 → 0 | 0.57 / 1.45 → 0 | 2 → 0 |
+
+With nothing kept the time is AIOStreams' (its public instance was slow and uneven during the runs: 1.2-7.1 s for
+the same kind of title); one of its answers timed out at 8 s, was asked again and played (14 s), where it used to
+fail. On the TV the rest of a start stays: ~1 s from your last word to the decision and ~2 s to the player's first
+frame.
+
+What's left is outside the agent: AIOStreams' own time for a title it wasn't asked for lately (the public instance's
+addons' timeouts, in its own settings) and TV Agent Player's ~2 s to its first frame.
+
 ## Voice: decided while you pause
 
 The TV app streams the remote's microphone in 20 ms chunks from the moment the pill opens (`stream_port`, 8767,
@@ -574,6 +627,6 @@ rm -rf ~/.config/tv-agent ~/.local/share/tv-agent ~/.local/opt/llama.cpp ~/.loca
 | `systemd/` | User services for a packaged install (`tv-agent setup services` writes them for a checkout) |
 | `src/tv_agent/voicetests.py` | Voice tests: labels for kept recordings, seeded from the history; comparing runs; a command kept as tests |
 | `src/tv_agent/quality.py` | The Quality numbers from the history's traces; the nightly check against its baselines |
-| `scripts/` | `fetch-models.sh`; `bench_voice.py` (your voice tests), `bench_fallbacks.py` (decision paths and models on `eval/`), `bench_chains.py` (chained commands), `bench_finding.py` (episodes and scenes from a description, timed), Phase 0 benchmarks |
-| `eval/` | `utterances.jsonl` (107 labelled sentences, the panel's tests), `commands.jsonl` (654, made by `build_commands.py`: every action, titles made of command words, numbers in every form, fillers, mishearings, non-commands), `chains.jsonl` (chained commands, ones that aren't, ones refused), `finding.jsonl` (episodes and scenes described, with the right answers) |
+| `scripts/` | `fetch-models.sh`; `bench_voice.py` (your voice tests), `bench_fallbacks.py` (decision paths and models on `eval/`), `bench_chains.py` (chained commands), `bench_finding.py` (episodes and scenes from a description, timed), `bench_starts.py` (starts up to the link, timed, nothing on the TV), Phase 0 benchmarks |
+| `eval/` | `utterances.jsonl` (107 labelled sentences, the panel's tests), `commands.jsonl` (654, made by `build_commands.py`: every action, titles made of command words, numbers in every form, fillers, mishearings, non-commands), `chains.jsonl` (chained commands, ones that aren't, ones refused), `finding.jsonl` (episodes and scenes described, with the right answers), `starts.jsonl` (films and episodes to start, for `bench_starts.py`) |
 | `tests/` | Offline unit tests |

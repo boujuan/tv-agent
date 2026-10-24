@@ -578,6 +578,8 @@ async def _episode(agent, imdb: str, name: str, eps: list[dict], wanted: str) ->
                  detail={"plots": {v["id"]: texts.get(v["id"], "") for v in picked}})
     addons = await agent.addons()
     ahead = {v["id"]: asyncio.create_task(_lines(agent.http, addons, v["id"], VERIFY_S)) for v in picked[:3]}
+    if order and scores[order[0]] > 0:                # its streams meanwhile: the plots' best is usually the answer
+        agent.prefetch("series", picked[0]["id"])
     try:
         fits, sure, marks = await _pick(agent.llm, name, wanted, picked, texts)
     except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError) as e:
@@ -591,6 +593,7 @@ async def _episode(agent, imdb: str, name: str, eps: list[dict], wanted: str) ->
              name, [v["id"] for v in fits], " sure" if sure else "", len(picked), (t_plots - t0) * 1000,
              (t_look - t_plots) * 1000, (time.perf_counter() - t_look) * 1000)
     if fits and sure:
+        agent.prefetch("series", fits[0]["id"])     # while its subtitles are checked (one lookup per video at a time)
         if got is None and looking is not None and looking.done():
             got = looking.result()
         job = ahead.get(fits[0]["id"]) or asyncio.create_task(_lines(agent.http, addons, fits[0]["id"], VERIFY_S))

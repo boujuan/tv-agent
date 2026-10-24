@@ -35,7 +35,7 @@ def title_agent(monkeypatch, catalog: dict[str, list[C.Meta]], sounds_like: list
     a = Agent.__new__(Agent)
     a.cfg = types.SimpleNamespace(decide_off=[])
     a.rules = types.SimpleNamespace(title_candidates=4, title_question="Which title?")
-    a.account, a.dry_run, a.http = None, False, None
+    a.account, a.dry_run, a.look_ahead, a.http = None, False, True, None
     asked = []
 
     async def search(http, query, addons, patience=1.5, enough=None):
@@ -381,3 +381,239 @@ def test_in_a_chain_a_title_asked_about_stops_it(monkeypatch):
         return await a._play_title(PlayTitle(title="dune", episode=2))
     out = asyncio.run(run())
     assert not out.ok and shown and played == []
+
+
+def stream_agent(answers: list[list[S.Stream]], fits: bool = True):
+    """An Agent with only what the stream lookups use: each lookup answers the next of `answers`; `fits`: whether
+    an answer's best stream fits the rules (Agent._fits)."""
+    a = Agent.__new__(Agent)
+    a._streams, a._stream_jobs, a._originals = {}, {}, {}
+    asked = []
+
+    async def fetch(http, addons, kind, video, enough=None):
+        asked.append(video)
+        await asyncio.sleep(0.05)
+        return answers[min(len(asked), len(answers)) - 1]
+
+    async def addons(max_age=3600):
+        return []
+    a.http, a.addons, a._fits = None, addons, lambda meta: (lambda found: fits)
+    a.fetch = fetch
+    return a, asked
+
+
+def test_streams_kept_past_their_fresh_window_are_used_at_once_when_they_fit_and_asked_again(monkeypatch):
+    old = [S.Stream("AIOStreams", "https://x/old", "4K", "", "old.mkv", 0, height=2160)]
+    new = [S.Stream("AIOStreams", "https://x/new", "4K", "", "new.mkv", 0, height=2160)]
+
+    async def run(fits: bool, fresh: bool = False):
+        a, asked = stream_agent([new], fits)
+        monkeypatch.setattr(agent_mod.streams, "fetch", a.fetch)
+        a._streams[("movie", "tt1")] = (time.monotonic() - agent_mod.STREAMS_TTL - 60, old)
+        got = await a.fetch_streams("movie", "tt1", {}, fresh=fresh)
+        await asyncio.sleep(0.1)                      # the lookup made meanwhile
+        return [s.url for s in got], asked, [s.url for s in a._streams[("movie", "tt1")][1]]
+    assert asyncio.run(run(True)) == (["https://x/old"], ["tt1"], ["https://x/new"])      # at once, then refreshed
+    assert asyncio.run(run(False)) == (["https://x/new"], ["tt1"], ["https://x/new"])     # doesn't fit: waited for
+    assert asyncio.run(run(True, fresh=True)) == (["https://x/new"], ["tt1"], ["https://x/new"])
+
+    async def too_old():
+        a, asked = stream_agent([new])
+        monkeypatch.setattr(agent_mod.streams, "fetch", a.fetch)
+        a._streams[("movie", "tt1")] = (time.monotonic() - agent_mod.STREAMS_STALE - 1, old)
+        return [s.url for s in await a.fetch_streams("movie", "tt1", {})]
+    assert asyncio.run(too_old()) == ["https://x/new"]
+
+    async def settled(released: str):
+        a, asked = stream_agent([new], fits=False)
+        monkeypatch.setattr(agent_mod.streams, "fetch", a.fetch)
+        a._streams[("series", "tt1:6:25")] = (time.monotonic() - agent_mod.STREAMS_TTL - 60, old)
+        meta = {"videos": [{"id": "tt1:6:25", "season": 6, "episode": 25, "released": released}]}
+        return [s.url for s in await a.fetch_streams("series", "tt1:6:25", meta)]
+    # The best is only 1080p, but the episode is from 1995: no better copy is coming
+    assert asyncio.run(settled("1995-05-21T00:00:00.000Z")) == ["https://x/old"]
+    today = time.strftime("%Y-%m-%dT00:00:00.000Z", time.gmtime())
+    assert asyncio.run(settled(today)) == ["https://x/new"]            # out today: the new answer is waited for
+
+    async def addons_fail():
+        a, asked = stream_agent([[]], fits=False)
+        monkeypatch.setattr(agent_mod.streams, "fetch", a.fetch)
+        a._streams[("movie", "tt1")] = (time.monotonic() - agent_mod.STREAMS_TTL - 60, old)
+        return [s.url for s in await a.fetch_streams("movie", "tt1", {})]
+    assert asyncio.run(addons_fail()) == ["https://x/old"]           # better than nothing
+
+
+def link_agent(monkeypatch, resolves: dict[str, str | None], rechecks: bool = True):
+    """An Agent with only what link checks use: streams.resolve answers from `resolves` (stream url -> where it
+    leads) after 50 ms; streams.recheck answers `rechecks`."""
+    a = Agent.__new__(Agent)
+    a._links, a._link_jobs, a.http = {}, {}, None
+    calls = []
+
+    async def resolve(http, s, hops=None):
+        calls.append(("resolve", s.url))
+        await asyncio.sleep(0.05)
+        if hops is not None:
+            hops.append({"host": "addon.example", "status": 302, "ms": 50})
+        return resolves.get(s.url)
+
+    async def recheck(http, link, headers=None):
+        calls.append(("recheck", link))
+        return rechecks
+    monkeypatch.setattr(agent_mod.streams, "resolve", resolve)
+    monkeypatch.setattr(agent_mod.streams, "recheck", recheck)
+    return a, calls
+
+
+def test_a_link_is_found_once_and_reused_checked_at_its_own_address(monkeypatch):
+    s = S.Stream("AIOStreams", "https://addon/play/1", "n", "", "f.mkv", 0)
+
+    async def run():
+        a, calls = link_agent(monkeypatch, {s.url: "https://cdn/f.mkv"})
+        first, second = await asyncio.gather(a.link(s), a.link(s))          # one request for both
+        about = {}
+        third = await a.link(s, about)                                       # a moment later: as it is
+        assert about == {"how": "answered a moment ago"}
+        a_while = time.monotonic() - agent_mod.LINK_TRUSTED - 1
+        a._links[s.url] = (a_while, "https://cdn/f.mkv", a_while)
+        fourth = await a.link(s)                                             # later: checked at its address
+        fifth = await a.link(s)                                              # it just answered: as it is
+        too_old = time.monotonic() - agent_mod.LINK_TTL - 1
+        a._links[s.url] = (too_old, "https://cdn/f.mkv", time.monotonic() - agent_mod.LINK_TRUSTED - 1)
+        sixth = await a.link(s)                                              # too old: the addon again
+        return [first, second, third, fourth, fifth, sixth], calls
+    links, calls = asyncio.run(run())
+    assert links == ["https://cdn/f.mkv"] * 6
+    assert calls == [("resolve", s.url), ("recheck", "https://cdn/f.mkv"), ("resolve", s.url)]
+
+
+def test_a_link_that_stops_answering_at_its_address_is_found_again(monkeypatch):
+    s = S.Stream("AIOStreams", "https://addon/play/1", "n", "", "f.mkv", 0)
+
+    async def run():
+        a, calls = link_agent(monkeypatch, {s.url: "https://cdn/new.mkv"}, rechecks=False)
+        a_while = time.monotonic() - agent_mod.LINK_TRUSTED - 1
+        a._links[s.url] = (a_while, "https://cdn/old.mkv", a_while)
+        return await a.link(s), calls
+    link, calls = asyncio.run(run())
+    assert link == "https://cdn/new.mkv" and calls == [("recheck", "https://cdn/old.mkv"), ("resolve", s.url)]
+
+
+def test_the_best_link_found_a_moment_ago_starts_without_asking_anything(monkeypatch):
+    best, other = (S.Stream("AIOStreams", f"https://addon/play/{n}", "n", "", f"{n}.mkv", 0) for n in (1, 2))
+
+    async def run():
+        a, calls = link_agent(monkeypatch, {best.url: "https://cdn/1.mkv", other.url: "https://cdn/2.mkv"})
+        a._links[best.url] = (time.monotonic(), "https://cdn/1.mkv", time.monotonic())
+        about = {}
+        return await a._first_playable([best, other], None, about), about, calls
+    got, about, calls = asyncio.run(run())
+    assert got == (best, "https://cdn/1.mkv") and about["how"] == "answered a moment ago" and calls == []
+
+
+def test_a_list_kept_from_earlier_whose_links_fail_gives_way_to_the_new_answer(monkeypatch):
+    old = [S.Stream("AIOStreams", f"https://addon/old/{n}", "n", "", f"{n}.mkv", 0) for n in (1, 2)]
+    new = S.Stream("AIOStreams", "https://addon/new/1", "n", "", "n1.mkv", 0)
+
+    async def again():
+        return [old[0], new]                             # what was tried already isn't tried again
+
+    async def run():
+        a, calls = link_agent(monkeypatch, {new.url: "https://cdn/n1.mkv"})
+        about = {}
+        return await a._first_playable(old, again, about), about, calls
+    got, about, calls = asyncio.run(run())
+    assert got == (new, "https://cdn/n1.mkv") and about["asked_again"] is True
+    assert [url for _, url in calls] == [old[0].url, old[1].url, new.url]
+
+
+def test_a_video_looked_up_ahead_has_its_best_link_checked_too(monkeypatch):
+    best = S.Stream("AIOStreams", "https://addon/play/1", "4K", "", "f.mkv", 0, height=2160)
+    dropped = S.Stream("AIOStreams", "https://addon/play/0", "cam", "", "cam.mkv", 0, why_dropped="cam/ts")
+
+    async def run():
+        a, calls = link_agent(monkeypatch, {best.url: "https://cdn/f.mkv"})
+        a.account, a.look_ahead = object(), True
+        a.cfg = types.SimpleNamespace(player="tvplayer", probe_streams=True)
+
+        async def fetch_streams(kind, video, meta=None, fresh=False):
+            return [dropped, best]
+
+        async def streams_for(kind, video, meta=None, fresh=False):
+            return [dropped, best]
+
+        async def meta(http, kind, imdb):
+            return {}
+        monkeypatch.setattr(agent_mod.cinemeta, "meta", meta)
+        a.fetch_streams, a.streams_for = fetch_streams, streams_for
+        a.prefetch("movie", "tt1")
+        await asyncio.sleep(0.2)
+        return a._links, calls
+    links, calls = asyncio.run(run())
+    assert calls == [("resolve", best.url)] and links[best.url][1] == "https://cdn/f.mkv"
+
+
+def test_an_addon_that_times_out_is_asked_again_at_once_and_each_answer_is_traced():
+    tries = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        tries.append(request.url.host)
+        if len(tries) == 1:
+            raise httpx.ReadTimeout("slow", request=request)
+        return httpx.Response(200, json={"streams": [{"url": "https://debrid/f.mkv", "name": "4K ⚡"}]})
+    manifest = {"resources": ["stream"], "types": ["movie"], "idPrefixes": ["tt"]}
+
+    async def run():
+        trace = tracing.Trace()
+        tracing.TRACE.set(trace)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            found = await S.fetch(http, [Addon("AIOStreams", "https://aio.example/manifest.json", manifest)],
+                                  "movie", "tt1")
+        return found, trace.close()[0]
+    found, steps = asyncio.run(run())
+    assert len(found) == 1 and tries == ["aio.example", "aio.example"]
+    step = next(s for s in steps if s["step"] == "addons")
+    assert step["addons"][0]["addon"] == "AIOStreams" and step["addons"][0]["tries"] == 2 and step["playable"] == 1
+
+
+def test_a_link_checks_requests_are_timed_by_host_without_their_paths():
+    def handler(request):
+        if request.url.host == "aio.example":
+            return httpx.Response(302, headers={"location": "https://cdn.example/key123/file.mkv"})
+        return httpx.Response(206, headers={"content-type": "video/x-matroska"}, content=b"\0")
+
+    async def run():
+        hops = []
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            s = S.Stream("AIO", "https://aio.example/play/secret", "n", "d", "f", 0)
+            link = await S.resolve(http, s, hops)
+            again = await S.recheck(http, link)
+        return link, again, hops
+    link, again, hops = asyncio.run(run())
+    assert link == "https://cdn.example/key123/file.mkv" and again is True
+    assert [(h["host"], h["status"]) for h in hops] == [("aio.example", 302), ("cdn.example", 206)]
+    assert "secret" not in str(hops) and "key123" not in str(hops)
+
+
+def test_an_episode_said_by_number_has_its_streams_looked_up_before_the_details_come(monkeypatch):
+    a, _ = title_agent(monkeypatch, {}, [])
+    a.account = object()
+    looked = []
+    a.prefetch = lambda kind, video: looked.append(video)
+
+    async def get(imdb):
+        return {"state": {"video_id": "tt2:3:4"}}
+    a.library.get = get
+
+    async def meta(http, kind, imdb):
+        looked.append("meta")
+        return {"videos": []}
+    monkeypatch.setattr(agent_mod.cinemeta, "meta", meta)
+
+    def asked(**fields):
+        looked.clear()
+        asyncio.run(a._play_found(PlayTitle(title="x", **fields), "tt2", "series", "X"))
+        return looked[:2]
+    assert asked(episode=6) == ["tt2:3:6", "meta"]                  # "episode 6": of the season you're on
+    assert asked(season=2) == ["tt2:2:1", "meta"]                   # "season 2": its first episode
+    assert asked(season=2, latest=True) == ["meta"]
