@@ -7,6 +7,11 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 ## server — unreleased
 
 ### Added
+- The activity history says more about each command, for debugging and for training on later: the agent's
+  version, which speech model heard it and where (`stt_model`, `stt_where`), the language hint and how many names
+  went with it (`stt_language`, `stt_vocabulary`), the decision's `trace` (each step tried, with the model that
+  answered, the LLM's or d1's) and what the action reports about itself (`details`). The log's "decided … after the
+  last word" line names the speech model, its time and what failed before it.
 - Phones are offered this computer's Tailscale address automatically (after the LAN address and `phone_hosts`), as
   TV Agent Player already was, and the listeners follow it when Tailscale starts, stops or moves (looked at every
   minute). `GET /v1/clients/me` returns the addresses the agent listens on for phones now, in the order to try, so
@@ -34,6 +39,14 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 - TV Agent Player is told all the agent's addresses, the LAN's first, then `phone_hosts` and this computer's
   Tailscale address while Tailscale runs, and the agent listens for it on each: it reaches the agent with the
   computer away from home too (needs the player from its 0.1.0).
+
+### Changed
+- The names sent to the hosted speech model go most likely first, since only 100 fit: what's playing and Continue
+  Watching, then your vocabulary, what you watched (newest first), Twitch favourites and the rest of the library
+  (newest added first). They follow the language hint: titles as your Stremio library names them with a Spanish
+  hint, Cinemeta's original names with an English one, both without a hint. Sending both with a Spanish hint made
+  4 of the 91 kept commands come out worse ("Pause" as "Paws"); command words aren't sent, the model hears them
+  well.
 
 ### Fixed
 - Hosted speech-to-text works again with a long watch history: the names it's asked to listen for (your
@@ -82,6 +95,8 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   when every phone has the latest release and names the ones that don't.
 
 ### Changed
+- Decisions › Speech to text › Show all: says the order the names are sent in, and counts against the hosted
+  model's 100 (AssemblyAI refuses more).
 - Settings › Updates no longer has a Kodi row (the agent can still update Kodi: `POST /v1/kodi/update`).
 - Settings › Updates: a TV Agent Player row, with its version on the TV, the latest release and "Update the player".
 - Settings › Playback › Player: **TV Agent Player** (and the tray menu, the overview, About).

@@ -8,6 +8,7 @@ import os
 import time
 from pathlib import Path
 
+from . import __version__
 from .config import DATA_DIR
 
 FILE = DATA_DIR / "activity.jsonl"
@@ -24,14 +25,16 @@ def append(entry: dict, path: Path = FILE):
 def entry(source: str, heard: str, decision, ok: bool | None, say: str, ms: float | None,
           extra: dict | None = None) -> dict:
     """One record. source: 'tv' (remote mic), 'laptop' (panel mic), 'text' (typed), 'mcp'. ms: doing it. extra:
-    how it was heard and timed (stt, stt_ms, stt_cost, after_speech_ms, audio_s, recording); decide_ms and the
-    models' cost come from the decision."""
-    e = {"source": source, "heard": heard, "type": decision.action.type, "via": decision.via,
+    how it was heard and timed (stt_model, stt_where, stt_language, stt_vocabulary, stt_ms, stt_cost,
+    after_speech_ms, audio_s, recording) and how the action went (the agent's details); decide_ms, the models'
+    cost and the trace (each step tried, with the model that answered) come from the decision. Rich enough to
+    debug a command later, or to train on."""
+    e = {"agent": __version__, "source": source, "heard": heard, "type": decision.action.type, "via": decision.via,
          "rule": decision.rule, "confidence": round(decision.confidence, 3),
          "action": decision.action.model_dump(exclude_none=True), "ok": ok, "say": say,
          "ms": round(ms) if ms is not None else None,
          "decide_ms": round(decision.ms, 2) if getattr(decision, "ms", 0) else None,      # rules: well under 1 ms
-         "cost": getattr(decision, "cost", 0) or None}
+         "cost": getattr(decision, "cost", 0) or None, "trace": getattr(decision, "trace", None) or None}
     e.update({k: v for k, v in (extra or {}).items() if v is not None})
     return {k: v for k, v in e.items() if v is not None or k in ("ok", "ms")}
 

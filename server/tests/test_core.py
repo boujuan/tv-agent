@@ -1261,9 +1261,9 @@ def _bare_service(monkeypatch, tmp_path):
                                     log_transcripts=True, secret=lambda k: "key", stt_language="native",
                                     native_language="spa", stt_vocabulary=["Stremio"], stt_vocabulary_library=False,
                                     twitch_favorites=[])
-    svc._library_names, svc._library_names_at = [], 0.0
+    svc._library_names, svc._library_names_at, svc._other_names = {}, 0.0, {}
     svc.agent = types.SimpleNamespace(http=None, state=types.SimpleNamespace(
-        timings=types.SimpleNamespace(add=lambda *a: None)))
+        timings=types.SimpleNamespace(add=lambda *a: None), now_playing=None))
     svc.stt, svc._stt_name, svc._stt_gen, svc._stt_loading = None, "", 0, asyncio.Lock()
     monkeypatch.setattr(stt, "RECORDINGS", tmp_path / "recordings")
     return svc, server, stt
@@ -1437,12 +1437,54 @@ def test_the_hosted_model_gets_a_language_hint_and_the_vocabulary(monkeypatch, t
     monkeypatch.setattr(stt, "hosted_transcribe", hosted)
     svc.cfg.twitch_favorites = ["Ibai"]
     svc.cfg.stt_vocabulary_library = True
-    svc._library_names, svc._library_names_at = ["The Bear", "stremio"], 1e12      # fresh: no refresh started
+    svc._library_names, svc._library_names_at = {"recent": ["The Bear", "stremio"]}, 1e12   # fresh: no refresh
     asyncio.run(svc.transcribe(b"\0" * 32000))
-    assert sent == {"language": "es", "vocabulary": ["Stremio", "Ibai", "The Bear"]}   # native Spanish; no repeats
+    assert sent == {"language": "es", "vocabulary": ["Stremio", "The Bear", "Ibai"]}   # native Spanish; no repeats
     svc.cfg.stt_language = ""
     asyncio.run(svc.transcribe(b"\0" * 32000))
     assert sent["language"] == ""                    # the model guesses
+
+
+def test_the_vocabulary_sends_the_likeliest_names_first_in_the_hints_language(monkeypatch, tmp_path):
+    """What's playing and Continue Watching, then yours, what you watched (newest first), Twitch and the rest of
+    the library (newest added first). Stremio's names with a Spanish hint, Cinemeta's with an English one, both
+    without. Only the first 100 go (AssemblyAI refuses more), so the least likely are the ones left out."""
+    import asyncio
+    import types
+    svc, server, stt = _bare_service(monkeypatch, tmp_path)
+    svc.cfg.stt_vocabulary_library, svc.cfg.twitch_favorites = True, ["Ibai"]
+    svc.agent.state.now_playing = types.SimpleNamespace(name="Severance")
+    item = lambda i, name, last="", offset=0, ctime="": {"_id": f"tt{i}", "type": "movie", "name": name,
+                                                       "_ctime": ctime,
+                                                       "state": {"lastWatched": last, "timeOffset": offset}}
+    items = [item(1, "Old Film", last="2026-01-01"), item(2, "El señor de los anillos", last="2026-10-01"),
+             item(3, "Half Watched", last="2026-09-01", offset=600), item(4, "Never Watched", ctime="2026-05-01"),
+             item(5, "Added Lately", ctime="2026-10-20"), item(6, "Severance", last="2026-10-23", offset=60)]
+
+    async def library_items():
+        return items
+    svc.agent.library = types.SimpleNamespace(items=library_items)
+    asked = []
+
+    async def meta(http, kind, imdb_id):
+        asked.append(imdb_id)
+        return {"name": "The Lord of the Rings" if imdb_id == "tt2" else
+                next(i["name"] for i in items if i["_id"] == imdb_id)}
+    monkeypatch.setattr(server.cinemeta, "meta", meta)
+    asyncio.run(svc._refresh_library_names())
+    svc._library_names_at = 1e12
+    assert asked == []                                                      # a Spanish hint: Stremio's names only
+    assert svc.stt_vocabulary() == ["Severance", "Half Watched", "Stremio", "El señor de los anillos", "Old Film",
+                                    "Ibai", "Added Lately", "Never Watched"]
+    asyncio.run(svc._refresh_library_names(other_names=True))
+    asyncio.run(svc._refresh_library_names(other_names=True))
+    assert sorted(asked) == ["tt1", "tt2", "tt3", "tt4", "tt5", "tt6"]       # each title's name asked once
+    svc.cfg.stt_language = "en"
+    assert svc.stt_vocabulary()[3] == "The Lord of the Rings"
+    svc.cfg.stt_language = ""
+    assert svc.stt_vocabulary()[3:5] == ["El señor de los anillos", "The Lord of the Rings"]
+    svc._library_names = {"rest": [f"Film {i}" for i in range(150)]}
+    assert len(svc.stt_vocabulary()) == stt.VOCABULARY_MAX == 100
 
 
 def test_another_script_from_this_laptop_asks_the_hosted_model(monkeypatch, tmp_path):

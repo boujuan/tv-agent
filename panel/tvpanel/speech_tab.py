@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
 from .common import (AMBER, GREEN, RED, TV_AGENT, WHERE, ApiError, KeyLine, agent_config, agent_stt, api, dim,
                      load_cfg, offer_to_delete_recordings, openrouter_check)
 
-VOCABULARY_MAX = getattr(agent_stt, "VOCABULARY_MAX", 200)      # names the hosted model is sent with each command
+VOCABULARY_MAX = getattr(agent_stt, "VOCABULARY_MAX", 100)      # names the hosted model is sent with each command
 
 
 def clean_names(words) -> list[str]:
@@ -321,7 +321,8 @@ class VocabularyDialog(QDialog):
         self.saving = self.closed = False
         v = QVBoxLayout(self)
         v.addWidget(dim("Names the hosted speech-to-text should hear as they're written (AssemblyAI models use "
-                        "them). Yours go first; few and distinctive works best."))
+                        "them, the first 100). What's playing and Continue Watching go first, then yours, what you "
+                        "watched, Twitch and the rest of the library; few and distinctive works best."))
         self.message = QLabel("")
         self.message.setWordWrap(True)
         self.message.hide()

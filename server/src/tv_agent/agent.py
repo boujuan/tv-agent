@@ -69,6 +69,7 @@ NOW_PLAYING_FILE = CONFIG_DIR / "now-playing.json"
 class Outcome:
     ok: bool
     say: str
+    details: dict | None = None     # how it went, for the activity history (never a link)
 
 
 @dataclass(frozen=True)

@@ -67,6 +67,8 @@ from .languages import ANDROID_LOCALE
 from .languages import name as language_name
 from .listen_stream import StreamSession
 from . import stt as stt_mod
+from .stremio import cinemeta
+from .stremio import library as library_mod
 from .stt import Stt
 from .tv import status as tv_status
 from .tv import tvplayer
@@ -184,8 +186,11 @@ class Service:
         self._stt_gen = 0                       # bumped by unload_stt, so a load finishing after it isn't kept
         self._stt_loading = asyncio.Lock()
         self._panel_adb: Adb | None = None
-        self._library_names: list[str] = []      # for the speech model's vocabulary, refreshed now and then
+        # The library's titles for the speech model's vocabulary, refreshed now and then: "continue" (Continue
+        # Watching), "recent" (watched before), "rest" (never watched, newest added first)
+        self._library_names: dict[str, list[str]] = {}
         self._library_names_at = 0.0
+        self._other_names: dict[str, str] = {}   # a library name -> Cinemeta's, where it differs (else "")
         self.token = cfg.secret("agent_token") or ""
         self.clients = clients_mod.Clients()
         self._busy = asyncio.Lock()
@@ -255,7 +260,7 @@ class Service:
         ms = (time.perf_counter() - t) * 1000
         self.agent.state.timings.add(f"execute:{d.action.type}", ms)
         log.info("%s -> %s (%.0f ms)", d.action.type, out.say, ms)
-        self.record(source, heard, d, out.ok, out.say, ms, extra)
+        self.record(source, heard, d, out.ok, out.say, ms, {**(extra or {}), **(out.details or {})})
         return out
 
     async def run(self, d: Decision, heard: str, source: str, extra: dict | None = None):
@@ -344,31 +349,66 @@ class Service:
         return ANDROID_LOCALE.get(self.cfg.native_language, "").split("_")[0] if lang == "native" else lang
 
     def stt_vocabulary(self) -> list[str]:
-        """The names the hosted model should hear: yours (Settings), then your Twitch favourites and the titles you
-        watched lately; the library part is refreshed in the background every 10 minutes."""
-        names = list(self.cfg.stt_vocabulary)
-        if self.cfg.stt_vocabulary_library:
-            names += list(self.cfg.twitch_favorites) + self._library_names
-            if time.monotonic() - self._library_names_at > 600:
-                self._library_names_at = time.monotonic()
-                asyncio.create_task(self._refresh_library_names())
-        seen, out = set(), []
-        for n in names:
-            n = n.strip()[:100]
-            if n and n.lower() not in seen:
-                seen.add(n.lower())
-                out.append(n)
-        return out[:stt_mod.VOCABULARY_MAX]
+        """The names the hosted model should hear, most likely first, since only VOCABULARY_MAX go: what's playing
+        and Continue Watching, then yours (Settings), what you watched before (newest first), your Twitch
+        favourites and the rest of the library. Command words aren't sent: the model hears those well, and they'd
+        take the names' places. The library part is refreshed in the background every 10 minutes.
 
-    async def _refresh_library_names(self):
+        The names follow the language hint, since the list's language leans how borderline words come out (English
+        names next to Spanish ones turned 4 of 91 kept commands worse, "Pause" into "Paws"; measured 2026-10-24):
+        Stremio's names with a Spanish (or other) hint, as your library has them; Cinemeta's original names with
+        an English one; both without a hint."""
+        if not self.cfg.stt_vocabulary_library:
+            return stt_mod.vocabulary(self.cfg.stt_vocabulary)
+        lang = self.stt_language()
+        if time.monotonic() - self._library_names_at > 600:
+            self._library_names_at = time.monotonic()
+            asyncio.create_task(self._refresh_library_names(other_names=lang in ("en", "")))
+
+        def named(names: list[str]) -> list[str]:
+            if lang == "en":
+                return [self._other_names.get(n) or n for n in names]
+            return [m for n in names for m in (n, self._other_names.get(n, ""))] if lang == "" else names
+        lib, np = self._library_names, self.agent.state.now_playing
+        return stt_mod.vocabulary(named([np.name] if np and np.name else []), named(lib.get("continue", [])),
+                                  self.cfg.stt_vocabulary, named(lib.get("recent", [])), self.cfg.twitch_favorites,
+                                  named(lib.get("rest", [])))
+
+    async def _refresh_library_names(self, other_names: bool = False):
         try:
             items = await self.agent.library.items()
         except Exception as e:
             log.info("library titles for the speech model: %s", type(e).__name__)
             return
-        recent = sorted((i for i in items if i.get("type") in ("movie", "series") and i.get("name")),
-                        key=lambda i: (i.get("state") or {}).get("lastWatched") or "", reverse=True)
-        self._library_names = [i["name"] for i in recent[:150]]
+        titles = [i for i in items if i.get("type") in ("movie", "series") and i.get("name") and i.get("_id")]
+
+        def watched(i: dict) -> str:
+            return (i.get("state") or {}).get("lastWatched") or ""
+        cont = sorted((i for i in titles if library_mod.in_continue_watching(i)), key=watched, reverse=True)
+        recent = sorted((i for i in titles if watched(i) and not library_mod.in_continue_watching(i)), key=watched,
+                        reverse=True)
+        rest = sorted((i for i in titles if not watched(i)), key=lambda i: i.get("_ctime") or "", reverse=True)
+        if other_names:
+            await self._fetch_other_names((cont + recent + rest)[:stt_mod.VOCABULARY_MAX])
+        self._library_names = {"continue": [i["name"] for i in cont], "recent": [i["name"] for i in recent],
+                               "rest": [i["name"] for i in rest]}
+
+    async def _fetch_other_names(self, items: list[dict]):
+        """Cinemeta's name of each title the vocabulary may send, once per title: Stremio keeps the name in the
+        language it was added in ("El señor de los anillos: La comunidad del anillo"), Cinemeta has the original
+        ("The Lord of the Rings: The Fellowship of the Ring")."""
+        gate = asyncio.Semaphore(6)
+
+        async def one(i: dict):
+            async with gate:
+                try:
+                    m = await asyncio.wait_for(cinemeta.meta(self.agent.http, i["type"], i["_id"]), 4)
+                except Exception:
+                    return                      # tried again at the next refresh
+            other = str(m.get("name") or "")
+            self._other_names[i["name"]] = other if library_mod.bare(other) != library_mod.bare(i["name"]) else ""
+        await asyncio.gather(*(one(i) for i in items if i["name"] not in self._other_names
+                               and cinemeta.IMDB_ID.match(i["_id"])))
 
     async def transcribe(self, pcm: bytes, where: str | None = None, model: str | None = None,
                          fallback: bool = True) -> tuple[str, dict]:
@@ -391,10 +431,10 @@ class Service:
                 if not key:
                     failed = {"stt_error": "no OpenRouter key"}
                     continue
+                language, vocabulary = self.stt_language(), self.stt_vocabulary()
                 try:
                     text, cost = await stt_mod.hosted_transcribe(self.agent.http, key, model, pcm,
-                                                                 language=self.stt_language(),
-                                                                 vocabulary=self.stt_vocabulary())
+                                                                 language=language, vocabulary=vocabulary)
                 except (httpx.HTTPError, ValueError, KeyError) as e:
                     why = type(e).__name__
                     if isinstance(e, httpx.HTTPStatusError):        # the status says which: a refused request or theirs
@@ -403,7 +443,10 @@ class Service:
                     failed = {"stt_error": f"{model}: {why}",
                               "stt_failed_ms": round((time.perf_counter() - t) * 1000)}
                     continue
-                info = {"stt": model, "stt_cost": cost}
+                # what it was asked with, for the history: which model, the hint and how many names it used
+                info = {"stt": model, "stt_model": model, "stt_where": "hosted", "stt_cost": cost,
+                        "stt_language": language if model in stt_mod.USES_LANGUAGE else None,
+                        "stt_vocabulary": len(vocabulary) if model in stt_mod.USES_VOCABULARY else None}
             else:
                 # the panel asking for this laptop's text while hosted only: loaded for this once, not kept
                 local = await self.local_stt(keep=fallback or self.cfg.stt_where != "hosted")
@@ -411,7 +454,7 @@ class Service:
                     failed = {"stt_error": "no local speech model"}
                     continue
                 text = await asyncio.to_thread(local.transcribe, pcm)
-                info = {"stt": "local"}
+                info = {"stt": "local", "stt_model": self._stt_name, "stt_where": "local"}
                 if i < len(order) - 1 and (stt_mod.NON_LATIN.search(text) or (not text.strip()
                                                                                and len(pcm) >= HALF_SECOND)):
                     # nothing in half a second or more, or another script ("Пауса"): Parakeet guessed the language
@@ -505,7 +548,9 @@ async def stream_session(svc: "Service", reader: asyncio.StreamReader, send, sou
     if sess.endpoint_ms is not None:
         svc.agent.state.timings.add("endpoint", sess.endpoint_ms)
         extra["after_speech_ms"] = round(sess.endpoint_ms)
-        log.info("decided %.0f ms after the last word", sess.endpoint_ms)
+        log.info("decided %.0f ms after the last word (heard by %s in %s ms%s)", sess.endpoint_ms,
+                 heard.get("stt_model") or heard.get("stt"), heard.get("stt_ms"),
+                 f", after {heard['stt_error']}" if heard.get("stt_error") else "")
     extra["recording"] = await svc.keep_recording(bytes(sess.pcm))
     if d.action.type != "none":
         svc.start(d, text, source, extra)
@@ -717,7 +762,7 @@ def local_app(svc: Service) -> FastAPI:
                 "stt_language": c.stt_language, "stt_language_now": svc.stt_language(),
                 "stt_vocabulary": list(c.stt_vocabulary), "stt_vocabulary_library": c.stt_vocabulary_library,
                 "stt_vocabulary_count": len(sent := svc.stt_vocabulary()),
-                "stt_vocabulary_sent": sent,        # all of it, as sent: yours, then Twitch favourites and the library
+                "stt_vocabulary_sent": sent,        # all of it, as sent, most likely first (stt_vocabulary)
                 "llama_server": c.llama_server}
 
     @app.get("/v1/pipeline")
@@ -967,7 +1012,7 @@ async def serve(cfg: Config):
         await svc.local_stt()               # hosted only: loaded if ever needed, ~1 GB of memory saved
     if cfg.stt_vocabulary_library:          # the first command's vocabulary has your titles too, not only the apps
         svc._library_names_at = time.monotonic()
-        asyncio.create_task(svc._refresh_library_names())
+        asyncio.create_task(svc._refresh_library_names(other_names=svc.stt_language() in ("en", "")))
     local = local_app(svc)
     listeners = svc.listeners = Listeners(svc, local)     # also read by /v1/clients (where phones can reach it)
     await listeners.load_certificate()

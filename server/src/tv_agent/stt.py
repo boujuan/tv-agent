@@ -98,6 +98,19 @@ async def hosted_transcribe(http, key: str, model: str, pcm16: bytes, timeout: f
     return str(data.get("text") or "").strip(), (data.get("usage") or {}).get("cost")
 
 
+def vocabulary(*groups, limit: int = VOCABULARY_MAX) -> list[str]:
+    """The names to send, from groups most likely said first: each once (case aside), at most 100 characters, the
+    first `limit` of them (what doesn't fit is the least likely)."""
+    seen, out = set(), []
+    for group in groups:
+        for n in group:
+            n = n.strip()[:100]
+            if n and n.lower() not in seen:
+                seen.add(n.lower())
+                out.append(n)
+    return out[:limit]
+
+
 def save_recording(pcm16: bytes) -> str | None:
     """Keep a command's audio (with keep_recordings on): its file name, the oldest beyond RECORDINGS_KEPT removed."""
     if len(pcm16) < RATE // 5:                          # under 0.1 s: nothing was said
