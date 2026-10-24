@@ -110,14 +110,17 @@ commands that can't be chained runs **the first one alone**, and the TV says wha
    done: pause". Nothing is tried again.
 5. **"Cancel"** ("cancela", "never mind", "olvídalo"), any other command but the volume, or **Back** in TV Agent
    Player stops it at once. A start still on its way stops too (its loading screen closed); a title already
-   playing goes on. In Kodi and Just Player, Back isn't seen: say "cancel".
+   playing goes on. In Kodi and Just Player, Back isn't seen: say "cancel". "Cancel" also stops a single start on
+   its way, and says "Nothing to cancel" when there's none.
 
 **Scenes**: the subtitles searched are your subtitle addons' for that episode or film (the ones the episode check
 kept, with their measured shift, else the addons' for that file; a file's own embedded subtitles would mean reading
-the whole file). The LLM says when the moment is, the line it placed it by and how: said in it, between the lines
-around it, or a guess from the story. A guess, or a line that isn't in the subtitles within 90 s of that time, is
-refused ("Not sure where “…” is: …"); otherwise the line shows on the TV before the jump. Single "go to the part
-where …" commands get the same checks.
+the whole file). The LLM quotes the subtitle line it places the moment by, with the time listed before it, and says
+how: said in the moment, the line just before a moment without words, or a guess from the story. The agent finds
+that line in the subtitles itself and jumps 3 s before it (the model's own arithmetic was once 7 hours off). Refused:
+a guess, a line that isn't in the subtitles, one said in more than one place with no time to tell them apart, and a
+description cut off while it was said ("… where Paul rides the": say it again). The line shows on the TV for 2.5 s
+before the jump. Single "go to the part where …" commands get the same checks.
 
 `scripts/bench_chains.py` decides the chained sentences of `eval/chains.jsonl` with your setup (rules, the LLM) and
 judges each step; `--off llm` for the rules alone. Chained commands said to the TV become voice tests like any

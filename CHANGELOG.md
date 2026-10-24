@@ -6,7 +6,19 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 
 ## server — unreleased
 
+### Fixed
+- Binge mode: the next episode didn't start at the end of an episode ("Couldn't start the next episode"): a start
+  made in the background wrote into the finished record of the command before it (since server 0.6.0). The same
+  stopped a switch to the right episode's file, or to another copy, made after the start.
+- "Cancel" during a start left its loading screen up when the player still had an item it was sent but never loaded;
+  with nothing on its way it says "Nothing to cancel". Back on the loading screen says the start stopped instead of
+  "That didn't work (PlayerError)".
+
 ### Changed
+- "Go to the part where …" (and a chain's scene step) jumps to the subtitle line the LLM quotes, found in the
+  subtitles by the agent, 3 s before it: the LLM's own seconds were 7 hours off for a line at 44:18 (Pluribus,
+  2026-10-24, refused then). A line said in more than one place needs its listed time, and a description cut off
+  while it was said ("… where Paul rides the", "… dances with") is refused: say it again.
 - A title d1 isn't sure of (under 40%), or can't be asked about (its hosted service answered 502 for a while on
   2026-10-24, and the search's best match was then wrong for 10 of 16 misheard names), isn't played: the candidates
   are listed on the TV, d1's likeliest first, and "number 2" plays that one as asked (its season, episode or the
