@@ -256,7 +256,7 @@ class Service:
 
     async def execute(self, d: Decision, heard: str, source: str, extra: dict | None = None):
         t = time.perf_counter()
-        out = await self.agent.execute(d.action)
+        out = await self.agent.execute(d.action, heard)
         ms = (time.perf_counter() - t) * 1000
         self.agent.state.timings.add(f"execute:{d.action.type}", ms)
         log.info("%s -> %s (%.0f ms)", d.action.type, out.say, ms)

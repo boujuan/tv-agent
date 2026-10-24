@@ -5,6 +5,8 @@ import logging
 import os
 import re
 import time
+from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
@@ -63,6 +65,14 @@ STARTS = {"play_title", "continue_watching", "next_episode", "pick"}     # actio
 LIST_TTL = 300              # "number 2" refers to a list shown in the last 5 minutes
 STREAMS_TTL = 1800          # an addon's answer for a video is reused for 30 minutes (links resolve when played)
 NOW_PLAYING_FILE = CONFIG_DIR / "now-playing.json"
+WARM_ITEMS = 2              # Continue Watching's first items: their streams looked up when the mic opens
+EXPECT_AT_MOST = 2          # stream lookups started on a guess while a title is still being decided
+# A leader this far ahead once popularity has been weighed, said exactly, is what d1 picked every time it was asked
+# (2026-10-24: Oppenheimer 19.6 ahead of the 1980 series, d1 0.97; Shogun 18.2, d1 0.22, the same pick)
+CERTAIN_GAP = 15
+CHECK_AFTER = 5.0           # the episode check waits this long after the file opens: the start has the network first
+ERROR_SHOWN = 3.0           # a start that fails says why on the loading screen this long before going Home
+HEARD: ContextVar[str] = ContextVar("heard", default="")    # what the command being run was, as transcribed
 
 
 @dataclass
@@ -157,6 +167,58 @@ def _episode_label(name: str, v: dict) -> str:
     return f"{name} · S{v['season']}E{v.get('episode', 0)}"
 
 
+def _title_screen(name: str, meta: dict, video: str) -> dict:
+    """What TV Agent Player's loading and pause screens say about a title (its PROTOCOL.md, `loading` and `info`):
+    the name; year and runtime for a film, "S4E1 · <episode name>" for an episode; the plot; Cinemeta's artwork,
+    which is public (metahub), never a stream link."""
+    v = next((x for x in cinemeta.episodes(meta) if x["id"] == video), None)
+    if v is not None:
+        subtitle = " · ".join(x for x in (f"S{v['season']}E{v.get('episode', 0)}", v.get("name") or v.get("title"))
+                              if x)
+        plot = v.get("overview") or v.get("description") or meta.get("description")
+    else:
+        minutes = _runtime_min(meta)
+        runtime = (f"{minutes // 60} h {minutes % 60} min" if minutes >= 60 else f"{minutes} min") if minutes else ""
+        subtitle = " · ".join(x for x in (str(meta.get("year") or meta.get("releaseInfo") or ""), runtime) if x)
+        plot = meta.get("description")
+    return {"title": name, "subtitle": subtitle, "plot": plot or "", "poster": meta.get("poster") or "",
+            "backdrop": meta.get("background") or "", "logo": meta.get("logo") or ""}
+
+
+def _stream_screen(s: streams.Stream) -> dict:
+    """What the pause screen says about the file: the addon that found it, its description without links, the
+    debrid service, size, release group, and the badges the file's header can't tell the player."""
+    return {"source": s.source or s.addon, "description": streams.description(s), "debrid": streams.debrid(s),
+            "size": s.size, "release": streams.release(s), "badges": streams.badges(s)}
+
+
+class Loading:
+    """TV Agent Player's loading screen for one start: shown once the player's screen is up, then each step. A player
+    without it (older than 0.2) answers "unknown command" once and isn't sent it again (tvplayer.loading)."""
+
+    def __init__(self, player: TvPlayer, video: str, screen: dict, ready: asyncio.Task, step: str):
+        self.player, self.video, self.step, self.shown = player, video, step, False
+        self.screen = {k: v for k, v in screen.items() if k != "plot"}
+        self.first = asyncio.create_task(self._show(ready))
+
+    async def _show(self, ready: asyncio.Task):
+        try:
+            if await asyncio.shield(ready):
+                self.shown = self.player.loading(self.video, **self.screen, step=self.step)
+        except Exception as e:                  # the start goes on without it
+            log.info("loading screen: %s", type(e).__name__)
+
+    def at(self, step: str):
+        if step == self.step:
+            return
+        self.step = step
+        if self.shown:
+            try:
+                self.player.loading(self.video, **self.screen, step=step)
+            except Exception as e:
+                log.info("loading screen: %s", type(e).__name__)
+
+
 class Agent:
     def __init__(self, cfg: Config, dry_run: bool = False):
         self.cfg = cfg
@@ -208,6 +270,7 @@ class Agent:
         self._preload_task: asyncio.Task | None = None
         self._preloaded: tuple[str, str, str] | None = None   # (video id, stream url, link) open in TV Agent Player
         self._fallback: tuple[NowPlaying, list[streams.Stream], tuple, float] | None = None   # another file, if it fails
+        self._closing: asyncio.Task | None = None     # a failed start's loading screen, going Home in a moment
 
     async def close(self):
         if self._progress and not self._progress.done():
@@ -276,8 +339,12 @@ class Agent:
         """The LLM, when there's a key and its step is on (the Decisions tab)."""
         return self.llm if self.llm is not None and "llm" not in self.cfg.decide_off else None
 
-    async def execute(self, action: Action) -> Outcome:
+    async def execute(self, action: Action, heard: str = "") -> Outcome:
+        """`heard`: the command as transcribed, for the loading screen and the title choice."""
         handler = getattr(self, "_" + action.type.replace("none", "unclear"))
+        HEARD.set(heard)
+        if action.type in STARTS and self._closing is not None:
+            self._closing.cancel()              # the screen stays up for this start
         if action.type not in ("volume", "none", "binge", "timer", "auto_skip", "wrong") and not self.dry_run:
             asyncio.create_task(self._wake())
         try:
@@ -298,25 +365,43 @@ class Agent:
         return self._addons
 
     async def warm(self):
-        """Refresh what a play needs before it's asked for (your addons, your library: ~0.4 s each when stale).
-        Run when the mic opens and at startup."""
+        """Refresh what a play needs before it's asked for (your addons, your library: ~0.4 s each when stale), and
+        look up the streams of what Continue Watching would play first (3-6 s each, kept 30 minutes). Run when the mic
+        opens and at startup."""
         try:
             await self.addons(max_age=3000)
             if time.monotonic() - self.library._at > 480:
                 await self.library.items(fresh=True)
+            for item in (await self.library.continue_watching())[:WARM_ITEMS]:
+                target = await self._continue_target(item)
+                if not isinstance(target, Outcome):
+                    self.prefetch(item["type"], target[0])
         except Exception as e:
             log.info("warming up: %s", type(e).__name__)
 
-    async def fetch_streams(self, kind: str, video_id: str) -> list[streams.Stream]:
+    def _fits(self, meta: dict | None) -> Callable[[list[streams.Stream]], bool]:
+        """Whether an addon's answer is enough to start without the slower ones: a stream your rules keep, at the
+        best resolution they allow (and in the right language, when the title is known)."""
+        def fits(found: list[streams.Stream]) -> bool:
+            plan = self.track_plan(meta) if meta else None
+            ranked = streams.rank([replace(s) for s in found], self.cfg.max_height, self.cfg.max_mbps,
+                                  _runtime_min(meta or {}), bool(plan and plan.subtitles is None),
+                                  plan.audio if plan else None)
+            return bool(ranked) and not ranked[0].why_dropped and ranked[0].height >= min(self.cfg.max_height, 2160) \
+                and (plan is None or ranked[0].rank_key[1] == 2)
+        return fits
+
+    async def fetch_streams(self, kind: str, video_id: str, meta: dict | None = None) -> list[streams.Stream]:
         """Your addons' streams for a video (3-6 s from AIOStreams), reused for 30 minutes, with one lookup in
-        flight per video: a lookup started early (prefetch) is the one the play then waits for."""
+        flight per video: a lookup started early (prefetch) is the one the play then waits for. It doesn't wait for
+        a slow addon once one has answered with a stream that fits (_fits)."""
         key = (kind, video_id)
         if (hit := self._streams.get(key)) and time.monotonic() - hit[0] < STREAMS_TTL:
             return [replace(s) for s in hit[1]]       # copies: ranking marks them
         job = self._stream_jobs.get(key)
         if job is None or (job.done() and (job.cancelled() or job.exception())):
             job = self._stream_jobs[key] = asyncio.create_task(
-                streams.fetch(self.http, await self.addons(), kind, video_id))
+                streams.fetch(self.http, await self.addons(), kind, video_id, enough=self._fits(meta)))
         found = await asyncio.shield(job)                  # a replaced command doesn't waste the lookup
         self._stream_jobs.pop(key, None)
         if found:
@@ -343,13 +428,18 @@ class Agent:
 
     async def streams_for(self, kind: str, video_id: str, meta: dict | None = None) -> list[streams.Stream]:
         meta = meta or {}
-        found = await self.fetch_streams(kind, video_id)
-        if kind == "series":                    # files numbered as a neighbour that are this episode (episode_check)
-            for filename, size, named in self.checks.playing_as(video_id)[:4]:
-                try:
-                    found += [s for s in await self.fetch_streams(kind, named) if s.filename == filename]
-                except Exception as e:
-                    log.info("streams of %s (named %s): %s", video_id, named, type(e).__name__)
+        # Files numbered as a neighbour that are this episode (episode_check): looked up at the same time
+        named = self.checks.playing_as(video_id)[:4] if kind == "series" else []
+        found, *others = await asyncio.gather(self.fetch_streams(kind, video_id, meta),
+                                              *(self.fetch_streams(kind, n) for _, _, n in named),
+                                              return_exceptions=True)
+        if isinstance(found, BaseException):
+            raise found
+        for (filename, size, n), more in zip(named, others):
+            if isinstance(more, BaseException):
+                log.info("streams of %s (named %s): %s", video_id, n, type(more).__name__)
+            else:
+                found += [s for s in more if s.filename == filename]
         plan = self.track_plan(meta)
         ranked = streams.rank(found, self.cfg.max_height, self.cfg.max_mbps, _runtime_min(meta),
                               plan.subtitles is None, plan.audio)
@@ -463,27 +553,40 @@ class Agent:
                 fixes += 1
 
     async def find_title(self, title: str, kind: str | None, season: int | None = None,
-                         utterance: str | None = None, with_addons: bool = True) -> cinemeta.Meta | None:
+                         utterance: str | None = None, with_addons: bool = True,
+                         expect: Callable[[str, str], None] | None = None) -> cinemeta.Meta | None:
         """Candidates of both kinds from Cinemeta and your metadata addons (search.py); d1 picks one unless a
-        candidate clearly wins on its own."""
+        candidate clearly wins on its own. `expect` is told the leader while d1 decides (_expecting)."""
         if kind is None and season is not None:
             kind = "series"   # "the bear season 3" is the 2022 series, not the 1989 film
+        hits = await self._title_hits(title, kind, with_addons)
+        return await self._choose_title(title, kind, hits, utterance, expect) if hits else None
+
+    async def _title_hits(self, title: str, kind: str | None, with_addons: bool = True,
+                          enough: asyncio.Event | None = None) -> list[tuple[float, cinemeta.Meta]]:
+        """The title search's candidates, best first ([] when nothing comes close). `enough`: see search.search."""
         try:
             addons = await self.addons() if with_addons else []
         except Exception as e:
             log.info("addons unavailable for the title search (%s); Cinemeta only", type(e).__name__)
             addons = []
-        hits = cinemeta.ranked(title, await title_search.search(self.http, title, addons), kind)
+        hits = cinemeta.ranked(title, await title_search.search(self.http, title, addons, enough=enough), kind)
         if kind:
             hits = [h for h in hits if h[1].type == kind] or hits
         if not hits or (min(hits[0][1].rank, hits[0][1].extra_rank) > 0 and cinemeta.similarity(title, hits[0][1]) < 70):
-            return None
+            return []
+        return hits
+
+    async def _choose_title(self, title: str, kind: str | None, hits: list[tuple[float, cinemeta.Meta]],
+                            utterance: str | None = None,
+                            expect: Callable[[str, str], None] | None = None) -> cinemeta.Meta:
         if self._decisive(title, hits):
             return hits[0][1]
         # A close call: Cinemeta's popularity of the leading few tells a famous title from its namesakes.
         pops = await self._popularity([m for _, m in hits[:4]])
         hits = cinemeta.ranked(title, [m for _, m in hits], kind, pops)
-        if self._decisive(title, hits):
+        if self._decisive(title, hits) or (title_search.said_exactly(title, hits[0][1]) and len(hits) > 1
+                                           and hits[0][0] - hits[1][0] >= CERTAIN_GAP):
             return hits[0][1]
         # Candidates: each source's top hit of each kind (Cinemeta's search knows alternate titles: "la casa de
         # papel" is Money Heist) plus the best name matches. Those top hits go first, since d1 leans to the first.
@@ -491,6 +594,8 @@ class Agent:
         top = (firsts + [h for h in hits if h not in firsts])[:self.rules.title_candidates]
         if "d1" in self.cfg.decide_off:
             return top[0][1]
+        if expect:
+            expect(top[0][1].id, top[0][1].type)
         try:
             pick = await self.d1.choice(utterance or f"play {title}", self.rules.title_question,
                                         {f"c{i}": m.label for i, (_, m) in enumerate(top)})
@@ -513,49 +618,113 @@ class Agent:
                 return m.id, 0.0
         return dict(await asyncio.gather(*(one(m) for m in metas)))
 
-    async def resolve(self, title: str, kind: str | None, season: int | None,
-                      exact: bool = False) -> tuple[str, str, str] | None:
-        """(imdb id, type, name): your library first (what you watch), then Cinemeta. A name the search doesn't find
-        exactly also goes to the LLM, meanwhile, for the real titles it sounds like ("ceberance": Severance); the
-        closest-sounding one that the library or the search has is used."""
+    async def resolve(self, title: str, kind: str | None, season: int | None, exact: bool = False,
+                      expect: Callable[[str, str], None] | None = None) -> tuple[str, str, str] | None:
+        """(imdb id, type, name): your library first (what you watch), then the title search. With the LLM on, it's
+        asked at the same time for the real titles that sound like the name ("ceberance": Severance). Those are
+        looked up as they come, side by side (your library, else Cinemeta by that name or by its part before a
+        subtitle: "Rebel Moon" is "Rebel Moon - Part One: A Child of Fire"), and once one is found the search for
+        what was heard stops waiting for its slow sources: a misheard name is a search nobody has made, which
+        Cinemeta takes up to 8 s to answer. A title said exactly wins; then the LLM's names in its order (a series
+        asked for by season has to have it), as the search for what was heard has it, else as looked up; else what
+        that search found."""
         if kind is None and season is not None:
             kind = "series"
         item = await self.library.find(title, kind)
         if item and (not exact or library_mod.bare(item.get("name", "")) == library_mod.bare(title)):
             return item["_id"], item["type"], item.get("name", title)
-        if exact:                              # a sentence nothing understood: only a title said exactly
-            m = await self.find_title(title, kind, season)
-            return (m.id, m.type, m.name) if m and title_search.said_exactly(title, m) else None
-        fix = asyncio.create_task(self._sounds_like(title)) if self.llm_on() else None
-        try:
-            m = await self.find_title(title, kind, season)
-            if m and title_search.said_exactly(title, m) or fix is None:
-                return (m.id, m.type, m.name) if m else None
-            candidates = await fix
-        finally:
-            if fix and not fix.done():
-                fix.cancel()
-        for name in candidates:
-            if m and title_search.said_exactly(name, m):
-                return m.id, m.type, m.name                  # the search had found it
-            log.info("title %r: sounds like %r (LLM)", title, name)
+        utterance = HEARD.get() or None        # d1 sees the whole sentence ("…season four")
+        if exact or not self.llm_on():         # exact: a sentence nothing understood; only a title said exactly
+            m = await self.find_title(title, kind, season, utterance, expect=expect)
+            return (m.id, m.type, m.name) if m and (not exact or title_search.said_exactly(title, m)) else None
+        found = asyncio.Event()
+        fix = asyncio.create_task(self._sounds_like(title))
+        heard = asyncio.create_task(self._title_hits(title, kind, enough=found))
+        looks: dict[str, asyncio.Task] = {}
+        decided = False                        # once it has: nothing more is looked up
+
+        async def look(name: str) -> tuple[str, str, str] | None:
             if item := await self.library.find(name, kind):
-                return item["_id"], item["type"], item.get("name", name)
-            better = await self.find_title(name, kind, season, with_addons=False)     # a real title: Cinemeta has it
-            if better and title_search.said_exactly(name, better):
-                return better.id, better.type, better.name
-        return (m.id, m.type, m.name) if m else None
+                got = item["_id"], item["type"], item.get("name", name)
+            elif (hit := await self.find_title(name, kind, season, utterance, with_addons=False)) \
+                    and title_search.said_as(name, hit):
+                got = hit.id, hit.type, hit.name
+            else:
+                return None
+            if not await self._has_season(got[0], got[1], season):
+                return None
+            found.set()
+            if expect:
+                expect(got[0], got[1])
+            return got
+
+        def looking(names: list[str]):
+            for name in names:
+                if name not in looks and not decided:
+                    looks[name] = asyncio.create_task(look(name))
+
+        def answered(t: asyncio.Task):          # looked up as soon as the LLM answers, while the search goes on
+            if not t.cancelled() and not t.exception():
+                looking(t.result())
+        fix.add_done_callback(answered)
+        m = choosing = None
+        try:
+            hits = await heard
+            if any(title_search.said_exactly(title, h) for _, h in hits):
+                m = await self._choose_title(title, kind, hits, utterance, expect)
+                if title_search.said_exactly(title, m):
+                    return m.id, m.type, m.name
+            elif hits:                          # what the search found, in case no sound-alike is: chosen meanwhile
+                choosing = asyncio.create_task(self._choose_title(title, kind, hits, utterance))
+            try:
+                names = await fix
+            except Exception as e:
+                log.info("LLM title fix: %s", type(e).__name__)
+                names = []
+            looking(names)
+            for name in names:
+                named = [h for _, h in hits if title_search.said_exactly(name, h)]
+                got = (named[0].id, named[0].type, named[0].name) if len(named) == 1 else None
+                if not (got and await self._has_season(got[0], got[1], season)):
+                    got = await looks[name]
+                if got:
+                    log.info("title %r: sounds like %r (LLM): %s", title, name, got[2])
+                    return got
+            if m is None and choosing is not None:
+                m = await choosing
+            return (m.id, m.type, m.name) if m else None
+        finally:
+            for t in (fix, heard, choosing, *looks.values()):
+                if t is not None and not t.done():
+                    t.cancel()
+            decided = True
+
+    async def _has_season(self, imdb: str, kind: str, season: int | None) -> bool:
+        """A sound-alike of a series asked for by season has that season ("paul the boys season 4" isn't Polo Boys,
+        which has one). Cinemeta's episode list, usually fetched already; True when it can't say."""
+        if season is None:
+            return True
+        if kind != "series":
+            return False
+        try:
+            eps = cinemeta.episodes(await cinemeta.meta(self.http, kind, imdb))
+        except (httpx.HTTPError, ValueError, AssertionError):
+            return True
+        return any(v["season"] == season for v in eps)
 
     async def _sounds_like(self, heard: str) -> list[str]:
-        """The LLM's real titles for a misheard one, kept when they sound like it, closest first."""
+        """The LLM's real titles for a misheard one, in its order, kept when they sound like it or were heard whole:
+        in "paul the boys" ("Pon The Boys" misheard), "The Boys" is heard but sounds less like it than Polo Boys."""
         key = library_mod.sounds(heard)
         names = {i.get("name", "") for i in await self.library.items() if i.get("type") in ("movie", "series")}
         names = sorted(names - {""}, key=lambda n: -fuzz.ratio(library_mod.sounds(n), key))[:10]
-        scored = [(fuzz.ratio(library_mod.sounds(t), key), t) for t in await self.llm.titles(heard, f"play {heard}",
-                                                                                            names)]
         said = library_mod.bare(heard)
-        return [t for score, t in sorted(scored, key=lambda x: -x[0])          # stable: the LLM's order on a tie
-                if score >= 65 and library_mod.bare(t) != said][:2]
+
+        def kept(t: str) -> bool:
+            name = library_mod.bare(t)
+            return name != said and (fuzz.ratio(library_mod.sounds(t), key) >= 65 or
+                                     len(name) >= 3 and re.search(rf"\b{re.escape(name)}\b", said) is not None)
+        return [t for t in await self.llm.titles(heard, HEARD.get() or f"play {heard}", names) if kept(t)][:2]
 
     async def episode_id(self, m: cinemeta.Meta, season: int | None, episode: int | None) -> str | None:
         """tt…:S:E for a series when a season (and maybe episode) was said, checked against Cinemeta's list."""
@@ -577,15 +746,18 @@ class Agent:
         t0 = time.perf_counter()
         if not jump:
             asyncio.create_task(self.notify(f"Finding {label}…"))
-        kodi_ready = player_ready = kodi_open = None
+        kodi_ready = player_ready = kodi_open = loading = None
         if self.cfg.player == "kodi" and not self.dry_run:
             kodi_ready = asyncio.create_task(self._start_kodi())   # Kodi gets ready (or cold-starts) during the search
         elif self.cfg.player == "tvplayer" and not self.dry_run:
-            # The player's screen comes up and connects during the search (~0.3 s), so the link goes to a ready player.
-            # Whether Kodi plays too (it's stopped first: one player at a time) is asked meanwhile as well: a Kodi
-            # frozen in the background answers only by its 1.5 s timeout.
+            # The player's screen comes up and connects during the search (~0.3 s), so the link goes to a ready player,
+            # and shows the loading screen meanwhile. Whether Kodi plays too (it's stopped first: one player at a
+            # time) is asked meanwhile as well: a Kodi frozen in the background answers only by its 1.5 s timeout.
             player_ready = asyncio.create_task(self.tvplayer.ready(self.adb))
             kodi_open = asyncio.create_task(self._kodi_player())
+            if not jump:
+                loading = Loading(self.tvplayer, video, _title_screen(name, meta, video) | {"heard": HEARD.get()},
+                                  player_ready, "Starting…" if prepared is not None else "Finding streams…")
         if prepared is not None:            # found and checked while the previous episode played
             found = [prepared]
         else:
@@ -594,17 +766,17 @@ class Agent:
             found = [s for s in found if not s.headers]     # Just Player can't send an addon's extra headers
         if not found:
             if kodi_ready is not None or player_ready is not None:
-                asyncio.create_task(self._home_unless_playing(kodi_ready or player_ready))
+                self._not_started(f"No playable stream for {label}", kodi_ready or player_ready, loading)
             return Outcome(False, f"No playable stream for {label}")
         t_streams = time.perf_counter()
         # The next episode, already open in TV Agent Player (preload): its link as it was opened, nothing to check.
         preloaded = (self._preloaded[2] if self.cfg.player == "tvplayer" and prepared is not None and self._preloaded
                      and self._preloaded[:2] == (video, prepared.url) else None)
         chosen, link, checking = found[0], preloaded or found[0].url, None
-        verifying = (self._verify(found[0], video, meta) if kind == "series" and self.cfg.check_episodes
-                     and not self.dry_run else None)
         if self.cfg.probe_streams and not preloaded:      # runs while the player gets ready; finds where the link leads
             checking = asyncio.create_task(self._first_playable(found[:3]))
+            if loading is not None:
+                loading.at("Checking the link…")
         # A file in your debrid library, or one checked while the last episode played, is opened even if the
         # check fails now (it may be a passing hiccup); anything else needs an answer.
         trusted = prepared is not None or found[0].library
@@ -627,13 +799,11 @@ class Agent:
         plan = self.track_plan(meta)
         if self.cfg.player == "tvplayer":
             if not await checked():              # what was playing carries on, followed as before
-                await self._home_unless_playing(player_ready)
+                self._not_started(f"The links for {label} didn't answer", player_ready, loading)
                 return Outcome(False, f"The links for {label} didn't answer")
             if not (player_ready is not None and await player_ready) and not await self.tvplayer.ready(self.adb):
                 return Outcome(False, "TV Agent Player didn't open: is it installed and paired (tv-agent tv pair)?")
             t_ready = time.perf_counter()
-            if verifying is not None and verifying.done() and chosen is found[0] and not preloaded:
-                chosen, link, verifying = self._known_right(verifying, chosen, link, found, video, meta)
             async with self._starting:
                 if self.tvplayer.now() is not None:
                     await self._note_position(tvplayer.PID)    # a replay of this episode starts where it is
@@ -646,8 +816,11 @@ class Agent:
                 # the next title) Kodi can't be in front, so that's done after the file opens instead of before
                 if kodi_open is not None and not self.tvplayer.up and (kodi := await kodi_open) is not None:
                     await self.kodi.stop(kodi)
+                if loading is not None:
+                    loading.at("Starting…")
                 await self.tvplayer.open(link, resume_ms, item=video, title=label, headers=chosen.headers or None,
-                                         audio=plan.audio, subs=plan.subtitles)
+                                         audio=plan.audio, subs=plan.subtitles,
+                                         info=_title_screen(name, meta, video) | _stream_screen(chosen))
                 if kodi_open is not None and not kodi_open.done():
                     asyncio.create_task(self._stop_kodi_when(kodi_open))
                 t_open = time.perf_counter()
@@ -658,13 +831,13 @@ class Agent:
                                   (imdb, kind, name, video, label, meta), time.monotonic())
                 if kind == "series" and self.cfg.check_episodes:
                     self._verify_task = asyncio.create_task(self._switch_if_wrong(
-                        self.state.now_playing, chosen, verifying if chosen is found[0] else None,
-                        (imdb, kind, name, video, label, meta)))
+                        self.state.now_playing, chosen, None, (imdb, kind, name, video, label, meta), link))
                 self._tracks_task = asyncio.create_task(self._player_subs(plan, addon_subs, label))
                 if kind == "series" and self.cfg.auto_skip:
                     self._start_skip_watch(self.state.now_playing)
                 self._started(imdb, name, kind, video, meta)
-            for stage, a, b in (("streams", t0, t_streams), ("player", t_streams, t_ready), ("open", t_ready, t_open)):
+            stages = (("streams", t0, t_streams), ("player", t_streams, t_ready), ("open", t_ready, t_open))
+            for stage, a, b in stages:
                 self.state.timings.add(f"start:{stage}", (b - a) * 1000)
             log.info("start %s: streams %.0f ms, then the link checked and the player ready %.0f ms, open %.0f ms%s",
                      video, (t_streams - t0) * 1000, (t_ready - t_streams) * 1000, (t_open - t_ready) * 1000,
@@ -672,6 +845,7 @@ class Agent:
         elif self.cfg.player == "just":
             if not await checked():
                 return Outcome(False, f"The links for {label} didn't answer")
+            stages = (("streams", t0, t_streams),)
             async with self._starting:
                 resume_ms = self._replace_session(video, resume_ms)
                 subs = languages.android_locale(plan.subtitles[0]) if plan.subtitles else None
@@ -686,8 +860,7 @@ class Agent:
                     self._duration = asyncio.create_task(self._probe_duration(self.state.now_playing))
                 if kind == "series" and self.cfg.check_episodes:
                     self._verify_task = asyncio.create_task(self._switch_if_wrong(
-                        self.state.now_playing, chosen, verifying if chosen is found[0] else None,
-                        (imdb, kind, name, video, label, meta)))
+                        self.state.now_playing, chosen, None, (imdb, kind, name, video, label, meta), link))
                 self._started(imdb, name, kind, video, meta)
         else:
             await self.tv(lambda adb: adb.run(["am", "force-stop", justplayer.PACKAGE]))
@@ -705,8 +878,6 @@ class Agent:
                 await self._home_unless_playing()
                 return Outcome(False, f"The links for {label} didn't answer")
             t_check = time.perf_counter()
-            if verifying is not None and verifying.done() and chosen is found[0]:
-                chosen, link, verifying = self._known_right(verifying, chosen, link, found, video, meta)
             async with self._starting:
                 if (pid := await self._kodi_player()) is not None:
                     await self._note_position(pid)      # a replay of this episode starts where it is
@@ -728,8 +899,7 @@ class Agent:
                 self._picture_task = asyncio.create_task(self._watch_picture(self.state.now_playing))
                 if kind == "series" and self.cfg.check_episodes and not self.dry_run:
                     self._verify_task = asyncio.create_task(self._switch_if_wrong(
-                        self.state.now_playing, chosen, verifying if chosen is found[0] else None,
-                        (imdb, kind, name, video, label, meta)))
+                        self.state.now_playing, chosen, None, (imdb, kind, name, video, label, meta), link))
                 again = None if self._again and self._again[0].video_id == video and \
                     time.monotonic() - self._again[1] < STUCK_WITHIN * 2 else \
                     (lambda: self.play(imdb, kind, name, video, label, meta, resume_ms, prepared=chosen))
@@ -738,14 +908,20 @@ class Agent:
                 if kind == "series" and self.cfg.auto_skip:
                     self._start_skip_watch(self.state.now_playing)
                 self._started(imdb, name, kind, video, meta)
-            for stage, a, b in (("streams", t0, t_streams), ("kodi", t_streams, t_kodi), ("link", t_kodi, t_check),
-                                ("open", t_check, t_open)):
+            stages = (("streams", t0, t_streams), ("kodi", t_streams, t_kodi), ("link", t_kodi, t_check),
+                      ("open", t_check, t_open))
+            for stage, a, b in stages:
                 self.state.timings.add(f"start:{stage}", (b - a) * 1000)
             log.info("start %s: streams %.0f ms, then Kodi ready %.0f ms, link check %.0f ms more, open %.0f ms",
                      video, (t_streams - t0) * 1000, (t_kodi - t_streams) * 1000, (t_check - t_kodi) * 1000,
                      (t_open - t_check) * 1000)
         quality = f" · {'4K' if chosen.height >= 2160 else f'{chosen.height}p'}" if chosen.height else ""
-        return Outcome(True, f"Playing {label}{quality}" + (f" · from {_clock(resume_ms)}" if resume_ms else ""))
+        # The start's stages and the stream played, for the activity history (`tv-agent stats` has them too)
+        details = {f"{stage}_ms": round((b - a) * 1000) for stage, a, b in stages} | {
+            "stream": {"source": chosen.source or chosen.addon, "height": chosen.height, "size": chosen.size,
+                       "release": streams.release(chosen), "preloaded": bool(preloaded)}}
+        return Outcome(True, f"Playing {label}{quality}" + (f" · from {_clock(resume_ms)}" if resume_ms else ""),
+                       details)
 
     def _replace_session(self, video: str, resume_ms: int, exact: bool = False) -> int:
         """Right before a new file opens, what belonged to the previous start stops: its follower (it would read
@@ -770,6 +946,30 @@ class Agent:
         self._save_now_playing()
         if kind == "series":
             self._prefetch = asyncio.create_task(self._prepare_next(imdb, name, video, meta))
+
+    def _not_started(self, why: str, ready: asyncio.Task, loading: Loading | None):
+        """A start that didn't happen, with the player brought up for it. TV Agent Player's loading screen says why
+        for a moment, then goes: the player stops (its screen closes) or, with something else playing on, the
+        screen is cleared. Otherwise back to Home unless something plays. A new start meanwhile keeps the screen
+        (execute() cancels this)."""
+        if loading is not None:
+            loading.at(why)
+
+        async def close():
+            if loading is not None:
+                await asyncio.gather(loading.first, return_exceptions=True)
+                if loading.shown and self.tvplayer.has_loading:
+                    await asyncio.sleep(ERROR_SHOWN)
+                    try:
+                        if self.tvplayer.now() is not None:
+                            await self.tvplayer.clear_loading()
+                        else:
+                            await self.tvplayer.stop(tvplayer.PID)
+                        return
+                    except (tvplayer.PlayerError, asyncio.TimeoutError, OSError) as e:
+                        log.info("closing the loading screen: %s", type(e).__name__)
+            await self._home_unless_playing(ready)
+        self._closing = asyncio.create_task(close())
 
     async def _home_unless_playing(self, ready: asyncio.Task | None = None):
         """The player was brought up for a start that didn't happen: back to Home, unless it's playing something."""
@@ -1054,7 +1254,8 @@ class Agent:
             link = await streams.resolve(self.http, s) or s.url
             plan = self.track_plan(meta)
             await self.tvplayer.preload(link, item=video, headers=s.headers or None, audio=plan.audio,
-                                        subs=plan.subtitles)
+                                        subs=plan.subtitles,
+                                        info=_title_screen(np.name, meta, video) | _stream_screen(s))
             self._preloaded = (video, s.url, link)
             log.info("next episode %s preloaded in the player", video)
         except asyncio.CancelledError:
@@ -1125,6 +1326,7 @@ class Agent:
             return
         at_end = bool(duration and last is not None and duration - last <= 8000)
         after, self._after_this = self._after_this, None
+        HEARD.set("")                           # what starts now wasn't said (this runs in that start's context)
         try:
             if at_end and after == "off":
                 await self._turn_off()
@@ -1219,15 +1421,17 @@ class Agent:
             self._episode_cues[key] = cues
         return self._episode_cues[key]
 
-    def _verify(self, s: streams.Stream, video: str, meta: dict) -> asyncio.Task:
-        """Whether this file is the episode (episode_check.py): known already, or checked now in the background."""
+    def _verify(self, s: streams.Stream, video: str, meta: dict, link: str | None = None) -> asyncio.Task:
+        """Whether this file is the episode (episode_check.py): known already, or checked now in the background.
+        `link`: where its link was found to lead, if it was."""
         async def run() -> episode_check.Verdict:
             if known := self.checks.get(s.filename, s.size, video):
                 return known
             ids = [v["id"] for v in cinemeta.episodes(meta)]
             try:
-                link = await streams.resolve(self.http, s) or s.url      # once: each read would follow the addon's
-                verdict = await asyncio.wait_for(episode_check.check(link, video, self.episode_subs, ids), 45)
+                # Resolved once: each read would follow the addon's redirect
+                resolved = link if link and link != s.url else await streams.resolve(self.http, s) or s.url
+                verdict = await asyncio.wait_for(episode_check.check(resolved, video, self.episode_subs, ids), 45)
             except (asyncio.TimeoutError, OSError, ValueError, httpx.HTTPError) as e:
                 log.info("checking %s is %s: %s", s.filename, video, type(e).__name__)
                 return episode_check.Verdict(video, None, checked=time.time())
@@ -1239,27 +1443,15 @@ class Agent:
             return verdict
         return asyncio.create_task(run())
 
-    def _known_right(self, verifying: asyncio.Task, chosen: streams.Stream, link: str, found: list, video: str,
-                     meta: dict) -> tuple[streams.Stream, str, asyncio.Task | None]:
-        """Before opening: a pick already found to be another episode gives way to the next one (checked in turn
-        once it plays)."""
-        verdict = verifying.result() if not verifying.cancelled() and not verifying.exception() else None
-        if not verdict or verdict.ok is not False:
-            return chosen, link, verifying
-        alt = next((s for s in found[1:] if s.filename != chosen.filename and
-                    not ((v := self.checks.get(s.filename, s.size, video)) and v.ok is False)), None)
-        if alt is None:
-            return chosen, link, verifying
-        log.info("not opening %s: it's %s; %s instead", chosen.filename, verdict.actual or "another episode",
-                 alt.filename or alt.name)
-        return alt, alt.url, self._verify(alt, video, meta)
-
     async def _switch_if_wrong(self, np: NowPlaying, chosen: streams.Stream, verifying: asyncio.Task | None,
-                               what: tuple):
-        """Once this file is known not to be the episode asked for, a right one takes over at the same moment."""
+                               what: tuple, link: str | None = None):
+        """Once this file is known not to be the episode asked for, a right one takes over at the same moment. A
+        check started here waits CHECK_AFTER first: it reads the file too, and the player's start comes first."""
         imdb, kind, name, video, label, meta = what
         try:
-            verdict = await (verifying or self._verify(chosen, video, meta))
+            if verifying is None and not self.checks.get(chosen.filename, chosen.size, video):
+                await asyncio.sleep(CHECK_AFTER)
+            verdict = await (verifying or self._verify(chosen, video, meta, link))
             if verdict.ok is not False or self.state.now_playing is not np:
                 return
             alt = next((s for s in await self.streams_for(kind, video, meta) if not s.why_dropped and
@@ -1475,11 +1667,43 @@ class Agent:
             imdb, name, playing_video = current
             kind = "series"
         else:
-            found = await self.resolve(a.title, a.kind, a.season, exact=a.guess)
+            t = time.perf_counter()
+            found = await self.resolve(a.title, a.kind, a.season, exact=a.guess, expect=self._expecting(a))
+            ms = (time.perf_counter() - t) * 1000
+            self.state.timings.add("start:title", ms)
+            log.info("title %r: %s (%.0f ms)", a.title, found[2] if found else "not found", ms)
             if not found:
                 return Outcome(False, f"Didn't get that: “{a.title}”" if a.guess else f"Couldn't find “{a.title}”")
             imdb, kind, name = found
+            out = await self._play_found(a, imdb, kind, name, playing_video)
+            out.details = {"title_ms": round(ms), **(out.details or {})}
+            return out
         return await self._play_found(a, imdb, kind, name, playing_video)
+
+    def _expecting(self, a: PlayTitle) -> Callable[[str, str], None]:
+        """Called with the title the search or the LLM leans to while the rest decides (d1, the other sound-alikes):
+        its stream lookup, the longest wait of a start (3-6 s), begins at once, since it's usually what plays. At
+        most EXPECT_AT_MOST guesses per command."""
+        tried: set[str] = set()
+
+        def expect(imdb: str, kind: str):
+            if imdb not in tried and len(tried) < EXPECT_AT_MOST and not a.episode_name and self.account \
+                    and not self.dry_run:
+                tried.add(imdb)
+                asyncio.create_task(self._expect(a, imdb, kind))
+        return expect
+
+    async def _expect(self, a: PlayTitle, imdb: str, kind: str):
+        try:
+            if kind == "movie":
+                self.prefetch(kind, imdb)
+                return
+            state = ((await self.library.get(imdb)) or {}).get("state") or {}
+            eps = cinemeta.episodes(await cinemeta.meta(self.http, kind, imdb))
+            if eps and isinstance(v := self._episode_for(a, "", eps, state), dict):
+                self.prefetch(kind, v["id"])
+        except Exception as e:
+            log.info("streams ahead for %s: %s", imdb, type(e).__name__)
 
     async def _play_found(self, a: PlayTitle, imdb: str, kind: str, name: str,
                           playing_video: str | None = None) -> Outcome:
@@ -1506,27 +1730,34 @@ class Agent:
                 resume = state.get("timeOffset", 0) if state.get("video_id") == v["id"] and not a.restart else 0
                 self.prefetch(kind, v["id"])
                 return await self.play(imdb, kind, name, v["id"], _episode_label(name, v), meta, resume)
-            season = a.season
-            if season is None and a.episode is not None:
-                # "episode 3 of the bear": the season you're on, else the first
-                on = playing_video or state.get("video_id")
-                current = next((x for x in eps if x["id"] == on), None)
-                season = current["season"] if current else eps[0]["season"]
-            if season is not None:
-                match = [v for v in eps if v["season"] == season and (a.episode is None or v.get("episode") == a.episode)]
-                if not match:
-                    return Outcome(False, f"{name} has no season {season}" + (f" episode {a.episode}" if a.episode else ""))
-                v = match[0]
-            elif a.latest:
-                now = datetime.now(timezone.utc)
-                v = ([x for x in eps if (when := cinemeta.released(x)) and when <= now] or eps)[-1]
-            elif state.get("video_id") and not a.restart:
-                v = next((x for x in eps if x["id"] == state["video_id"]), eps[0])   # "play the bear": where you were
-            else:
-                v = eps[0]
+            v = self._episode_for(a, name, eps, state, playing_video)
+            if isinstance(v, str):
+                return Outcome(False, v)
             video, label = v["id"], _episode_label(name, v)
         resume = state.get("timeOffset", 0) if state.get("video_id") == video and not a.restart else 0
         return await self.play(imdb, kind, name, video, label, meta, resume)
+
+    @staticmethod
+    def _episode_for(a: PlayTitle, name: str, eps: list[dict], state: dict,
+                     playing_video: str | None = None) -> dict | str:
+        """The episode a request for a series plays (eps: Cinemeta's, in order), or why there's none."""
+        season = a.season
+        if season is None and a.episode is not None:
+            # "episode 3 of the bear": the season you're on, else the first
+            on = playing_video or state.get("video_id")
+            current = next((x for x in eps if x["id"] == on), None)
+            season = current["season"] if current else eps[0]["season"]
+        if season is not None:
+            match = [v for v in eps if v["season"] == season and (a.episode is None or v.get("episode") == a.episode)]
+            if not match:
+                return f"{name} has no season {season}" + (f" episode {a.episode}" if a.episode else "")
+            return match[0]
+        if a.latest:
+            now = datetime.now(timezone.utc)
+            return ([x for x in eps if (when := cinemeta.released(x)) and when <= now] or eps)[-1]
+        if state.get("video_id") and not a.restart:
+            return next((x for x in eps if x["id"] == state["video_id"]), eps[0])   # "play the bear": where you were
+        return eps[0]
 
     async def _find_episode(self, series: str, eps: list[dict], wanted: str) -> dict | None:
         """An episode by its name ("Advanced Dungeons & Dragons": matched here), or by what happens in it ("Mr. Burns
@@ -1576,10 +1807,20 @@ class Agent:
 
     async def _continue_item(self, item: dict) -> Outcome:
         """Where you stopped in this library item, or the next episode when you'd finished that one."""
-        imdb, kind, name = item["_id"], item["type"], item.get("name", "")
         st = item.get("state") or {}
         if st.get("timeOffset") and st.get("duration") and st["timeOffset"] < progress.WATCHED_AT * st["duration"]:
-            self.prefetch(kind, st.get("video_id") or imdb)     # where you stopped: its streams meanwhile
+            self.prefetch(item["type"], st.get("video_id") or item["_id"])   # where you stopped: its streams meanwhile
+        target = await self._continue_target(item)
+        if isinstance(target, Outcome):
+            return target
+        video, offset, label, meta = target
+        return await self.play(item["_id"], item["type"], item.get("name", ""), video, label, meta, offset)
+
+    async def _continue_target(self, item: dict) -> tuple[str, int, str, dict] | Outcome:
+        """(video, where in it, label, meta) that carrying on with this library item plays; warm() looks its
+        streams up before it's asked for."""
+        imdb, kind, name = item["_id"], item["type"], item.get("name", "")
+        st = item.get("state") or {}
         meta = await cinemeta.meta(self.http, kind, imdb)
         video, offset, label = st.get("video_id") or imdb, st.get("timeOffset", 0), name
         if kind == "series":
@@ -1594,7 +1835,7 @@ class Agent:
                 video, offset = ids[i], 0
             v = eps[ids.index(video)] if video in ids else None
             label = _episode_label(name, v) if v else name
-        return await self.play(imdb, kind, name, video, label, meta, offset)
+        return video, offset, label, meta
 
     async def _next_episode(self, a: NextEpisode) -> Outcome:
         current = await self.current_series()

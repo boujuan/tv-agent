@@ -82,6 +82,8 @@ class TvPlayer:
         self._loads = itertools.count(1)
         self._run = secrets.token_hex(3)        # an agent restarted meanwhile names its loads differently
         self._adopt: str | None = None          # after a restart: the first item the player reports that starts so
+        self._coming: tuple[str, str] | None = None    # (video, item id) of the start the loading screen is for
+        self._no_loading: set[str | None] = set()      # player versions without the loading screen
 
     # ---- the connection ----
 
@@ -181,16 +183,24 @@ class TvPlayer:
     def up(self) -> bool:
         return self._writer is not None
 
-    async def call(self, t: str, timeout: float = 4.0, **fields) -> dict:
-        """One command; its answer (with its results), or PlayerError with the player's reason."""
+    def _send(self, t: str, **fields) -> tuple[int, asyncio.Future]:
+        """A command written at once, in order with the ones after it; (its id, the future of its answer)."""
         writer = self._writer
         if writer is None:
             raise PlayerError("the player isn't open")
         cid = next(self._ids)
         fut = asyncio.get_running_loop().create_future()
         self._acks[cid] = fut
+        writer.write(json.dumps({"t": t, "id": cid, **fields}, ensure_ascii=False).encode() + b"\n")
+        self._sent = time.monotonic()
+        return cid, fut
+
+    async def call(self, t: str, timeout: float = 4.0, **fields) -> dict:
+        """One command; its answer (with its results), or PlayerError with the player's reason."""
+        writer = self._writer
+        cid, fut = self._send(t, **fields)
         try:
-            await self._write(writer, {"t": t, "id": cid, **fields})
+            await writer.drain()
             answer = await asyncio.wait_for(fut, timeout)
         finally:
             self._acks.pop(cid, None)
@@ -234,13 +244,54 @@ class TvPlayer:
         """After the agent restarts: what the player has open, if it's this video, is followed again."""
         self.item, self.last, self._adopt = None, {}, f"{video}#"
 
+    def loading(self, video: str, **fields) -> bool:
+        """The loading screen for the start of `video` (PROTOCOL.md, `loading`): what was heard, the title, its
+        artwork, the step it's at. Written at once and answered in the background, so a start never waits for it. A
+        later call for the same video updates what it gives; the load that follows has the same item id, and its
+        first frame takes the screen away. False with no player screen up, or a player older than this screen (it
+        answered "unknown command" once: not asked again)."""
+        if self._writer is None or self.app in self._no_loading:
+            return False
+        if self._coming is None or self._coming[0] != video:
+            self._coming = (video, f"{video}#{self._run}-{next(self._loads)}")
+        cid, fut = self._send("loading", item=self._coming[1], **{k: v for k, v in fields.items() if v})
+        asyncio.create_task(self._loading_answered(cid, fut, self.app))
+        return True
+
+    @property
+    def has_loading(self) -> bool:
+        """Whether the connected player has the loading screen, as far as it has said (an older one answers the first
+        `loading` with "unknown command", within milliseconds)."""
+        return self.up and self.app not in self._no_loading
+
+    async def clear_loading(self):
+        """The loading screen taken away while what was playing goes on (`osd` with no text)."""
+        await self.call("osd", text="", ms=0)
+
+    async def _loading_answered(self, cid: int, fut: asyncio.Future, app: str | None):
+        try:
+            answer = await asyncio.wait_for(fut, 4)
+        except (asyncio.TimeoutError, PlayerError):
+            return
+        finally:
+            self._acks.pop(cid, None)
+        error = str(answer.get("error") or "")
+        if error.startswith("unknown command"):
+            log.info("player %s has no loading screen", app)
+            self._no_loading.add(app)
+        elif error:
+            log.info("loading screen: %s", error)
+
     async def open(self, url: str, resume_ms: int = 0, *, item: str, title: str = "", headers: dict | None = None,
                    audio: str | None = None, subs: list[str] | None = None, bitrate: int = 0, play: bool = True,
-                   http: str | None = None):
+                   http: str | None = None, info: dict | None = None):
         """Loads it in place (the screen stays: no relaunch). `audio` and `subs` are the track plan
-        (languages.TrackPlan), applied in the player's own first choice. Each load gets its own id (`item`#run-n),
-        so an event about the one before, even one this agent opened before a restart, can't be taken for this one's."""
-        self.item, self.last, self._adopt = f"{item}#{self._run}-{next(self._loads)}", {}, None
+        (languages.TrackPlan), applied in the player's own first choice. Each load gets its own id (`item`#run-n,
+        the one its loading screen had), so an event about the one before, even one this agent opened before a
+        restart, can't be taken for this one's. `info` is what the pause screen shows (PROTOCOL.md, `info`)."""
+        coming, self._coming = self._coming, None
+        self.item = coming[1] if coming and coming[0] == item else f"{item}#{self._run}-{next(self._loads)}"
+        self.last, self._adopt = {}, None
         fields = {"url": url, "item": self.item, "title": title, "start_ms": max(0, int(resume_ms)), "audio": audio,
                   "subs": subs, "play": play}
         if headers:
@@ -249,15 +300,20 @@ class TvPlayer:
             fields["bitrate"] = int(bitrate)
         if http:
             fields["http"] = http
+        if info:
+            fields["info"] = info
         await self.call("load", timeout=6, **fields)
 
     async def preload(self, url: str, start_ms: int = 0, *, item: str, headers: dict | None = None,
-                      audio: str | None = None, subs: list[str] | None = None, bitrate: int = 0):
+                      audio: str | None = None, subs: list[str] | None = None, bitrate: int = 0,
+                      info: dict | None = None):
         fields = {"url": url, "item": f"{item}#preload", "start_ms": max(0, int(start_ms)), "audio": audio, "subs": subs}
         if headers:
             fields["headers"] = headers
         if bitrate:
             fields["bitrate"] = int(bitrate)
+        if info:
+            fields["info"] = info
         await self.call("preload", **fields)
 
     def now(self) -> tuple[int, int, float] | None:

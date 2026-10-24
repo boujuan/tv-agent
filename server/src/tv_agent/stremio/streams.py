@@ -15,6 +15,7 @@ AIOStreams describes each stream in machine-readable `streamData` when asked by 
 import asyncio
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import httpx
@@ -44,6 +45,17 @@ UNIT = {"tb": 1e12, "gb": 1e9, "gib": 2**30, "mb": 1e6, "mib": 2**20}
 CAM_QUALITIES = {"cam", "ts", "tc", "scr"}
 # AIOStreams sends these when a link can't play (uncached, failed, 429…): a short video explaining it.
 PROBLEM_VIDEO = re.compile(r"/static/[\w-]+\.mp4$")
+# What the pause screen shows that the file's header can't tell TV Agent Player (its PROTOCOL.md, `info`)
+BADGES = [("atmos", re.compile(r"\batmos\b", re.I)), ("dtsx", re.compile(r"\bdts[ :._-]?x\b", re.I)),
+          ("hdr10+", HDR10_PLUS), ("imax", re.compile(r"\bimax\b", re.I)), ("remux", re.compile(r"\bremux\b", re.I))]
+LINK = re.compile(r"\b(?:https?://|www\.)\S+", re.I)
+GROUP = re.compile(r"-([A-Za-z0-9]{2,20})(?:\.(?:mkv|mp4|avi|ts|m2ts))?$")
+# Debrid services by AIOStreams' id (streamData.service.id) and by the tag other addons put in a stream's name
+DEBRID = {"realdebrid": "Real-Debrid", "alldebrid": "AllDebrid", "premiumize": "Premiumize", "torbox": "TorBox",
+          "debridlink": "Debrid-Link", "easydebrid": "EasyDebrid", "offcloud": "Offcloud", "pikpak": "PikPak",
+          "putio": "put.io", "RD": "Real-Debrid", "AD": "AllDebrid", "PM": "Premiumize", "TB": "TorBox",
+          "DL": "Debrid-Link", "ED": "EasyDebrid", "OC": "Offcloud", "PKP": "PikPak"}
+DEBRID_TAG = re.compile(r"\[(RD|AD|PM|TB|DL|ED|OC|PKP)[+\] ]")
 
 
 @dataclass
@@ -65,6 +77,8 @@ class Stream:
     audio: tuple[str, ...] = ()      # "DD+", "Atmos"…
     languages: tuple[str, ...] = ()  # audio languages by name: "English", "Spanish", "Latino", "Multi"…
     group: str = ""                  # release group
+    source: str = ""                 # the addon AIOStreams found it with ("Torrentio"); else the addon itself
+    service: str = ""                # the debrid service's id in AIOStreams ("realdebrid")
     aio_score: int | None = None     # AIOStreams' ranked-expression score (its ★)
     matched: tuple[str, ...] = ()    # AIOStreams' ranked expressions that matched ("Web T1", "4K", "DV"…)
     headers: dict = field(default_factory=dict, repr=False)
@@ -107,6 +121,8 @@ def parse(addon: str, raw: dict, order: int) -> Stream | None:
         s.duration_ms = int(data.get("duration") or 0)
         service = data.get("service") or {}
         s.cached = service.get("cached") if isinstance(service.get("cached"), bool) else None
+        s.service = str(service.get("id") or "")
+        s.source = str(data.get("addon") or "")
         s.library = bool(data.get("library"))
         s.quality = str(pf.get("quality") or "")
         s.visual = tuple(pf.get("visualTags") or ())
@@ -126,6 +142,33 @@ def parse(addon: str, raw: dict, order: int) -> Stream | None:
         s.size = int(float(m.group(1).replace(",", ".")) * UNIT[m.group(2).lower()])
     s.cached = False if UNCACHED.search(text) else (True if CACHED.search(text) else None)
     return s
+
+
+def badges(s: Stream) -> list[str]:
+    """atmos, dtsx, hdr10+, imax, remux: from AIOStreams' tags and the stream's name, description and filename."""
+    text = " ".join([s.name, s.description, s.filename, s.quality, *s.visual, *s.audio])
+    return [b for b, rx in BADGES if rx.search(text)]
+
+
+def description(s: Stream) -> str:
+    """The addon's text about the stream as the pause screen shows it: links (they can carry an account key) and
+    invisible characters removed, blank lines dropped."""
+    text = LINK.sub("", s.description).replace("\u200d", "").replace("\u200b", "")
+    return "\n".join(line.rstrip() for line in text.splitlines() if line.strip())[:600]
+
+
+def debrid(s: Stream) -> str:
+    """The debrid service the link plays from ("Real-Debrid"), if the addon says."""
+    if s.service:
+        return DEBRID.get(s.service, s.service.title())
+    m = DEBRID_TAG.search(f"{s.name}\n{s.description}")
+    return DEBRID[m.group(1)] if m else ""
+
+
+def release(s: Stream) -> str:
+    """The release group: AIOStreams' parse, else the filename's "-GROUP" ending."""
+    m = GROUP.search(s.filename)
+    return s.group or (m.group(1) if m else "")
 
 
 def _language_fit(s: Stream, want: str | None) -> float:
@@ -170,9 +213,11 @@ def rank(streams: list[Stream], max_height: int, max_mbps: float, runtime_min: i
     return sorted(streams, key=lambda s: s.rank_key, reverse=True)
 
 
-async def fetch(http: httpx.AsyncClient, addons: list[Addon], kind: str, video_id: str,
-                timeout: float = 8.0) -> list[Stream]:
-    """All playable streams from every addon that serves this id, in addon order."""
+async def fetch(http: httpx.AsyncClient, addons: list[Addon], kind: str, video_id: str, timeout: float = 8.0,
+                enough: Callable[[list[Stream]], bool] | None = None, grace: float = 0.5) -> list[Stream]:
+    """All playable streams from every addon that serves this id, in addon order. With `enough`: once the answers in
+    have a stream it takes, the addons still asking get `grace` seconds more, then are left out (one that hangs
+    would hold the start for its 8 s timeout, twice)."""
     async def one(addon: Addon) -> list[dict]:
         for attempt in (1, 2):    # one retry a second later when the addon has a hiccup (5xx, rate limit)
             try:
@@ -191,15 +236,31 @@ async def fetch(http: httpx.AsyncClient, addons: list[Addon], kind: str, video_i
                 return []
         return []
 
+    def parsed() -> list[Stream]:
+        out, order = [], 0
+        for addon, task in zip(serving, tasks):
+            for raw in task.result() if task.done() and not task.cancelled() and not task.exception() else []:
+                if s := parse(addon.name, raw, order):
+                    out.append(s)
+                order += 1
+        return out
+
     serving = [a for a in addons if a.serves_streams(kind, video_id)]
-    results = await asyncio.gather(*(one(a) for a in serving))
-    out, order = [], 0
-    for addon, raws in zip(serving, results):
-        for raw in raws:
-            if s := parse(addon.name, raw, order):
-                out.append(s)
-            order += 1
-    return out
+    tasks = [asyncio.create_task(one(a)) for a in serving]
+    pending = set(tasks)
+    try:
+        while pending:
+            _, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            if pending and enough is not None and enough(parsed()):
+                _, pending = await asyncio.wait(pending, timeout=grace)
+                if pending:
+                    log.info("streams for %s: going on without %s", video_id,
+                             ", ".join(a.name for a, t in zip(serving, tasks) if t in pending))
+                break
+    finally:
+        for task in pending:
+            task.cancel()
+    return parsed()
 
 
 async def resolve(http: httpx.AsyncClient, s: Stream) -> str | None:

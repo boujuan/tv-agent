@@ -191,6 +191,10 @@ class FakeTvPlayer:
     async def open(self, url, resume_ms=0, **kw):
         self.did.append(("open", url, resume_ms, kw))
 
+    def loading(self, video, **fields):
+        self.did.append(("loading", video, fields))
+        return True
+
     async def position(self, pid=T.PID):
         return self.pos
 
@@ -210,6 +214,12 @@ def bare_agent(player: FakeTvPlayer) -> Agent:
     return a
 
 
+META = {"id": "tt1", "name": "X", "description": "The show", "poster": "https://images.metahub.space/poster/tt1",
+        "background": "https://images.metahub.space/background/tt1", "logo": "https://images.metahub.space/logo/tt1",
+        "videos": [{"id": "tt1:1:2", "season": 1, "episode": 2, "name": "Second", "overview": "Episode two"},
+                   {"id": "tt1:1:3", "season": 1, "episode": 3, "name": "Third"}]}
+
+
 def test_play_brings_the_player_up_during_the_search_and_loads_in_place():
     async def run():
         player = FakeTvPlayer(pos=None)
@@ -222,22 +232,34 @@ def test_play_brings_the_player_up_during_the_search_and_loads_in_place():
         async def found(kind, video, meta):
             await asyncio.sleep(0)
             seen.append(player.did[:])            # the player is already being brought up meanwhile
-            return [S.Stream("AIOStreams", "https://x/1", "n", "", "f.mkv", 0, library=True,
-                             headers={"Authorization": "Bearer t"})]
+            return [S.Stream("AIOStreams", "https://x/1", "4K", "Atmos · DV · HDR10+ https://debrid.example/KEY/f\n"
+                             "◈ 62 GB", "X.S01E02.2160p.REMUX-TRiNiTY.mkv", 0, library=True, size=62_000_000_000,
+                             source="Torrentio", service="realdebrid", headers={"Authorization": "Bearer t"})]
         a.account, a.notify, a.streams_for, a._kodi_player = object(), nothing, found, nothing
         a.adb = object()
         a.track_plan = lambda meta: languages.TrackPlan("eng", None)
         a._replace_session = lambda video, resume_ms, exact=False: resume_ms
         a._player_subs, a._started, a._preloaded = nothing, lambda *args: None, None
         a.state.timings = types.SimpleNamespace(add=lambda *args: None)
-        out = await Agent.play(a, "tt1", "series", "X", "tt1:1:2", "X S1E2", {}, resume_ms=90_000)
+        agent_mod.HEARD.set("Play X season one episode two")
+        out = await Agent.play(a, "tt1", "series", "X", "tt1:1:2", "X S1E2", META, resume_ms=90_000)
         return out, player.did, seen, a.state.now_playing
 
     out, did, seen, np = asyncio.run(run())
-    assert out.ok and seen == [[("ready",)]]
-    assert did[1] == ("open", "https://x/1", 90_000, {"item": "tt1:1:2", "title": "X S1E2",
-                                                    "headers": {"Authorization": "Bearer t"}, "audio": "eng",
-                                                    "subs": None})
+    assert out.ok and [d[0] for d in seen[0]] == ["ready", "loading"]     # up, and saying so, during the search
+    screens = [d[2] for d in did if d[0] == "loading"]
+    assert [x["step"] for x in screens] == ["Finding streams…", "Starting…"]
+    art = {"poster": META["poster"], "backdrop": META["background"], "logo": META["logo"]}
+    assert screens[0] == {"title": "X", "subtitle": "S1E2 · Second", **art, "heard": "Play X season one episode two",
+                          "step": "Finding streams…"}
+    load = next(d for d in did if d[0] == "open")
+    info = load[3].pop("info")
+    assert load == ("open", "https://x/1", 90_000, {"item": "tt1:1:2", "title": "X S1E2",
+                                                  "headers": {"Authorization": "Bearer t"}, "audio": "eng",
+                                                  "subs": None})
+    assert info == {"title": "X", "subtitle": "S1E2 · Second", "plot": "Episode two", **art, "source": "Torrentio",
+                    "description": "Atmos · DV · HDR10+\n◈ 62 GB", "debrid": "Real-Debrid", "size": 62_000_000_000,
+                    "release": "TRiNiTY", "badges": ["atmos", "hdr10+", "remux"]}
     assert np.player == "tvplayer" and np.video_id == "tt1:1:2"
 
 
@@ -260,7 +282,9 @@ def test_a_preloaded_next_episode_opens_with_the_link_it_was_preloaded_with():
         await Agent.play(a, "tt1", "series", "X", "tt1:1:3", "X S1E3", {}, prepared=nxt)
         return player.did
 
-    assert asyncio.run(run())[1][1] == "https://cdn/resolved-2"
+    did = asyncio.run(run())
+    assert next(d for d in did if d[0] == "open")[1] == "https://cdn/resolved-2"
+    assert [d[2]["step"] for d in did if d[0] == "loading"] == ["Starting…"]         # nothing to find or check
 
 
 def test_transport_goes_straight_to_the_open_player_without_asking_the_tv():
@@ -360,3 +384,90 @@ def test_a_file_the_tv_cant_read_is_explained_on_the_tv_at_once():
     assert asyncio.run(run()) == ["The TV can't look up this file's server: check its internet (DNS)"]
     assert agent_mod.load_failed_text({"cause": "InvalidResponseCodeException", "http": 403}) == \
         "The file's server refused it (HTTP 403)"
+
+
+def test_the_loading_screen_goes_ahead_of_its_load_with_the_same_item(tls):
+    async def run():
+        p, srv, fake = await server(tls)
+        assert p.loading("tt1:1:2", title="X") is False                     # no screen up yet
+        await fake.connect()
+        assert p.loading("tt1:1:2", title="X", subtitle="S1E2 · Second", heard="", step="Finding streams…")
+        first = await fake.answer()
+        assert p.loading("tt1:1:2", title="X", step="Starting…")
+        again = await fake.answer()
+        info = {"title": "X", "source": "Torrentio", "badges": ["atmos"]}
+        load, _ = await asyncio.gather(fake.answer(), p.open("https://debrid/f.mkv", item="tt1:1:2", info=info))
+        # a later start of the same episode is another load: its own id
+        nxt, _ = await asyncio.gather(fake.answer(), p.open("https://debrid/f.mkv", item="tt1:1:2"))
+        pre, _ = await asyncio.gather(fake.answer(), p.preload("https://debrid/g.mkv", item="tt1:1:3", info=info))
+        srv.close()
+        return first, again, load, nxt, pre
+
+    first, again, load, nxt, pre = asyncio.run(run())
+    assert first["t"] == "loading" and first["item"].startswith("tt1:1:2#") and "heard" not in first   # empty: left out
+    assert first["subtitle"] == "S1E2 · Second" and first["step"] == "Finding streams…"
+    assert again["item"] == first["item"] and again["step"] == "Starting…"
+    assert load["t"] == "load" and load["item"] == first["item"] and load["info"]["source"] == "Torrentio"
+    assert nxt["item"] != first["item"] and "info" not in nxt
+    assert pre["t"] == "preload" and pre["info"]["badges"] == ["atmos"]
+
+
+def test_an_older_player_without_the_loading_screen_isnt_sent_it_again(tls):
+    async def run():
+        p, srv, fake = await server(tls)
+        await fake.connect()
+        assert p.loading("tt1", title="X", step="Finding streams…")
+        await fake.answer(error="unknown command loading")         # what player 0.1 answers
+        await asyncio.sleep(0.05)
+        assert not p.has_loading and p.loading("tt1", step="Starting…") is False
+        cmd, _ = await asyncio.gather(fake.answer(), p.open("https://debrid/f.mkv", item="tt1"))
+        srv.close()
+        return cmd
+    assert asyncio.run(run())["t"] == "load"                  # the start itself goes on as before
+
+
+def test_a_start_that_fails_says_why_on_the_loading_screen_then_the_player_stops(monkeypatch):
+    async def run():
+        player = FakeTvPlayer(pos=None)
+        player.up, player.has_loading = True, True
+        player.now = lambda: None                    # nothing else plays
+        a = bare_agent(player)
+        home = []
+
+        async def nothing(*args, **kw):
+            return None
+
+        async def found(kind, video, meta):
+            return []
+
+        async def home_unless_playing(ready=None):
+            home.append(ready)
+        monkeypatch.setattr(agent_mod, "ERROR_SHOWN", 0)
+        a.account, a.notify, a.streams_for, a._kodi_player, a.adb = object(), nothing, found, nothing, object()
+        a._home_unless_playing = home_unless_playing
+        out = await Agent.play(a, "tt1", "movie", "X", "tt1", "X", {"name": "X", "year": "2024", "runtime": "166 min"})
+        await a._closing
+        return out, player.did, home
+
+    out, did, home = asyncio.run(run())
+    screens = [d[2] for d in did if d[0] == "loading"]
+    assert not out.ok and [x["step"] for x in screens] == ["No playable stream for X"]    # failed before it showed
+    assert screens[0]["subtitle"] == "2024 · 2 h 46 min"
+    assert did[-1] == ("stop",) and home == []                   # the player's screen closed, not Home over it
+
+
+def test_what_the_pause_screen_says_about_a_stream():
+    aio = S.parse("AIOStreams", {"url": "https://debrid/x", "name": "4K ⚡", "description": "✎ X\n▣ DV · HDR10+\n\n"
+                                 "⛉ [RD] Comet · FraMeSToR  www.example.org/abc", "streamData": {
+                                     "type": "debrid", "addon": "Comet", "size": 69_026_891_608,
+                                     "service": {"id": "realdebrid", "cached": True},
+                                     "parsedFile": {"resolution": "2160p", "quality": "BluRay REMUX",
+                                                    "releaseGroup": "FraMeSToR", "visualTags": ["DV", "HDR10+"],
+                                                    "audioTags": ["TrueHD", "Atmos"]}}}, 0)
+    assert S.badges(aio) == ["atmos", "hdr10+", "remux"] and S.debrid(aio) == "Real-Debrid"
+    assert S.description(aio) == "✎ X\n▣ DV · HDR10+\n⛉ [RD] Comet · FraMeSToR" and S.release(aio) == "FraMeSToR"
+    assert aio.source == "Comet"
+    plain = S.parse("Torrentio", {"url": "https://t/x", "name": "Torrentio\n[PM+] 1080p",
+                                  "title": "Film.2019.IMAX.1080p.DTS-X.mkv\n👤 12 💾 9 GB"}, 0)
+    assert S.badges(plain) == ["dtsx", "imax"] and S.debrid(plain) == "Premiumize" and plain.source == ""
+    assert S.release(S.Stream("A", "u", "n", "", "Show.S01E01.1080p.WEB-DL-NTb.mkv", 0)) == "NTb"

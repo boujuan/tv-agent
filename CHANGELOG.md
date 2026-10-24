@@ -4,6 +4,52 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
+## server — unreleased
+
+### Added
+- TV Agent Player's loading and pause screens get what they show (from player 0.2; its PROTOCOL.md, `loading` and
+  `info`). As soon as the title is known, a `loading` command with the title, a subtitle ("2024 · 2 h 46 min", or
+  "S4E1 · <episode name>"), what was heard and Cinemeta's artwork, then each step: "Finding streams…", "Checking
+  the link…", "Starting…". A start that fails says why there for 3 s, then the player closes (or, with something
+  else playing on, only the screen goes). `load` and `preload` carry `info` for the pause screen: the plot, the
+  addon that found the stream (AIOStreams' own source, e.g. Comet), its description without links, the debrid
+  service, size, release group, and the badges the file's header can't give the player (Atmos, DTS:X, HDR10+, IMAX,
+  remux). A player without these screens answers "unknown command" once and isn't sent them again; it starts as
+  before.
+- Each start's stages are in the activity history (`title_ms`, `streams_ms`, `player_ms`, `open_ms`, the stream
+  played) and `tv-agent stats` has `start:title`.
+
+### Changed
+- Faster starts. Measured without the TV from the decision to the streams `load` waits for (the link check ~0.7 s
+  and the player's ~1.3 s to the first frame come after), medians of 3-6 runs:
+  - A misheard title: the LLM's sound-alikes are looked up as soon as it answers, side by side with the search for
+    what was heard, which stops waiting for its slow sources once one is found; and when the search for what was
+    heard has the sound-alike by name, no d1. A misheard name Cinemeta has never been asked (2026-10-24: "paul the
+    boys", 7.2 s to the title): 3.5 s → 1.5 s to the title, 9.5 s → 2.2 s to the streams. "doom part two": 1.6 s →
+    0.6 s to the title.
+  - No d1 when the leader is certain once popularity counts: said exactly and 15 ahead (the Oppenheimer film
+    against the 1980 series; d1 had picked it at 0.95-0.97). For a closer call, the leader's streams are looked up
+    while d1 decides. "shogun": 1.15 s → 0.77 s to the title.
+  - Continue Watching's first two items have their streams looked up when the mic opens (kept 30 minutes): carrying
+    on waits 0 s for them instead of 2.2 s (1-8 s).
+  - The stream lookup goes on without a slow addon once another has answered with a stream that fits your rules
+    (the best resolution they allow, in the right language): it gets 0.5 s more. An addon that hung held a start for
+    its 8 s timeout, twice.
+  - A file known to be another episode under its number is looked up at the same time as the episode's own streams
+    instead of after them. The episode check starts 5 s after the file opens and reads the link already checked,
+    instead of resolving it again during the start.
+  - AIOStreams' own answer (2-8 s, every time) is now most of a start.
+
+### Fixed
+- "Pon Rebel Mung" played "Rebelde (2022)": the LLM's "Rebel Moon" was found (Part One, by d1) and thrown away
+  because its full name has a subtitle, so the search's pick for the misheard words won, after three d1 calls in a
+  row. A sound-alike now counts by its name before a subtitle: Rebel Moon - Part One, 6 times in 6 (before: Part Two
+  5 times, Rebelde once).
+- "Paul the Boys, season four, episode one" played The Boys only by luck (Polo Boys or Pluribus 3 times in 6): a
+  sound-alike of a series asked for by season must have that season, a title heard whole in what was said counts
+  ("The Boys" sounds less like "paul the boys" than Polo Boys), the LLM's own order is kept, and d1 sees the whole
+  sentence. The Boys 6 times in 6.
+
 ## server 0.5.0 — 2026-10-24
 
 ### Added

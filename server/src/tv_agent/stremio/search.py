@@ -5,6 +5,7 @@ that Cinemeta ranks first. Results are merged by IMDb id, keeping every name a t
 A Cinemeta search nobody has made lately can take 4-8 s (its cache misses), so the searches run side by side and
 the agent goes on as soon as one of them has the title by exactly the name you said."""
 import asyncio
+import re
 from dataclasses import replace
 from urllib.parse import quote
 
@@ -21,6 +22,12 @@ MAX_CATALOGS = 4
 def said_exactly(query: str, m: Meta) -> bool:
     q = norm(query)
     return any(norm(n) == q for n in m.names)
+
+
+def said_as(query: str, m: Meta) -> bool:
+    """One of its names, or one's part before its subtitle: "Rebel Moon" is "Rebel Moon - Part One: A Child of Fire"."""
+    q = norm(query)
+    return said_exactly(query, m) or any(norm(re.split(r":| - | – ", n)[0]) == q for n in m.names)
 
 
 def search_catalogs(addons: list[Addon]) -> list[tuple[Addon, str, str]]:
@@ -69,14 +76,22 @@ def merge(results: list[list[Meta]]) -> list[Meta]:
     return list(by_id.values())
 
 
-async def search(client: httpx.AsyncClient, query: str, addons: list[Addon], patience: float = 1.5) -> list[Meta]:
+async def search(client: httpx.AsyncClient, query: str, addons: list[Addon], patience: float = 1.5,
+                 enough: asyncio.Event | None = None) -> list[Meta]:
     """Cinemeta and your metadata addons side by side. After `patience` seconds, an exact name match from those
-    that have answered is enough; otherwise the slower ones get a few more seconds."""
+    that have answered is enough; otherwise the slower ones get a few more seconds, unless `enough` is set
+    meanwhile (the caller found the title another way)."""
     tasks = [asyncio.create_task(cinemeta.search(client, query))]
     tasks += [asyncio.create_task(addon_search(client, a, kind, cat, query)) for a, kind, cat in search_catalogs(addons)]
     done, pending = await asyncio.wait(tasks, timeout=patience)
     if pending and not any(said_exactly(query, m) for t in done if not t.exception() for m in t.result()):
-        _, pending = await asyncio.wait(pending, timeout=7)
-    for t in pending:
-        t.cancel()
+        waits = [asyncio.create_task(asyncio.wait(pending, timeout=7))]
+        if enough is not None:
+            waits.append(asyncio.create_task(enough.wait()))
+        await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
+        for w in waits:
+            w.cancel()
+    for t in tasks:
+        if not t.done():
+            t.cancel()
     return merge([t.result() for t in tasks if t.done() and not t.cancelled() and not t.exception()])

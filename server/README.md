@@ -66,6 +66,7 @@ plays.
 | | TV Agent Player | Kodi |
 |---|---|---|
 | A new title or episode | Loads in place in the open player: no relaunch, no home screen in between | Opened over the playing one, after its decoder is let go (2 s) |
+| While it starts, and paused | A loading screen with the title, its artwork, what you said and the step it's at; on pause, the plot, the stream's source, debrid service, size, release and badges (player 0.2) | Kodi's own screens |
 | Jumps, skips, intros | Exact, in place, also in Dolby Vision; ±N s at the nearest keyframe, fast commands added up | Exact, but a Dolby Vision file is reopened at the time (its decoder's flush fails on this TV) |
 | Audio and subtitles | Your rule applied in the player's own first choice, before the first frame: commentary never, Simplified or Traditional Chinese by name, Castilian first, the file's main track; with subtitles off, a forced track in the audio's language still shows. Add-on subtitles drawn by the player, no rebuffering | Your rule set after the start, rechecked 8 s later; add-on subtitles loaded by Kodi |
 | What it tells the agent | State, position every second, tracks, decoder and HDR, sound output, errors, the exact position it closed at: nothing is polled | Polled over its API |

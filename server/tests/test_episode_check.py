@@ -59,7 +59,7 @@ def agent_with(tmp_path, by_video: dict):
     a.cfg = types.SimpleNamespace(max_height=2160, max_mbps=0, player="kodi")
     a.track_plan = lambda meta: types.SimpleNamespace(subtitles=None, audio="eng")
 
-    async def fetch_streams(kind, video):
+    async def fetch_streams(kind, video, meta=None):
         return [S.Stream("AIOStreams", f"https://x/{f}", f, "", f, 0, height=int(res[:-1]), size=size, cached=True)
                 for f, size, res in by_video.get(video, [])]
     a.fetch_streams = fetch_streams
