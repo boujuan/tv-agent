@@ -20,8 +20,25 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   AIOStreams says, else its first country), and streams with it first. `subtitles` (`"foreign"`, the default: only
   while the audio isn't `native_language`; `"always"`; `"off"`), also from the phone (`/v1/settings`, with
   `choices.audio_language` and `choices.subtitles_when`).
+- Chains: "pon el capítulo 5 de la segunda temporada de The Bear y vete al minuto 12", "play Dune Part Two and go to
+  the scene where Paul rides the worm", "pon Oppenheimer desde el principio con subtítulos en español". A play, then
+  one or two steps on what it plays (a jump to a time, a scene or past the intro; the audio or subtitle language;
+  the volume; a pause), in the order said, at most three. Read by the rules first (cut at "and" / "y" / commas and
+  at endings like "… with Spanish subtitles", "… desde el minuto 12"); when they find none but it sounds like one,
+  the LLM proposes the steps in a strict JSON schema, and any unknown action or field, a step not said, or a shape
+  outside the list rejects the whole chain (the first step alone runs, with a note). The plan shows on the TV
+  first; each step waits for the last one's proof (the episode asked for playing, its picture moving; the position,
+  the track, the volume, the pause), with a time limit; a failure stops the chain and says which step and why.
+  `scripts/bench_chains.py` with `eval/chains.jsonl`. README: "Chains".
+- "Cancel" ("cancela", "never mind", "olvídalo"): what's left of a chain stops, and a start on its way with it (its
+  loading screen closed); Back in TV Agent Player stops a chain too.
+- "Go to the part where …": the line the moment was found by shows on the TV before the jump, and a weak match is
+  refused: a moment the LLM would only guess from the story, or a line that isn't in the subtitles near that time.
 
 ### Changed
+- Commands said together that can't be chained (anything but a play first, or a timer, an app, Home, a setting… after
+  it) run the first one alone and say what wasn't done, instead of both: "pon The Bear y apaga la tele cuando
+  acabe" plays The Bear and says the timer wasn't set. "Stop and go home" is one command.
 - Subtitles follow the audio that actually plays: a Spanish-made title whose file has only English audio gets
   subtitles, and a Spanish dub gets none. Streams ranked for the audio wanted also read Torrentio-style flags and
   filename language words.
@@ -63,6 +80,8 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 ## panel — unreleased
 
 ### Added
+- Decisions › Explain: a chain's parts, which rules knew the steps after the play, and why one wasn't chained; the
+  LLM's proposed steps.
 - Settings › Languages: the audio can be the original language (the one each title was made in), and **Subtitles
   show**: only when the audio isn't your native language (as before), always, or off.
 - Activity tab: right-click a spoken command, **Add to voice tests…**: what it should do (what it did, or was

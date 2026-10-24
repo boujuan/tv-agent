@@ -1,0 +1,22 @@
+{"lang": "es", "text": "pon el capítulo 5 de la segunda temporada de The Bear y vete al minuto 12", "expect": {"type": "sequence", "steps": [{"type": "play_title", "title_any": ["bear"], "season": 2, "episode": 5}, {"type": "transport", "op": "seek_to", "seconds": 720}]}}
+{"lang": "en", "text": "play Dune Part Two and go to the scene where Paul rides the worm", "expect": {"type": "sequence", "steps": [{"type": "play_title", "title_any": ["dune"]}, {"type": "find_scene"}]}}
+{"lang": "es", "text": "pon Oppenheimer desde el principio con subtítulos en español", "expect": {"type": "sequence", "steps": [{"type": "play_title", "title_any": ["oppenheimer"], "restart": true}, {"type": "tracks", "subtitles": "spa"}]}}
+{"lang": "en", "text": "play severance season 2 episode 3 and go to the middle", "expect": {"type": "sequence", "steps": [{"type": "play_title", "title_any": ["severance"], "season": 2, "episode": 3}, {"type": "transport", "op": "seek_to", "percent": 50}]}}
+{"lang": "es", "text": "pon breaking bad, temporada 3 capítulo 7, y pausa", "expect": {"type": "sequence", "steps": [{"type": "play_title", "title_any": ["breaking bad"], "season": 3, "episode": 7}, {"type": "transport", "op": "pause"}]}}
+{"lang": "en", "text": "play the office with english subtitles", "expect": {"type": "sequence", "steps": [{"type": "play_title", "title_any": ["office"]}, {"type": "tracks", "subtitles": "eng"}]}}
+{"lang": "es", "text": "pon la casa de papel en inglés", "expect": {"type": "sequence", "steps": [{"type": "play_title", "title_any": ["casa de papel"]}, {"type": "tracks", "audio": "eng"}]}}
+{"lang": "en", "text": "play friends season 1 episode 1 and turn it up", "expect": {"type": "sequence", "steps": [{"type": "play_title", "title_any": ["friends"], "season": 1, "episode": 1}, {"type": "volume", "op": "up"}]}}
+{"lang": "es", "text": "pon the bear, vete al minuto 12 y pon subtítulos en inglés", "expect": {"type": "sequence", "steps": [{"type": "play_title", "title_any": ["bear"]}, {"type": "transport", "op": "seek_to", "seconds": 720}, {"type": "tracks", "subtitles": "eng"}]}}
+{"lang": "en", "text": "put on the bear season two episode five and skip ahead to twelve minutes in", "expect": {"type": "play_title", "title_any": ["bear"], "season": 2, "episode": 5}, "why": "the rules read “skip ahead to … in” as a skip forward, which can't follow a play: the play alone, with a note"}
+{"lang": "en", "text": "play dune part two and jump to when paul rides the worm", "expect": {"type": "sequence", "steps": [{"type": "play_title", "title_any": ["dune"]}, {"type": "find_scene"}]}}
+{"lang": "es", "text": "quiero ver oppenheimer en versión original con subtítulos en español", "expect": {"type": "sequence", "steps": [{"type": "play_title", "title_any": ["oppenheimer"]}, {"type": "tracks", "audio": "original"}, {"type": "tracks", "subtitles": "spa"}]}}
+{"lang": "es", "text": "ponme el quinto de la segunda de the bear y llévame al minuto doce", "expect": {"type": "sequence", "steps": [{"type": "play_title", "title_any": ["bear"], "season": 2, "episode": 5}, {"type": "transport", "op": "seek_to", "seconds": 720}]}}
+{"lang": "en", "text": "play the matrix and take me to the bit where neo takes the red pill", "expect": {"type": "sequence", "steps": [{"type": "play_title", "title_any": ["matrix"]}, {"type": "find_scene"}]}}
+{"lang": "es", "text": "pon interstellar y bájale el volumen a 20", "expect": {"type": "sequence", "steps": [{"type": "play_title", "title_any": ["interstellar"]}, {"type": "volume", "op": "set", "amount": 20}]}}
+{"lang": "es", "text": "pon el último capítulo de severance y salta la intro", "expect": {"type": "sequence", "steps": [{"type": "play_title", "title_any": ["severance"], "latest": true}, {"type": "skip", "what": "intro"}]}}
+{"lang": "en", "text": "play pride and prejudice", "expect": {"type": "play_title", "title_any": ["pride and prejudice"]}}
+{"lang": "es", "text": "pon romeo y julieta", "expect": {"type": "play_title", "title_any": ["romeo y julieta", "romeo and juliet"]}}
+{"lang": "es", "text": "ve al minuto treinta y cinco", "expect": {"type": "transport", "op": "seek_to", "seconds": 2100}}
+{"lang": "en", "text": "play fast and furious", "expect": {"type": "play_title", "title_any": ["fast"]}}
+{"lang": "es", "text": "pon the bear y apaga la tele cuando acabe", "expect": {"type": "play_title", "title_any": ["bear"]}}
+{"lang": "en", "text": "play the bear and go to minute 12 and go to the scene where carmy cries", "expect": {"type": "play_title", "title_any": ["bear"]}}

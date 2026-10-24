@@ -23,10 +23,10 @@ playback and progress sync. Also the `tv-agent` command line and the MCP server.
 | Missed a line | "what did they say?", "say that again" | Back 10 s, subtitles on for a moment |
 | Intro, recap, credits | "skip the intro", "skip the recap", "skip the credits"; "auto skip on" / "off" | Jumps to the end of the part you're in, from TheIntroDB / IntroDB timestamps (or a chapter named "Opening"); credits: the next episode in binge mode. Auto skip (off by default, `auto_skip`) skips intros and recaps by themselves when their timestamps are sure |
 | Lists | "what was I watching?", "what's new?", "new films", then "number 2" / "the second one" | A numbered list on the TV (posters); the remote's OK or number keys pick too |
-| A moment | "go to the part where they kiss", "ve a la parte en la que le disparan" | Found in the subtitles of what's playing (the LLM reads them with their times); the player jumps there |
+| A moment | "go to the part where they kiss", "ve a la parte en la que le disparan" | Found in the subtitles of what's playing (the LLM reads them with their times); the line it was found by shows on the TV, then the player jumps there. A weak match is refused ([Chains](#chains-a-play-and-what-follows)) |
 | Suggestions | "recommend something like Dark", "what should we watch?", "put on a comedy under 90 minutes", "recomiéndame una serie de miedo", "algo como La casa de papel" | The LLM suggests titles that fit, with what you watched lately as taste; each is checked by the title search (and its length, when you gave a limit), and the ones you've seen are left out; a numbered list on the TV, "number 2" plays it |
 | What's on | "what am I watching?", "where am I in Severance?" | The title, how far in and when it ends; your last episode of a title and how far in |
-| Two at once | "play Severance episode 2 and go to the middle", "turn it down and put on The Bear" | One after the other; the second waits until playback starts |
+| A few in one go | "pon el capítulo 5 de la segunda temporada de The Bear y vete al minuto 12", "play Dune Part Two and go to the scene where Paul rides the worm", "pon Oppenheimer desde el principio con subtítulos en español", "cancel" | A play, then up to two steps on what it plays, each once the last one is done: [Chains](#chains-a-play-and-what-follows) |
 | Help | "what can you do?", "help" | Every command as a pattern with its ‹placeholders›, by section, on the TV in the language you asked in (also the panel's Commands tab) |
 | Newest episode | "play the latest episode of The Bear" | The newest episode out |
 | Your library | "add this to my library", "remove Friends from my library", "mark this as watched", "mark The Bear season 3 as watched", "mark it as unwatched" | Written to your Stremio library, with Stremio's own per-episode watched marks |
@@ -57,6 +57,71 @@ intro", "eso está mal". A clean-up layer turns the Spanish into the English the
 
 Anything it doesn't understand shows "Didn't get that: …" and does nothing. While the pill listens, the volume
 is halved (Kodi's own volume when Kodi plays, else the TV's) and comes back afterwards; nothing is paused.
+
+## Chains: a play and what follows
+
+"Pon el capítulo 5 de la segunda temporada de The Bear y vete al minuto 12" is two steps: play that episode, then
+jump to 12:00. A chain is heavily guarded; anything it isn't sure of, it doesn't chain.
+
+**What can be chained**, fixed (`actions.chain_problem`): first one step that plays something (a title, an episode,
+"continue …", "next episode"), then one or two that act on what it plays, in the order said:
+
+| Step after the play | Say | Checked by |
+|---|---|---|
+| A jump: a time, the middle, the start | "… y vete al minuto 12", "… and go to the middle", "… from minute 12", "… desde el minuto 12" | The position, within 10 s of it; a time past the end fails |
+| A jump: a scene | "… and go to the scene where Paul rides the worm", "… y ve a la parte en la que se besan" | The line it was found by, shown on the TV for 2.5 s before the jump; the position |
+| A jump: past the intro or recap | "… y salta la intro" | Skipped when it comes (TheIntroDB / IntroDB, as "skip the intro") |
+| Audio or subtitle language | "… con subtítulos en español", "… with English subtitles", "… in English", "… en versión original" | The track playing is in that language (a language the file lacks: another copy that has it takes over, as usual) |
+| Volume | "… and turn it up", "… y pon el volumen a 20" | The TV's level (a set level or mute) |
+| Pause | "… y pausa" | The player paused; a pause comes last |
+
+At most three steps, one jump (a time and a scene would fight), each kind once. Never after a play: apps, Home,
+settings ("from now on…"), timers, binge or auto skip, stop, relative skips, another title, lists. A sentence of
+commands that can't be chained runs **the first one alone**, and the TV says what wasn't done and why ("Not done:
+“apaga la tele cuando acabe” (a sleep timer can't follow a play)").
+
+**How it's read** (`decide/chain.py`, before the decision steps):
+
+- Rules first. The sentence is cut at its joins ("and", "then", "y", "y luego", "después", commas) and endings that
+  ride on a play are cut off ("… con subtítulos en español", "… in English", "… from minute 12"); every part after
+  the first must be a command the fixed phrases or pattern rules know on its own. The first part then goes through
+  the decision steps like any command, and must be a play some step is sure of (the same bar as a single command:
+  a pattern rule, the LLM, d1 only when it's sure), said with a play verb or an episode ("the bear and pause" isn't
+  one). "Pride and prejudice", "treinta y cinco" and "an hour and a half" stay one command.
+- The LLM only proposes. When the rules find no chain but the sentence sounds like one (a play, then a join or an
+  ending, then words of a step that can follow), the LLM is asked for its steps as JSON in a strict schema, in place
+  of the LLM step. Any action or field outside the chain's list, a step's field put in the play ("seconds" in
+  play_title: two steps merged), a step after the play whose words weren't said (a pause nobody asked for), or a
+  shape the rules above refuse rejects **the whole chain**: the first step alone runs if it holds up by itself,
+  with a note; else nothing happens. A one-step answer is the LLM's usual single command.
+
+**How it runs** (`chain.py`):
+
+1. The plan shows first: in the pill ("The Bear S2E5, then 12:00"), then on the TV with "say “cancel” or press
+   Back to stop", and on TV Agent Player's loading screen while the title starts ("Finding streams… · then 12:00").
+2. The play step, then its proof within 75 s: something new playing, the episode asked for (by its id: "it started
+   S2E6 instead" stops the chain), its picture moving (TV Agent Player's first frame, Kodi's length, Just Player's
+   state).
+3. Each step after it, once the same title still plays: done, then checked (table above), within its own limit
+   (20 s for a jump, 50 s for a scene, 30 s for a language, 8 s for the volume or a pause). A language change or a
+   pause first waits up to 25 s for the episode check's verdict on a file it hasn't checked before: a wrong file
+   is replaced by the right one at the same moment, which keeps a jump but not a track or a pause.
+4. A step that fails or runs out of time stops the chain: "Step 2 (12:00): 12:00 is past the end (0:24:10) · not
+   done: pause". Nothing is tried again.
+5. **"Cancel"** ("cancela", "never mind", "olvídalo"), any other command but the volume, or **Back** in TV Agent
+   Player stops it at once. A start still on its way stops too (its loading screen closed); a title already
+   playing goes on. In Kodi and Just Player, Back isn't seen: say "cancel".
+
+**Scenes**: the subtitles searched are your subtitle addons' for that episode or film (the ones the episode check
+kept, with their measured shift, else the addons' for that file; a file's own embedded subtitles would mean reading
+the whole file). The LLM says when the moment is, the line it placed it by and how: said in it, between the lines
+around it, or a guess from the story. A guess, or a line that isn't in the subtitles within 90 s of that time, is
+refused ("Not sure where “…” is: …"); otherwise the line shows on the TV before the jump. Single "go to the part
+where …" commands get the same checks.
+
+`scripts/bench_chains.py` decides the chained sentences of `eval/chains.jsonl` with your setup (rules, the LLM) and
+judges each step; `--off llm` for the rules alone. Chained commands said to the TV become voice tests like any
+other (`scripts/bench_voice.py --seed`, below).
 
 ## Player: TV Agent Player, Kodi or Just Player
 
@@ -158,8 +223,9 @@ save your own), editable in the panel's **Decisions** tab and used at once, with
 
    A step that can't be reached passes to the next. When no model answered (off or unreachable), what's left is
    treated as the d1 tab's "when no model answers" intent (a title to play, or nothing).
-3. **Two commands in one** ("play Severance episode 2 and go to the middle"): when one side of an "and" / "y" is a
-   control command the rules know, the other side goes through the steps and both run, one after the other.
+3. **Chains** ("play Severance episode 2 and go to the middle"), before the steps: the sentence cut at its joins,
+   every part after the first a command the rules know, the first part through the steps; else, when it sounds
+   like one, the LLM's steps, checked. See [Chains](#chains-a-play-and-what-follows).
 4. **Apps and hooks:** the only apps the agent may start, the names you can call them, and which app gets YouTube,
    Twitch and Stremio-page links (and the link format).
 
@@ -406,6 +472,7 @@ rm -rf ~/.config/tv-agent ~/.local/share/tv-agent ~/.local/opt/llama.cpp ~/.loca
 | `src/tv_agent/tv/status.py` | The TV's status, network, speed test and ADB diagnosis for the panel |
 | `src/tv_agent/decide/` | `router.py` (the decision path), `rules.py` + `default_rules.json` (the rules engine and defaults), `text.py`, `numbers.py`, `d1.py`, `evaluate.py` |
 | `src/tv_agent/actions.py`, `agent.py` | The closed action set and what each one does on the TV |
+| `src/tv_agent/decide/chain.py`, `chain.py` | Chains: reading one (rules, the LLM's checked proposal), running one (plan, proof of each step, stop, cancel) |
 | `src/tv_agent/tv/` | `adb.py` (the only shell path), `apps.py`, `media.py`, `kodi.py`, `justplayer.py` |
 | `src/tv_agent/stremio/` | `account.py` (API, link login), `cinemeta.py`, `streams.py`, `subtitles.py`, `library.py`, `progress.py` |
 | `src/tv_agent/languages.py` | Audio/subtitle rule and track matching |
@@ -413,6 +480,6 @@ rm -rf ~/.config/tv-agent ~/.local/share/tv-agent ~/.local/opt/llama.cpp ~/.loca
 | `src/tv_agent/mcp_server.py` | MCP tools for Claude Code (`tv-agent-mcp`) |
 | `systemd/` | User services for a packaged install (`tv-agent setup services` writes them for a checkout) |
 | `src/tv_agent/voicetests.py` | Voice tests: labels for kept recordings, seeded from the history; comparing runs |
-| `scripts/` | `fetch-models.sh`; `bench_voice.py` (your voice tests), `bench_fallbacks.py` (decision paths and models on `eval/`), Phase 0 benchmarks |
-| `eval/` | `utterances.jsonl` (107 labelled sentences, the panel's tests), `commands.jsonl` (654, made by `build_commands.py`: every action, titles made of command words, numbers in every form, fillers, mishearings, non-commands) |
+| `scripts/` | `fetch-models.sh`; `bench_voice.py` (your voice tests), `bench_fallbacks.py` (decision paths and models on `eval/`), `bench_chains.py` (chained commands), Phase 0 benchmarks |
+| `eval/` | `utterances.jsonl` (107 labelled sentences, the panel's tests), `commands.jsonl` (654, made by `build_commands.py`: every action, titles made of command words, numbers in every form, fillers, mishearings, non-commands), `chains.jsonl` (chained commands, ones that aren't, ones refused) |
 | `tests/` | Offline unit tests |

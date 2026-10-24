@@ -2,7 +2,7 @@
 validated objects; nothing it outputs reaches the TV's shell except through the executors in agent.py."""
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 
 Title = Annotated[str, Field(min_length=1, max_length=120)]
@@ -168,14 +168,85 @@ STEPS = (PlayTitle, ContinueWatching, NextEpisode, OpenInStremio, YouTube, Twitc
 Step = Annotated[Union[STEPS], Field(discriminator="type")]
 
 
+# A chain: one step that plays something, then one or two that act on what it plays, in that order (chain.py)
+CHAIN_PLAY = ("play_title", "continue_watching", "next_episode")
+# Audio and subtitle languages as chain steps (agent._tracks: the file's track, else another copy that has it)
+LANGUAGE_STEPS = True
+
+
+def follow_kinds(step) -> tuple[str, ...]:
+    """What a step after the play changes, for the chain's rules: a jump (to a time, a scene, past the intro or
+    recap), the audio or subtitle language, the volume, a pause. Empty for one that can't follow a play: an app, a
+    setting, a timer, another title…"""
+    match step:
+        case Transport(op="seek_to") | FindScene() | Skip(what="intro" | "recap"):
+            return ("jump",)
+        case Transport(op="pause"):
+            return ("pause",)
+        case Tracks():
+            return (("audio",) if step.audio else ()) + (("subtitles",) if step.subtitles else ())
+        case Volume():
+            return ("volume",)
+    return ()
+
+
+def _named(step) -> str:
+    """A step as a refused chain names it."""
+    if step.type == "transport":
+        return {"forward": "a skip forward", "back": "a skip back", "toggle": "play/pause"}.get(step.op, step.op)
+    return {"timer": "a sleep timer", "open_app": "an app", "home": "going home", "binge": "binge mode",
+            "auto_skip": "auto skip", "play_title": "another title", "continue_watching": "another title",
+            "next_episode": "another episode", "show_list": "a list", "recommend": "suggestions",
+            "library": "the library", "replay": "a replay", "skip": "skipping the credits"}.get(
+        step.type, step.type.replace("_", " "))
+
+
+def chain_problem(steps: list) -> str | None:
+    """Why these steps aren't a chain, or None: a play step first, then one or two others that act on what it plays,
+    each kind at most once (one jump: a time and a scene would fight), a pause last."""
+    if len(steps) > 3:
+        return "more than three steps"
+    if len(steps) < 2:
+        return "a chain is a play and one or two steps after it"
+    if steps[0].type not in CHAIN_PLAY:
+        return "a chain starts by playing something"
+    if getattr(steps[0], "guess", False):
+        return "the title was only a guess"
+    seen: list[str] = []
+    for step in steps[1:]:
+        if step.type == "tracks" and not LANGUAGE_STEPS:
+            return "language changes can't be chained yet"
+        if step.type == "tracks" and (step.keep or step.subtitles == "foreign"):
+            return "a setting can't be chained"
+        kinds = follow_kinds(step)
+        if not kinds:
+            return f"{_named(step)} can't follow a play"
+        if "pause" in seen:
+            return "a pause comes last"
+        if twice := set(kinds) & set(seen):
+            return {"jump": "two jumps", "pause": "two pauses"}.get(k := twice.pop(), f"the {k} changed twice")
+        seen += kinds
+    return None
+
+
 class Sequence(_Action):
-    type: Literal["sequence"] = "sequence"      # "play The Bear and skip the intro": one after the other
+    type: Literal["sequence"] = "sequence"      # a chain: "play The Bear S2E5 and go to minute 12"
     steps: list[Step] = Field(min_length=2, max_length=3)
 
+    @model_validator(mode="after")
+    def _a_chain(self):
+        if problem := chain_problem(self.steps):
+            raise ValueError(problem)
+        return self
 
-Action = Annotated[Union[(*STEPS, Sequence, Unclear)], Field(discriminator="type")]
+
+class Cancel(_Action):
+    type: Literal["cancel"] = "cancel"          # what's still to come of a chain, or a start on its way, stops
+
+
+Action = Annotated[Union[(*STEPS, Sequence, Cancel, Unclear)], Field(discriminator="type")]
 ACTION = TypeAdapter(Action)
-ACTION_TYPES = {m.model_fields["type"].default: m for m in (*STEPS, Sequence, Unclear)}
+ACTION_TYPES = {m.model_fields["type"].default: m for m in (*STEPS, Sequence, Cancel, Unclear)}
 
 
 def parse(data: str | bytes | dict) -> Action:

@@ -1447,10 +1447,18 @@ class Decisions(QWidget):
         hit = ""
         for t in trace[1:]:
             st = t["stage"]
-            if st == "split":
+            if st == "split":                    # before chains (server 0.9 and older): two commands
                 left, right = t["parts"]
                 lines.append(f"Two commands: “<b>{left}</b>” and “<b>{right}</b>”; “{t['known']}” is the rule "
                              f"<b>{t['rule']}</b>, the other goes through the steps:")
+                continue
+            if st == "chain":                    # a play, then steps the rules know (server/decide/chain.py)
+                first, *after = t.get("parts") or [""]
+                known = ", ".join(f"“{p}” (<b>{r}</b>)" for p, r in zip(after, t.get("rules") or []))
+                lines.append(f"A chain: after it, {known}; “<b>{first}</b>” goes through the steps:")
+                if t.get("refused"):
+                    lines.append(f"<span style='color:{AMBER}'>Not chained ({t['refused']}): the first part runs "
+                                 "alone</span>")
                 continue
             if st == "fallback":
                 if t.get("accepted"):
@@ -1503,11 +1511,17 @@ class Decisions(QWidget):
                                  "step decides")
                     continue
                 said = str(t.get("action", "none")).replace("_", " ")
+                if t.get("chain"):                # asked for its steps: the sentence sounded chained
+                    said = " → ".join(str(x).replace("_", " ") for x in t.get("steps") or []) or said
                 if t.get("action") not in (None, "none"):
                     hit, states[step], notes[step] = step, "hit", f"answered: {said}"
                 else:
                     states[step], notes[step] = "visited", "not a command"
                 lines.append(f"{n} The LLM ({model}) answered <b>{said}</b>, checked like the rest")
+                if t.get("refused"):
+                    lines.append(f"<span style='color:{AMBER}'>Not chained ({t['refused']})"
+                                 f"{': its first step runs alone' if t.get('action') not in (None, 'none') else ''}"
+                                 "</span>")
             elif st == "model":
                 if t.get("available") is False:
                     states[step], notes[step] = "out", "didn't answer"

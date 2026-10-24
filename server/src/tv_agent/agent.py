@@ -15,9 +15,9 @@ import httpx
 from rapidfuzz import fuzz
 
 from . import __version__, activity, languages, skips, twitch, youtube
-from . import episode_check
-from .actions import (Action, AutoSkip, Binge, ContinueWatching, FindScene, Help, Home, Info, LibraryEdit, NextEpisode,
-                      OpenApp,
+from . import chain, episode_check
+from .actions import (Action, AutoSkip, Binge, Cancel, ContinueWatching, FindScene, Help, Home, Info, LibraryEdit,
+                      NextEpisode, OpenApp,
                       OpenInStremio, Pick, PlayTitle, Recommend, Replay, Sequence, ShowList, Skip, Timer, Tracks,
                       Transport, Twitch, Unclear, Volume, Wrong, YouTube)
 from .commands import LEGEND, SECTIONS, TV_HINT
@@ -225,12 +225,13 @@ class Loading:
     def __init__(self, player: TvPlayer, video: str, screen: dict, ready: asyncio.Task, step: str):
         self.player, self.video, self.step, self.shown = player, video, step, False
         self.screen = {k: v for k, v in screen.items() if k != "plot"}
+        self.then = f" · then {plan}" if (plan := chain.PLAN.get()) else ""     # a chain's next steps
         self.first = asyncio.create_task(self._show(ready))
 
     async def _show(self, ready: asyncio.Task):
         try:
             if await asyncio.shield(ready):
-                self.shown = self.player.loading(self.video, **self.screen, step=self.step)
+                self.shown = self.player.loading(self.video, **self.screen, step=self.step + self.then)
         except Exception as e:                  # the start goes on without it
             log.info("loading screen: %s", type(e).__name__)
 
@@ -240,7 +241,7 @@ class Loading:
         self.step = step
         if self.shown:
             try:
-                self.player.loading(self.video, **self.screen, step=step)
+                self.player.loading(self.video, **self.screen, step=step + self.then)
             except Exception as e:
                 log.info("loading screen: %s", type(e).__name__)
 
@@ -300,6 +301,7 @@ class Agent:
         self._asked: dict[str, tuple[float, dict]] = {}   # per title: (when, the audio / subtitles asked by voice)
         self._originals: dict[str, str] = {}     # per title: the language its files mark as the original audio
         self._probed: dict[tuple[str, int], tuple[set[str], set[str]] | None] = {}   # files' track languages
+        self.chain: chain.Run | None = None           # the chain running, or the last one (chain.py)
 
     async def close(self):
         if self._progress and not self._progress.done():
@@ -853,7 +855,7 @@ class Agent:
                 return await coro
             finally:
                 done_at[key] = time.perf_counter()
-        if not jump:
+        if not jump and not chain.PLAN.get():      # a chain has said its plan instead
             asyncio.create_task(self.notify(f"Finding {label}…"))
         kodi_ready = player_ready = kodi_open = loading = first_frame = None
         if self.cfg.player == "kodi" and not self.dry_run:
@@ -2265,17 +2267,24 @@ class Agent:
         title = np.name + (f" S{m.group(1)}E{m.group(2)}" if m else "")
         lines = "\n".join(f"{_clock(ms)} {words[:90]}" for ms, words in found[:3000])
         try:
-            secs, line = await self.llm.find_moment(title, a.what, lines)
+            secs, line, how = await self.llm.find_moment(title, a.what, lines)
         except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError) as e:
             log.info("scene search unavailable (%s)", type(e).__name__)
             return Outcome(False, "Couldn't search for that moment right now")
         if secs is None:
             return Outcome(False, f"Couldn't find “{a.what}”")
-        log.info("moment %r of %s at %d s (%r)%s", a.what, title, secs, line,
+        if why := chain.weak_scene(secs, line, how, found):
+            log.info("moment %r of %s refused: %s (%d s, %r, %s)", a.what, title, why, secs, line, how)
+            return Outcome(False, f"Not sure where “{a.what}” is: {why}")
+        log.info("moment %r of %s at %d s (%r, %s)%s", a.what, title, secs, line, how,
                  f", {shift:+.1f} s in the subtitles" if shift else "")
         secs = max(0, round(secs - shift))
+        await self.notify(f"{_clock(secs * 1000)}: “{line}”")     # the line it's placed by, shown before the jump
+        await asyncio.sleep(chain.SCENE_SHOWN)
         out = await self._transport(Transport(op="seek_to", seconds=max(0, secs - 2)))
-        return Outcome(out.ok, f"To {_clock(secs * 1000)}: “{line}”" if out.ok and line else out.say)
+        if not out.ok:
+            return out
+        return Outcome(True, f"To {_clock(secs * 1000)}: “{line}”", {"scene_ms": max(0, secs - 2) * 1000})
 
     async def _recommend(self, a: Recommend) -> Outcome:
         """Suggestions for a request ("something like Dark", "a short comedy"): the LLM proposes titles, with your
@@ -2449,21 +2458,14 @@ class Agent:
                 "filename": np.filename}
 
     async def _sequence(self, a: Sequence) -> Outcome:
-        """Two commands said together, one after the other. After one that starts something, the next waits until
-        it plays (a jump or a subtitle change needs the player), and "skip the intro" waits for the intro."""
-        said = []
-        for i, step in enumerate(a.steps):
-            started = i and a.steps[i - 1].type in STARTS
-            if started:
-                await self._until_playing()
-            if started and step.type == "skip" and step.what != "credits":
-                out = await self._skip_when_it_comes(step.what)
-            else:
-                out = await self.execute(step)
-            said.append(out.say)
-            if not out.ok:
-                return Outcome(False, " · ".join(said))
-        return Outcome(True, " · ".join(said))
+        """A chain: a play, then one or two steps on what it plays, each once the one before is done (chain.py)."""
+        ok, say, details = await chain.run(self, a)
+        return Outcome(ok, say, details)
+
+    async def _cancel(self, a: Cancel) -> Outcome:
+        """"Cancel": what's left of a chain, or a start on its way, stops (chain.cancel)."""
+        ok, say = await chain.cancel(self)
+        return Outcome(ok, say)
 
     async def _skip_when_it_comes(self, what: str) -> Outcome:
         """The intro or recap of what just started, skipped as it comes (it may be minutes in, or already past)."""
@@ -2478,18 +2480,6 @@ class Agent:
             return Outcome(True, f"Already past the {what}")
         self._start_skip_watch(np, also=what)
         return Outcome(True, f"Skipping the {what} when it comes")
-
-    async def _until_playing(self, wait_s: float = 20.0):
-        loop = asyncio.get_running_loop()
-        until = loop.time() + wait_s
-        while loop.time() < until:
-            if (pid := await self._player_id()) is not None and (await self._ctl(pid).position(pid))[1] > 0:
-                if pid != tvplayer.PID:
-                    await asyncio.sleep(1.5)    # past Kodi's own jump to where you stopped
-                return
-            if await self._just_status() is not None:
-                return
-            await asyncio.sleep(0.5)
 
     async def _recent_items(self) -> list[ListItem]:
         out = []

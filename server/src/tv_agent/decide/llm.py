@@ -36,7 +36,8 @@ ACTIONS = ["play_title", "continue_watching", "show_in_stremio", "info", "next_e
            "skip_intro", "skip_recap", "skip_credits",
            "auto_skip_on", "auto_skip_off", "stop_after_this", "turn_off_after_this", "stop_in", "turn_off_in",
            "cancel_timer", "binge_on", "binge_off", "library_add", "library_remove", "mark_watched", "mark_unwatched",
-           "show_recent", "show_new", "show_movies", "recommend", "find_scene", "pick", "help", "wrong", "none"]
+           "show_recent", "show_new", "show_movies", "recommend", "find_scene", "pick", "help", "wrong", "cancel",
+           "none"]
 SLOTS = {"title": "string", "season": "integer", "episode": "integer", "episode_name": "string", "seconds": "integer",
          "number": "integer", "app": "string", "language": "string", "query": "string"}
 SCHEMA = {"type": "object", "additionalProperties": False, "required": ["action", *SLOTS],
@@ -74,6 +75,7 @@ should we watch?"; the query is their request, in their words)
 find_scene: query (a moment of what's playing described in words, in English: "go to the part where Mr. Burns
 gets shot"). Going to an episode ("ve al episodio de … donde", "¿puedes ir al episodio en el que…?") is play_title.
 pick: number (an item of the list on screen) · wrong ("that's wrong": the last command was misunderstood)
+cancel ("cancel", "never mind": stop what was asked a moment ago, still on its way; not playback itself)
 
 Titles: copy one exactly from "candidates" when it's what was said, even misheard ("the bare" is "The Bear"). When
 a film or series is described instead of named, give its real title. Otherwise copy the title as said.
@@ -140,8 +142,10 @@ SCENE_SYSTEM = """Someone watching a film or episode ("watching") asked to jump 
 ("wanted", maybe misremembered). Below are its subtitles, one cue per line: "m:ss text" (or "h:mm:ss"). Find where
 that moment starts: what's said just before or as it happens; a moment without words (a gunshot, a kiss) is between
 the lines around it, and what you know about the story helps place it. Answer only with the JSON object: "seconds"
-from the start (a few seconds before the moment), and "line", the subtitle you placed it by; both null when it isn't
-there."""
+from the start (a few seconds before the moment), "line", the subtitle you placed it by, copied exactly, and "how":
+"words" when that line is said in the moment itself or right as it happens, "around" when the moment has no words of
+its own and the lines around it place it, "guess" when these lines don't show it and only the story would; all null
+when it isn't there."""
 
 
 class Llm:
@@ -255,10 +259,12 @@ class Llm:
         got = (json.loads(content) if isinstance(content, str) else content).get("id")
         return got if got in ids else None
 
-    async def find_moment(self, title: str, wanted: str, lines: str) -> tuple[int | None, str]:
-        """When a described moment happens, from the subtitles ("m:ss line" per cue): (seconds, the line), or None."""
-        schema = {"type": "object", "additionalProperties": False, "required": ["seconds", "line"],
-                  "properties": {"seconds": {"type": ["integer", "null"]}, "line": {"type": ["string", "null"]}}}
+    async def find_moment(self, title: str, wanted: str, lines: str) -> tuple[int | None, str, str]:
+        """When a described moment happens, from the subtitles ("m:ss line" per cue): (seconds, the line, how it was
+        placed: "words", "around" or "guess"); seconds None when it isn't there."""
+        schema = {"type": "object", "additionalProperties": False, "required": ["seconds", "line", "how"],
+                  "properties": {"seconds": {"type": ["integer", "null"]}, "line": {"type": ["string", "null"]},
+                                 "how": {"type": ["string", "null"], "enum": ["words", "around", "guess", None]}}}
         data = await self._post({
             "max_tokens": 120,
             "response_format": {"type": "json_schema",
@@ -271,7 +277,8 @@ class Llm:
         content = data["choices"][0]["message"]["content"]
         got = json.loads(content) if isinstance(content, str) else content
         secs = got.get("seconds")
-        return (secs if isinstance(secs, int) and secs >= 0 else None), str(got.get("line") or "")[:160]
+        return (secs if isinstance(secs, int) and secs >= 0 else None), str(got.get("line") or "")[:160], \
+            str(got.get("how") or "")
 
     async def answer(self, said: str, context: dict) -> tuple[bool, A.Action | None]:
         """(whether it answered, its action or None for "not a command")."""
@@ -315,6 +322,8 @@ def to_action(a: dict, said: str, candidates: list[str], rules: Rules) -> A.Acti
                 return A.AutoSkip(on=kind == "auto_skip_on")
             case "wrong":
                 return A.Wrong()
+            case "cancel":
+                return A.Cancel()
             case "start_over":
                 return A.Transport(op="seek_to", seconds=0)
             case "replay":

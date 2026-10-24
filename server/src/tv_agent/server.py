@@ -51,6 +51,7 @@ from pydantic import ValidationError
 from . import __version__
 from . import actions as A
 from . import activity
+from . import chain
 from . import clients as clients_mod
 from . import install
 from . import remote
@@ -160,7 +161,9 @@ def describe(a: A.Action) -> str:
         case A.Info():
             return f"{a.title.title()}…" if a.title else "What's on…"
         case A.Sequence():
-            return " · ".join(describe(x) for x in a.steps)
+            return chain.plan(a)
+        case A.Cancel():
+            return "Cancel"
         case A.LibraryEdit():
             what = a.title.title() if a.title else "this"
             return {"add": f"Adding {what} to your library", "remove": f"Removing {what} from your library",
@@ -259,6 +262,8 @@ class Service:
     async def execute(self, d: Decision, heard: str, source: str, extra: dict | None = None):
         t = time.perf_counter()
         out = await self.agent.execute(d.action, heard)
+        if d.note:                                       # what of the sentence wasn't done (a chain refused)
+            out.say = f"{out.say} · {d.note}"
         ms = (time.perf_counter() - t) * 1000
         self.agent.state.timings.add(f"execute:{d.action.type}", ms)
         log.info("%s -> %s (%.0f ms)", d.action.type, out.say, ms)
@@ -272,7 +277,7 @@ class Service:
         """Execute in the background so the pill can close; the result arrives on the TV as a toast."""
         out = await self.execute(d, heard, source, extra)
         if d.action.type in ("play_title", "continue_watching", "next_episode", "youtube", "twitch", "pick",
-                             "library", "skip", "wrong", "info", "sequence") or not out.ok:
+                             "library", "skip", "wrong", "info", "sequence", "cancel") or not out.ok or d.note:
             await self.agent.notify(out.say)
 
     def start(self, d: Decision, heard: str, source: str, extra: dict | None = None):

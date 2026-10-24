@@ -147,10 +147,17 @@ SECTIONS = [
         Command("mark ‹title› as watched/unwatched", "marca ‹título› como [no] visto",
                 "Stremio's own watched marks", "Las marcas de visto de Stremio", "library"),
     ]),
-    Section("Two at once", "Dos a la vez", [
-        Command("‹command› and ‹command›", "‹orden› y ‹orden›",
-                "One after the other: “play The Bear and skip the intro”",
-                "Una tras otra: «pon The Bear y salta la intro»", "sequence"),
+    Section("A few in one go", "Varias de una vez", [
+        Command("play ‹title› and go to ‹time›", "pon ‹título› y ve al minuto ‹n›",
+                "Plays it, then up to two more: a time or a scene, a language, the volume, pause",
+                "Lo pone y luego hasta dos más: un minuto o una escena, un idioma, el volumen, pausa", "sequence"),
+        Command("play ‹title› and go to the part where ‹moment›", "pon ‹título› y ve a la parte en la que ‹momento›",
+                "Shows the line it found, then jumps", "Enseña la frase que encontró y salta", "sequence"),
+        Command("play ‹title› with ‹language› subtitles · play ‹title› in ‹language›",
+                "pon ‹título› con subtítulos en ‹idioma› · pon ‹título› en ‹idioma›",
+                "“in ‹language›” is the audio", "«en ‹idioma›» es el audio", "sequence"),
+        Command("cancel", "cancela", "Stops what's left of it (Back too)", "Para lo que falta (Atrás también)",
+                "cancel"),
     ]),
     Section("When it gets it wrong", "Si se equivoca", [
         Command("that's wrong", "eso está mal",
@@ -168,12 +175,10 @@ TV_HINT = {"en": "Press the mic and say one · ▲▼ to scroll · BACK closes",
 EXAMPLES = {
     "en": {"title": "The Bear", "n": "three", "time": "twenty minutes", "language": "Spanish", "app": "YouTube",
            "search": "paella recipes", "channel": "Ibai", "level": "twenty", "first, second…": "third",
-           "something": "a short comedy", "moment": "they kiss",
-           "command": ["play The Bear season three", "skip the intro"]},
+           "something": "a short comedy", "moment": "they kiss"},
     "es": {"título": "La casa de papel", "n": "tres", "tiempo": "veinte minutos", "idioma": "inglés", "app": "YouTube",
            "búsqueda": "recetas de paella", "canal": "Ibai", "nivel": "veinte", "primero, segundo…": "tercero",
-           "algo": "una serie de miedo", "momento": "se besan",
-           "orden": ["pon La casa de papel", "salta la intro"]},
+           "algo": "una serie de miedo", "momento": "se besan"},
 }
 PLACEHOLDER = re.compile(r"‹([^›]+)›")
 

@@ -629,7 +629,13 @@
         "stop the episode",
         "stop the show",
         "stop the video",
-        "stop watching"
+        "stop watching",
+        "stop and go home",
+        "stop it and go home",
+        "stop and go to the home screen",
+        "para y vete al inicio",
+        "para y ve al inicio",
+        "para y vete al menú"
       ],
       "do": {
         "type": "transport",
@@ -758,6 +764,37 @@
         "op": "up"
       },
       "note": "complaints that mean louder"
+    },
+    {
+      "id": "cancel",
+      "say": [
+        "cancel",
+        "cancel that",
+        "cancel it",
+        "cancel this",
+        "cancel the plan",
+        "cancel the rest",
+        "cancel everything",
+        "never mind",
+        "nevermind",
+        "forget it",
+        "forget that",
+        "cancela",
+        "cancélalo",
+        "cancelalo",
+        "cancela eso",
+        "cancela todo",
+        "cancelar",
+        "olvídalo",
+        "olvidalo",
+        "déjalo",
+        "dejalo",
+        "da igual"
+      ],
+      "do": {
+        "type": "cancel"
+      },
+      "note": "stops what's still to come of a chain (“play The Bear and go to minute 12”), or a start on its way"
     },
     {
       "id": "timer_cancel",

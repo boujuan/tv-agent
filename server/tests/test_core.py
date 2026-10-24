@@ -1104,31 +1104,6 @@ def _router(**kw):
     return router.Router(NoD1(), rules, **kw)
 
 
-@pytest.mark.parametrize("text,steps", [
-    ("go to the second episode of sevence and go to the middle of it", ["play_title", "transport"]),
-    ("turn the volume down and play the bear", ["volume", "play_title"]),
-    ("pon la casa de papel y salta la intro", ["play_title", "skip"]),
-    ("play pride and prejudice", None),                           # a title with "and" stays one title
-    ("play tom and jerry", None),
-    ("pon romeo y julieta", None),
-    ("skip the intro and the recap", None),                       # a bare name isn't a title to play
-    ("pon el volumen al treinta y cinco", None),                  # numbers: one command (volume 35)
-    ("ve al minuto treinta y cinco", None),
-    ("skip to an hour and a half", None),
-    ("pausa y luego", None),                                      # the offline guess isn't a second command
-    ("salta la intro y pon friends", ["skip", "play_title"]),     # "pon" is a play verb once cleaned up
-    ("pon the bear y apaga la tele cuando acabe", ["play_title", "timer"]),
-    ("para cuando acabe este, que estoy cansado", None),
-])
-def test_two_commands_in_one_sentence(text, steps):
-    import asyncio
-    d = asyncio.run(_router().decide(text))
-    if steps is None:
-        assert d.action.type != "sequence", d.action
-    else:
-        assert d.action.type == "sequence" and [s.type for s in d.action.steps] == steps
-
-
 def test_help_is_shown_in_the_language_it_was_asked_in():
     import asyncio
     r = _router()
@@ -1239,26 +1214,6 @@ def test_llm_requests_adapt_to_what_a_model_takes():
     first, again = asyncio.run(run())
     assert first == again == {"action": "pause"}
     assert sent == [(0, "none"), (None, "none"), (None, "minimal"), (None, "minimal")]    # learned, then remembered
-
-
-def test_two_commands_run_one_after_the_other():
-    import asyncio
-    import types
-    from tv_agent.agent import Agent, Outcome
-
-    done = []
-
-    async def execute(a):
-        done.append(a.type)
-        return Outcome(True, a.type)
-
-    async def until_playing():
-        done.append("wait")
-
-    a = types.SimpleNamespace(execute=execute, _until_playing=until_playing)
-    seq = A.Sequence(steps=[A.PlayTitle(title="severance", episode=2), A.Transport(op="seek_to", percent=50)])
-    out = asyncio.run(Agent._sequence(a, seq))
-    assert done == ["play_title", "wait", "transport"] and out.ok and out.say == "play_title · transport"
 
 
 def test_subtitles_switch_over_from_what_kodi_shows():
@@ -1749,7 +1704,7 @@ def test_the_scene_search_jumps_to_where_the_llm_found_the_moment(monkeypatch):
     class Llm:
         async def find_moment(self, title, wanted, text):
             seen.update(title=title, wanted=wanted, first=text.splitlines()[0])
-            return 30, "line 30"
+            return 30, "line 30", "words"
 
     async def addons():
         return []
@@ -1761,12 +1716,18 @@ def test_the_scene_search_jumps_to_where_the_llm_found_the_moment(monkeypatch):
 
     async def no_subs(video, lang="eng"):
         return []                               # nothing kept from a check: the addons are asked as before
+    shown = []
+
+    async def notify(text):
+        shown.append((text, list(jumped)))
+    monkeypatch.setattr(agent_mod.chain, "SCENE_SHOWN", 0)
     np = NowPlaying("tt1", "series", "tt1:6:25", "The Simpsons")
     me = types.SimpleNamespace(state=types.SimpleNamespace(now_playing=np), llm=Llm(), http=None, addons=addons,
                                cfg=types.SimpleNamespace(subtitle_languages=["eng"]), _transport=transport,
-                               checks=types.SimpleNamespace(get=lambda *a: None), episode_subs=no_subs)
+                               checks=types.SimpleNamespace(get=lambda *a: None), episode_subs=no_subs, notify=notify)
     out = asyncio.run(Agent._find_scene(me, A.FindScene(what="Mr. Burns gets shot")))
     assert out.ok and jumped == [A.Transport(op="seek_to", seconds=28)]      # a moment before it
+    assert shown == [("0:30: “line 30”", [])] and out.details == {"scene_ms": 28_000}    # the line before the jump
     assert seen == {"title": "The Simpsons S6E25", "wanted": "Mr. Burns gets shot", "first": "0:01 line 1"}
 
     async def kept(video, lang="eng"):          # the episode's subtitles from checking the file, 3 s later than it

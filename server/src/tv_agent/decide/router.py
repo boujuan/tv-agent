@@ -9,8 +9,9 @@
              next step gets a try. Local, hosted or either first (`d1_where`, d1.py)
    A step that can't be reached passes to the next. When no model answered (off or unreachable), what's left is
    treated as the rules' offline intent (a title to play, or nothing).
-3. Two commands in one ("play Severance episode 2 and go to the middle"): when one side is a control command the
-   rules know, the other side goes through the steps and both run, one after the other.
+3. Before them, a chain ("play Severance episode 2 and go to the middle"; chain.py): a play and one or two steps
+   after it, found by the rules, or proposed by the LLM and checked when the rules find none but it sounds like one.
+   Commands said together that can't be chained run the first alone, with a note.
 Every decision carries a trace of the steps it went through, for the panel's diagram.
 """
 import logging
@@ -21,9 +22,10 @@ import httpx
 from pydantic import ValidationError
 
 from .. import actions as A
+from . import chain
 from . import text as T
 from .d1 import D1
-from .numbers import NUMBER, TENS, UNITS, seconds_in, to_int
+from .numbers import NUMBER, seconds_in, to_int
 from .rules import BUILTIN_INTENTS, LANGUAGE_NAMES, NoMatch, Rules
 
 
@@ -36,19 +38,12 @@ class Decision:
     trace: list[dict] = field(default_factory=list)
     ms: float = 0.0                   # how long deciding took (set by the server)
     cost: float = 0.0                 # what the model calls cost ($), from the trace
+    note: str = ""                    # said after the outcome: what of the sentence wasn't done (a chain refused)
 
 
 log = logging.getLogger(__name__)
 STEPS = ("phrases", "patterns", "llm", "d1")
 STAGE = {"phrases": "phrase", "patterns": "pattern", "llm": "llm", "d1": "model"}    # their names in the trace
-# What one side of "… and …" must be, as the rules decide it, for the sentence to be two commands
-CONTROL = {"transport", "volume", "tracks", "skip", "auto_skip", "binge", "timer", "replay", "home", "next_episode",
-           "show_list", "help", "info"}
-SPLIT = re.compile(r",?\s+(?:and then|and|then|y luego|y despu[eé]s|y)\s+")
-# What follows an "and" / "y" that's still the same command: "an hour and a half", "treinta y cinco"
-_NUMBER_WORDS = "|".join(sorted((w for w in [*UNITS, *TENS, "hundred"] if w not in ("a", "an", "un", "una", "oh")),
-                                key=len, reverse=True))
-SAME_COMMAND = re.compile(rf"(?:\d|(?:{_NUMBER_WORDS}|a half|half|a quarter|medio|media|un cuarto)\b)")
 # A subtitles or audio command that's a setting: "from now on, audio in Spanish"
 FROM_NOW_ON = re.compile(r"\b(?:from now on|by default|always|a partir de ahora|de ahora en adelante|desde ahora|"
                          r"por defecto|siempre)\b")
@@ -250,13 +245,10 @@ class Router:
         trace = [{"stage": "clean", "text": t}]
         if not t:
             return Decision(A.Unclear(heard=text), "none", 0.0, "", trace)
-        d = await self._two(t, rules, trace) or await self._steps(text, t, rules, trace)
+        d = await self._chain(text, t, rules, trace) or await self._steps(text, t, rules, trace)
         d.cost = sum(x.get("cost") or 0 for x in d.trace)
-        help_in = A.Help(lang="es" if T.spanish(text) else "en")         # the list in the language it was asked in
-        if d.action.type == "help" and d.action.lang is None:
-            d.action = help_in
-        elif d.action.type == "sequence" and any(x.type == "help" for x in d.action.steps):
-            d.action = A.Sequence(steps=[help_in if x.type == "help" else x for x in d.action.steps])
+        if d.action.type == "help" and d.action.lang is None:       # the list in the language it was asked in
+            d.action = A.Help(lang="es" if T.spanish(text) else "en")
         return d
 
     def _rules_only(self, t: str, rules: Rules) -> tuple[A.Action, str, str] | None:
@@ -264,32 +256,90 @@ class Router:
         return (("phrases" not in self.off and match_phrase(t, rules, trace))
                 or ("patterns" not in self.off and match_patterns(t, rules, trace)) or None)
 
-    async def _two(self, t: str, rules: Rules, trace: list) -> Decision | None:
-        """"play X and go to the middle", "turn it down and put on the news": two commands, when one side is a control
-        command the rules know (so "pride and prejudice" or "tom and jerry" stay one title). The other side goes
-        through every step."""
+    async def _chain(self, text: str, t: str, rules: Rules, trace: list) -> Decision | None:
+        """A chain (chain.py): the sentence cut at its joins and endings, each part after the first a command the
+        rules know; the first part goes through every step. Else, when it sounds like one, the LLM's steps, checked.
+        None: one command, decided as usual."""
         if "phrases" not in self.off and t in rules.phrases:
             return None                         # a fixed phrase (or a taught one) with an "and" in it
-        for m in SPLIT.finditer(t):
-            left, right = t[:m.start()].strip(" ,"), t[m.end():].strip(" ,")
-            if not left or not right or SAME_COMMAND.match(right):
-                continue
-            for known, other in ((right, left), (left, right)):
-                hit = self._rules_only(normalize(known, rules), rules)     # each side gets its own clean-up
-                if not hit or hit[0].type not in CONTROL:
-                    continue
-                part = [{"stage": "split", "parts": [left, right], "known": known, "rule": hit[2]}]
-                said = normalize(other, rules)
-                d = await self._steps(other, said, rules, part)
-                if d.action.type in ("none", "sequence") or d.via == "none" or (
-                        # a bare name ("skip the intro and the recap") isn't a title to play
-                        d.action.type == "play_title" and not T.PLAY_VERBS.match(said)
-                        and d.action.season is None and d.action.episode is None):
-                    continue
-                trace += part
-                steps = [d.action, hit[0]] if other == left else [hit[0], d.action]
-                return Decision(A.Sequence(steps=steps), "split", d.confidence, f"{d.rule} + {hit[2]}", trace)
-        return None
+        raw = chain.clean(text)
+        tried = 0                               # first parts decided (each may ask a model): two at most
+        for parts in chain.cuts(raw):
+            first, ends = chain.endings(parts[0])
+            after, more = [], False
+            for part in [*ends, *parts[1:]]:
+                hit = self._rules_only(normalize(part, rules), rules)
+                if not hit or hit[0].type not in chain.AFTER:
+                    break
+                after.append((part, hit))
+                # a pattern rule reads a part's start: "turn it up and pause" is two commands, one too many
+                more = more or any(self._known(part[m.end():], rules) for m in chain.JOIN.finditer(part))
+            else:
+                if after and tried < 2:
+                    tried += 1
+                    if d := await self._chain_of(first, after, rules, trace, more, joined=len(parts) > 1):
+                        return d
+        whole = self._rules_only(t, rules)
+        if (self.llm is None or "llm" in self.off or not chain.sounds_chained(raw)
+                or whole and not (whole[0].type == "play_title" and chain.has_steps(whole[0].title or ""))):
+            return None
+        return await self._chain_by_llm(text, rules, trace)
+
+    def _known(self, part: str, rules: Rules) -> bool:
+        """Whether a piece of a part is a command the rules know on its own (more than a number: "y cinco")."""
+        if not part or chain.SAME_COMMAND.match(part):
+            return False
+        hit = self._rules_only(normalize(part, rules), rules)
+        return bool(hit and hit[0].type in chain.AFTER)
+
+    async def _chain_of(self, first: str, after: list, rules: Rules, trace: list, more: bool = False,
+                        joined: bool = True) -> Decision | None:
+        """The chain of a first part and the commands after it, if the first is a play some step is sure of. A first
+        part sure to be another command makes commands said together that can't be chained (`joined`: "and", a
+        comma…): the first alone runs. Endings alone ride only on a play."""
+        said = normalize(first, rules)
+        part = [{"stage": "chain", "parts": [first, *[p for p, _ in after]], "rules": [h[2] for _, h in after]}]
+        d = await self._steps(first, said, rules, part)
+        if d.via == "none" or d.action.type == "none" or (
+                # a bare name ("the bear and pause") isn't a title to play
+                d.action.type == "play_title" and not T.PLAY_VERBS.match(said)
+                and d.action.season is None and d.action.episode is None):
+            return None
+        if not joined and d.action.type not in A.CHAIN_PLAY:
+            return None
+        steps = [d.action, *[chain.settled(h[0]) for _, h in after]]
+        problem = "more than three steps" if more else A.chain_problem(steps)
+        trace += part
+        if problem:
+            part[0]["refused"] = problem
+            left = " · ".join(f"“{p}”" for p, _ in after)
+            return Decision(d.action, d.via, d.confidence, d.rule, trace, note=f"Not done: {left} ({problem})")
+        rule = " + ".join([d.rule, *[h[2] for _, h in after]])
+        return Decision(A.Sequence(steps=steps), "chain", d.confidence, rule, trace)
+
+    async def _chain_by_llm(self, text: str, rules: Rules, trace: list) -> Decision | None:
+        """The LLM's steps for a sentence that sounds chained (in place of the LLM step: one step is its usual
+        answer). Checked by chain.read(); a chain that doesn't hold up runs its first step alone, if that does."""
+        context = await self.context(text) if self.context else {}
+        self.llm.last_usage = {}
+        try:
+            answer = await chain.ask(self.llm, text, context)
+        except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError) as e:
+            log.info("LLM unavailable for a chain (%s)", type(e).__name__)
+            trace.append({"stage": "llm", "model": self.llm.model, "chain": True, "reached": False})
+            return None                         # the steps as usual (the LLM step will try again)
+        got = chain.read(answer, text, context.get("candidates", []), rules)
+        trace.append({"stage": "llm", "model": self.llm.model, "chain": True, "steps": list(got.steps),
+                      "action": got.action.type if got.action else "none", "refused": got.problem or None,
+                      "reached": True, "cost": (getattr(self.llm, "last_usage", None) or {}).get("cost")})
+        if got.problem:
+            note = f"Not chained ({got.problem})" + (": only the first step" if got.action else "")
+            if got.action is None:
+                return Decision(A.Unclear(heard=text), "llm", 0.0, "chain", trace, note=note)
+            return Decision(got.action, "llm", 0.9, "chain", trace, note=note)
+        if got.action is None:
+            return Decision(A.Unclear(heard=text), "llm", 0.0, "llm", trace)
+        return Decision(got.action, "chain" if got.action.type == "sequence" else "llm", 0.9, "llm", trace)
 
     async def _steps(self, text: str, t: str, rules: Rules, trace: list) -> Decision:
         unsure = None                           # d1's answer when it wasn't sure enough to act
