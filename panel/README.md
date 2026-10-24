@@ -71,10 +71,13 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
   Twitch favourites, history on/off, TV addresses, and advanced addresses, ports, the Kodi login and pairing the TV
   app again (Save restarts the agent; what's playing carries on); and the panel's own behaviour: close to tray, open hidden in the
   tray, details on hover, notifications, start at login. Panel settings live in `~/.config/tv-agent/panel.conf`.
-  **Updates:** the latest GitHub releases against this computer, the TV app and the phones; install them by
-  themselves, check and tell, or don't check. The TV app's release is installed over ADB by the agent; this computer
-  moves to a newer release tag (git fast-forward of a clean `main`, then `uv sync` and a restart of the agent), never
-  over uncommitted or unpushed work; each phone updates itself.
+  **Updates:** a row per part (the voice agent, the panel, the TV app, TV Agent Player, the phones) with what runs
+  against the latest GitHub release, and a button for what to do now: *Update to X* (this computer's copy is
+  fast-forwarded to the release tag, never over uncommitted or unpushed work; the TV's apps over ADB), *Restart to
+  use X* when the copy on disk is newer than the voice agent or the panel running, or a greyed *Up to date*. Updates
+  install by themselves, are checked and told, or aren't checked; an update of this computer runs `uv sync` and
+  restarts the agent. A test build on the TV newer than the latest release is said so and never replaced by it;
+  each phone updates itself.
   **Phones:** the phones paired with the agent ([TV Agent phone app](https://github.com/boujuan/tv-agent-phone)),
   their app version (and whether a newer one is out), when each was last seen and from where, rename and revoke (at once); **Pair a phone…** shows a QR code and a
   one-time code (5 minutes) with the certificate fingerprint the app shows when the code is typed in.

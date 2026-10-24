@@ -5,6 +5,7 @@ moved up to a newer release tag here, only as a fast-forward of a clean main (ne
 each phone updates itself (the phone app's More › About)."""
 import html
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -53,6 +54,20 @@ def checkout() -> dict:
     return {"tag": tag, "tags": sorted(released), "why": why}
 
 
+def versions_here() -> dict:
+    """The voice agent's and the panel's versions in this copy as it is on disk now: each runs the code it started
+    with, so after an update (or a pull) they say whether a restart is due."""
+    out = {}
+    for key, path, rx in (("server", REPO / "server/pyproject.toml", r'^version = "([^"]+)"'),
+                          ("panel", REPO / "panel/tvpanel/__init__.py", r'^__version__ = "([^"]+)"')):
+        try:
+            m = re.search(rx, path.read_text(), re.M)
+        except OSError:
+            m = None
+        out[key] = m.group(1) if m else None
+    return out
+
+
 def update_checkout(tag: str) -> str:
     """Fast-forward to the release tag, then the voice agent's packages as its uv.lock says."""
     code, out = git("merge", "--ff-only", tag, timeout=60)
@@ -72,6 +87,7 @@ class UpdatesCard(QWidget):
         self.settings, self.panel = settings, panel
         self.state: dict = {}           # the agent's /v1/updates
         self.copy: dict = {}            # checkout()
+        self.here: dict = {}            # versions_here()
         self.updated_to = None          # a tag this panel moved to (it runs the old code until restarted)
         self.checked = 0.0              # when this card last asked (showing the tab again within a minute doesn't)
         self.phones: list = []          # the paired phones (/v1/clients), for their app versions
@@ -97,20 +113,23 @@ class UpdatesCard(QWidget):
                              "here is unsaved or unpushed. Phones have their own switch (More › About in the app).")
         f.addRow("Updates", self.mode)
         self.rows = {}
-        for key, label, button, fn in (("computer", "This computer", "Update this computer", self.update_computer),
-                                       ("tv", "TV app", "Update the TV app", lambda: self.update_app("tv")),
-                                       ("tvplayer", "TV Agent Player", "Update the player",
-                                        lambda: self.update_app("tvplayer")),
-                                       ("phone", "Phone app", None, None)):
+        # Each part's button is always there: what it would do now ("Update to 0.8.0", "Restart to use 0.8.0"), or
+        # greyed out when there's nothing to do
+        for key, label, fn in (("server", "Voice agent", lambda: self.act("server")),
+                               ("panel", "Panel", lambda: self.act("panel")),
+                               ("tv", "TV app", lambda: self.update_app("tv")),
+                               ("tvplayer", "TV Agent Player", lambda: self.update_app("tvplayer")),
+                               ("phone", "Phone app", None)):
             line = QHBoxLayout()
             text = QLabel("…")
             text.setWordWrap(True)
             line.addWidget(text, 1)
             b = None
-            if button:
-                b = QPushButton(button)
+            if fn:
+                b = QPushButton("Up to date")
+                b.setEnabled(False)
+                b.setMinimumWidth(170)
                 b.clicked.connect(fn)
-                b.setVisible(False)
                 line.addWidget(b)
             self.rows[key] = (text, b)
             f.addRow(label, line)
@@ -140,11 +159,11 @@ class UpdatesCard(QWidget):
                 state["phones"] = api("/v1/clients", timeout=10).get("devices") or []
             except Exception:
                 state["phones"] = []
-            return state, checkout()
+            return state, checkout(), versions_here()
 
         def done(res, err):
             self.check_button.setEnabled(True)
-            self.state, self.copy = res if res else ({"error": str(err)}, {"error": str(err)})
+            self.state, self.copy, self.here = res if res else ({"error": str(err)}, {"error": str(err)}, {})
             self.phones = self.state.pop("phones", []) or []
             self.show_state()
             if self.mode.currentData() == "auto" and self.copy.get("tag") and not self.copy.get("why") \
@@ -172,29 +191,39 @@ class UpdatesCard(QWidget):
 
     def show_state(self):
         comps, err = self.state.get("components") or {}, self.state.get("error")
-        text, b = self.rows["computer"]
-        server, panel = comps.get("server") or {}, comps.get("panel") or {}
-        here = f"voice agent {server.get('current') or '?'}, panel {__version__}"
-        if self.updated_to:
-            text.setText(f"<span style='color:{GREEN}'>✔</span> {here} · moved to {self.updated_to}: restart the panel "
-                         "to use it")
-            b.setText("Restart the panel")
-            b.setVisible(True)
-        elif self.copy.get("error"):
-            text.setText(f"{here} · <span style='color:gray'>{html.escape(self.copy['error'])}</span>")
-            b.setVisible(False)
-        elif self.copy.get("tag"):
-            why = self.copy.get("why")
-            text.setText(f"<span style='color:{AMBER}'>⬆</span> {here} · <b>{self.copy['tag']}</b> is out"
-                         + (f" <span style='color:gray'>(can't update from here: {html.escape(why)})</span>" if why else ""))
-            b.setText("Update this computer")
-            b.setVisible(not why)
-        else:
-            latest = ", ".join(f"{n} {c['latest']}" for n, c in (("voice agent", server), ("panel", panel))
-                               if c.get("latest"))
-            text.setText(f"<span style='color:{GREEN}'>✔</span> {here} · has every release"
-                         + (f" <span style='color:gray'>(latest: {latest})</span>" if latest else ""))
-            b.setVisible(False)
+        why = self.copy.get("why")
+        for key in ("server", "panel"):             # this computer's two parts, from the one copy of the repo
+            text, b = self.rows[key]
+            # this part's newest release not in this copy yet (the update moves the copy to the newest of any)
+            mine = [t for t in self.copy.get("tags") or [] if t.startswith(f"{key}-v")]
+            tag = max(mine, key=lambda t: [int(n) for n in re.findall(r"\d+", t)]) if mine else None
+            c = comps.get(key) or {}
+            running = (c.get("current") if key == "server" else __version__) or "?"
+            on_disk, latest = self.here.get(key), c.get("latest")
+            name = "voice agent" if key == "server" else "panel"
+            if key == "server" and err:
+                line = f"<span style='color:gray'>not running ({html.escape(err)})</span>"
+            elif tag:
+                line = (f"<span style='color:{AMBER}'>⬆</span> {running} running · <b>{tag}</b> is out"
+                        + (f" <span style='color:gray'>(can't update from here: {html.escape(why)})</span>"
+                           if why else ""))
+            elif on_disk and running != on_disk:
+                line = (f"<span style='color:{AMBER}'>↻</span> {running} running · this computer has {on_disk}: "
+                        f"restart the {name} to use it")
+            else:
+                line = (f"<span style='color:{GREEN}'>✔</span> {running}"
+                        + (", the latest" if latest == running else f" <span style='color:gray'>(latest release: "
+                           f"{latest})</span>" if latest else ""))
+            if key == "server" and self.copy.get("error"):
+                line += f" <span style='color:gray'>· {html.escape(self.copy['error'])}</span>"
+            text.setText(line)
+            if tag and not why:
+                b.setText(f"Update to {tag.split('-v', 1)[1]}")
+            elif on_disk and running not in (on_disk, "?") and not (key == "server" and err):
+                b.setText(f"Restart to use {on_disk}")
+            else:
+                b.setText("Not running" if key == "server" and err else "Can't update here" if tag else "Up to date")
+            b.setEnabled(b.text().startswith(("Update to", "Restart")))
         for key in ("tv", "tvplayer"):             # the apps the agent installs on the TV
             text, b = self.rows[key]
             c = comps.get(key) or {}
@@ -214,9 +243,16 @@ class UpdatesCard(QWidget):
                 text.setText(f"{c['current']} on the TV <span style='color:gray'>· no release on GitHub yet</span>")
             else:
                 text.setText("<span style='color:gray'>not checked yet</span>")
-            if c.get("newer") and c.get("installed") is not False:
-                b.setText("Update the player" if key == "tvplayer" else "Update the TV app")
-            b.setVisible(bool(c.get("newer")) and not self.state.get("installing"))
+            if c.get("ahead"):
+                text.setText(f"{c.get('current')} on the TV <span style='color:gray'>· a test build, newer than the "
+                             f"latest release ({c.get('latest')})</span>")
+            if key == "tvplayer" and c.get("installed") is False and c.get("latest"):
+                b.setText(f"Install {c['latest']}")
+            elif c.get("newer") and c.get("installed") is not False:
+                b.setText(f"Update to {c['latest']}")
+            else:
+                b.setText("Installing…" if self.state.get("installing") else "Up to date")
+            b.setEnabled(b.text().startswith(("Update to", "Install ")) and not self.state.get("installing"))
         text, _ = self.rows["phone"]
         latest = (comps.get("phone") or {}).get("latest")
         known = [d for d in self.phones if d.get("app_version")]
@@ -258,12 +294,27 @@ class UpdatesCard(QWidget):
             self.check(force=True)
         self.panel.bg.run(lambda: api(f"/v1/updates/{key}", {}, timeout=180), done)
 
+    def act(self, key: str):
+        """The voice agent's or the panel's button: update this computer to the newer release, or restart that part
+        to use the code it has."""
+        if self.copy.get("tag") and not self.copy.get("why"):
+            self.update_computer()
+        elif key == "panel":
+            self.restart_panel()
+        elif QMessageBox.question(self, "TV Agent", f"Restart the voice agent to use {self.here.get('server')}? "
+                                  "Whatever plays goes on; a command being decided right now is lost."
+                                  ) == QMessageBox.StandardButton.Yes:
+            self.panel.overview.cards["tv-agent"].act("restart")
+            self.status.setText("Restarting the voice agent…")
+            QTimer.singleShot(6000, lambda: self.check(force=True))
+
+    def restart_panel(self):
+        if self.panel.settings.dirty or self.panel.decisions.dirty:
+            QMessageBox.information(self, "TV Agent", "Save or revert your unsaved changes first.")
+            return
+        os.execv(sys.executable, [sys.executable, *sys.argv])
+
     def update_computer(self, ask: bool = True):
-        if self.updated_to:                         # the button now restarts the panel
-            if self.panel.settings.dirty or self.panel.decisions.dirty:
-                QMessageBox.information(self, "TV Agent", "Save or revert your unsaved changes first.")
-                return
-            os.execv(sys.executable, [sys.executable, *sys.argv])
         tag = self.copy.get("tag")
         if not tag or self.copy.get("why"):
             return
@@ -277,6 +328,7 @@ class UpdatesCard(QWidget):
                 self.status.setText(f"<span style='color:{AMBER}'>Not updated: {html.escape(str(err))}</span>")
                 return
             self.updated_to = res
+            self.here = versions_here()
             agent = self.panel.overview.cards["tv-agent"]
             if agent.active:
                 agent.act("restart")

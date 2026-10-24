@@ -40,9 +40,14 @@ TAG = re.compile(r"^(?P<prefix>.*?v)(?P<version>\d+(?:\.\d+){1,3})$")
 
 
 def version(text: str | None) -> tuple[int, ...] | None:
-    """"0.8.0" → (0, 8, 0); anything else (a "-dev" suffix, None) → None."""
-    m = re.fullmatch(r"v?(\d+(?:\.\d+){1,3})", (text or "").strip())
-    return tuple(int(p) for p in m.group(1).split(".")) if m else None
+    """"0.8.0" → (0, 8, 0, 0, 1), comparable: four numbers ("1.2" is "1.2.0.0"), then 1 for a release and 0 for a
+    test build ("0.9.0-dev", "0.2.0-test"), which comes just before its release: never replaced by an older one.
+    None for anything else."""
+    m = re.fullmatch(r"v?(\d+(?:\.\d+){1,3})(-[\w.]+)?", (text or "").strip())
+    if not m:
+        return None
+    numbers = [int(p) for p in m.group(1).split(".")]
+    return (*numbers, *[0] * (4 - len(numbers)), 0 if m.group(2) else 1)
 
 
 def newer(latest: str | None, current: str | None) -> bool:
@@ -131,8 +136,9 @@ class Updates:
             f = self.found.get(key) or {}
             out = {"latest": f.get("version"), "url": f.get("url"), "published": f.get("published"),
                    "notes": f.get("notes")}
-            if with_current:
-                out |= {"current": current, "newer": newer(f.get("version"), current)}
+            if with_current:                # "ahead": a test build newer than the latest release
+                out |= {"current": current, "newer": newer(f.get("version"), current),
+                        "ahead": current is not None and newer(current, f.get("version"))}
             if "apk" in f:
                 out |= {"apk": f["apk"], "sha256": f.get("sha256"), "size": f.get("size")}
             return out

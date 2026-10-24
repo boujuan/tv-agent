@@ -33,8 +33,9 @@ PHONE = [release("v0.1.0", [("tv-agent-phone-0.1.0.apk", "sha256:33")])]
 
 
 def test_versions_compare_as_numbers_and_never_downgrade():
-    assert U.version("0.10.0") > U.version("0.9.1") and U.version("v1.2") == (1, 2)
-    assert U.version("0.3.0-dev") is None and U.version(None) is None
+    assert U.version("0.10.0") > U.version("0.9.1") and U.version("v1.2") == U.version("1.2.0")
+    assert U.version("0.2.9") < U.version("0.3.0-dev") < U.version("0.3.0") and U.version(None) is None
+    assert U.newer("0.9.0", "0.9.0-dev") and not U.newer("0.1.1", "0.2.0-test")     # a test build: never downgraded
     assert U.newer("0.10.0", "0.9.0") and not U.newer("0.8.0", "0.9.0") and not U.newer("0.9.0", "0.9.0")
     assert U.newer("0.9.0", None) and not U.newer(None, "0.1.0")
 
@@ -84,7 +85,8 @@ def test_a_check_finds_whats_newer_than_what_runs(tmp_path, monkeypatch):
     assert s["error"] is None and s["mode"] == "notify" and s["checked"]
     assert s["components"]["server"] == {"latest": "0.3.0", "url": "https://github.com/x/server-v0.3.0",
                                          "published": "2026-10-23T10:00:00Z", "notes": "notes for server-v0.3.0",
-                                         "current": __version__, "newer": U.newer("0.3.0", __version__)}
+                                         "current": __version__, "newer": U.newer("0.3.0", __version__),
+                                         "ahead": U.newer(__version__, "0.3.0")}     # this copy is past 0.3.0
     assert s["components"]["tv"]["current"] == "0.8.0" and s["components"]["tv"]["newer"]
     assert s["components"]["phone"]["latest"] == "0.1.0" and "current" not in s["components"]["phone"]
 

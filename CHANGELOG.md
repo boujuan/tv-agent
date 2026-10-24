@@ -4,6 +4,22 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
+## server 0.8.1 — 2026-10-24
+
+### Fixed
+- A test build on the TV ("0.2.0-test", "0.9.0-dev") is compared as the version it is, just before its release:
+  TV Agent Player's 0.2.0-test had been offered 0.1.1 as an update (and `updates = "auto"` could have tried it).
+  `GET /v1/updates` says `ahead` for an app newer than its latest release.
+
+## panel 0.8.0 — 2026-10-24
+
+### Changed
+- Settings › Updates has a row and a button for each part: the voice agent, the panel, the TV app and TV Agent
+  Player. The button says what it would do now: *Update to X* when a release is out, *Restart to use X* when this
+  computer has newer code than the voice agent or the panel running (after an update, or a pull), else a greyed
+  *Up to date*. "This computer" is split into the voice agent's and the panel's rows; a test build on the TV newer
+  than the latest release is said so. Needs server 0.8.1 for that.
+
 ## server 0.8.0 — 2026-10-24
 
 ### Added
