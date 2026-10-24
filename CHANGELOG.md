@@ -4,6 +4,14 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
+## android 0.9.1 — 2026-10-24
+
+### Fixed
+- Pressing the mic button again while the pill listened did nothing. About half a second after the first press the
+  TV opens the remote's own mic for the pill (Google's remote service), and while it's open this remote (RC833)
+  ignores its mic button: no key, nothing else the TV or an app can see. OK now stops listening and sends at once;
+  the mic button still does the same in the rare case the remote's mic didn't open, and Back still cancels.
+
 ## server 0.8.1 — 2026-10-24
 
 ### Fixed

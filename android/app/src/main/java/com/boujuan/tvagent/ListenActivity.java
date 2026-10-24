@@ -44,8 +44,8 @@ import java.util.Arrays;
  * recording for voice recognition (Phase 0). The audio streams to tv-agent on the laptop while you speak; it shows
  * what it has understood, decides during your pause and says when to stop. Then the pill shows what it will do and
  * closes. Nothing keeps running afterwards. Without the stream (an older agent, a broken connection) it records until
- * you stop talking and sends it all at once, as before. The mic button again stops listening and sends at once; Back
- * while listening cancels, and nothing is done.
+ * you stop talking and sends it all at once, as before. OK stops listening and sends at once; Back while listening
+ * cancels, and nothing is done.
  */
 public class ListenActivity extends Activity {
     private static final int RATE = 16000;
@@ -93,7 +93,9 @@ public class ListenActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        sendNow = true;     // mic pressed again: stop listening and send what we have
+        // Mic pressed again: stop listening and send what we have. Rarely reached: while the remote's own mic is
+        // open (the TV opens it about 0.5 s after the press) the remote ignores its mic button, so OK does this.
+        sendNow = true;
     }
 
     @Override
@@ -102,7 +104,16 @@ public class ListenActivity extends Activity {
             event.startTracking();
             return true;
         }
+        if (isOk(keyCode)) {
+            sendNow = true;     // after listening, nothing to stop
+            return true;
+        }
         return super.onKeyDown(keyCode, event);
+    }
+
+    private static boolean isOk(int keyCode) {
+        return keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER
+                || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER;
     }
 
     // Handled when Back is let go, not pressed: closed on the press, the release went on to the app underneath,
@@ -123,6 +134,7 @@ public class ListenActivity extends Activity {
             }
             return true;
         }
+        if (isOk(keyCode)) return true;
         return super.onKeyUp(keyCode, event);
     }
 
