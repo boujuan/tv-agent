@@ -4,7 +4,7 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
-## server — unreleased
+## server 0.10.0 — 2026-10-24
 
 ### Added
 - A language the file playing lacks ("ponlo en español", "switch to English audio", "Chinese subtitles" when
@@ -77,7 +77,7 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   film faintly behind it), nothing is sent to speech to text, so a line of dialogue can't become a command (“Ya no
   me oigo”, heard in that near-silence, turned the volume up).
 
-## panel — unreleased
+## panel 0.9.0 — 2026-10-24
 
 ### Added
 - Decisions › Explain: a chain's parts, which rules knew the steps after the play, and why one wasn't chained; the
