@@ -52,7 +52,7 @@ stt_vocabulary = ["Stremio", "TizenTube", "YouTube", "YouTube Music", "Kodi", "T
 # stt_vocabularies = {es = ["Movistar Plus", "RTVE Play"], en = ["Peacock"]}
 stt_vocabulary_library = true   # plus your library's titles and Twitch favourites
 binge = true               # when an episode ends, the next one starts ("binge mode on / off")
-auto_skip = false          # skip intros and recaps by themselves when their timestamps are sure ("auto skip on")
+auto_skip = false          # skip intros and recaps by themselves when they're sure ("auto skip on")
 
 # How a command is decided (the panel's Decisions tab changes these live): the steps, in order, and the ones off
 decide_steps = ["phrases", "patterns", "llm", "d1"]

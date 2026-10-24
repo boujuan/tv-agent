@@ -15,6 +15,7 @@ import asyncio
 import bisect
 import logging
 import resource
+import struct
 import time
 from collections import OrderedDict
 
@@ -40,6 +41,7 @@ INFO, TIMESCALE, TRACKS, ENTRY, NUMBER, TYPE = 0x1549A966, 0x2AD7B1, 0x1654AE6B,
 VIDEO, COLOUR, TRANSFER, MAPPING, ADD_TYPE, ADD_DATA = 0xE0, 0x55B0, 0x55BA, 0x41E4, 0x41E7, 0x41ED
 CUES_ID, CUE_POINT, CUE_TIME, CUE_POS, CUE_TRACK, CUE_CLUSTER, CUE_REL = 0x1C53BB6B, 0xBB, 0xB3, 0xB7, 0xF7, 0xF1, 0xF0
 CLUSTER, TIMESTAMP, SIMPLE, GROUP, BLOCK_ID = 0x1F43B675, 0xE7, 0xA3, 0xA0, 0xA1
+DURATION, CHAPTERS = 0x4489, 0x1043A770
 DOVI = (0x64766343, 0x64767643)         # BlockAddIDType 'dvcC' / 'dvvC': a Dolby Vision configuration record
 LANGUAGE, LANGUAGE_BCP47, AUDIO_TRACK, TEXT_TRACK = 0x22B59C, 0x22B59D, 2, 17
 UNKNOWN = b"\x01\xff\xff\xff\xff\xff\xff\xff"
@@ -116,6 +118,10 @@ class Mkv:
         self.segment = 0                       # where the Segment's data starts (cue positions count from there)
         self.times: list[int] = []             # cue times, in ms
         self.places: list[tuple[int, int | None, int]] = []     # (cluster position, the block's place in it, time)
+        self.duration_ms = 0
+        self.ebml = b""                        # the EBML header
+        self.elements: dict[int, bytes] = {}   # Info, Tracks and Chapters as read (intros.py reads the last two)
+        self.seeks: dict[int, int] = {}        # the seek table: where each top-level element is
 
     @classmethod
     async def read(cls, fetch) -> "Mkv":
@@ -139,7 +145,7 @@ class Mkv:
                 eid, a, z = element(head, i)
                 if eid == CLUSTER or z < 0 or z > len(head):
                     break
-                if eid in (INFO, TRACKS):
+                if eid in (INFO, TRACKS, CHAPTERS):
                     found[eid] = head[i:z]
                 elif eid == SEEKHEAD:
                     seeks |= m._seeks(head, a, z)
@@ -158,6 +164,7 @@ class Mkv:
         except (Short, ValueError):
             raise ThumbError("a Matroska header I can't read") from None
         m.prefix = head[:ebml_end + 4] + UNKNOWN + found.get(INFO, b"") + m.prefix
+        m.ebml, m.elements, m.seeks = head[:ebml_end], {k: v for k, v in found.items() if k != CUES_ID}, seeks
         if not m.times:
             raise ThumbError("no seek index in the file")
         return m
@@ -189,9 +196,13 @@ class Mkv:
     def _info(self, info: bytes):
         if info:
             _, a, z = element(info, 0)
+            duration = 0.0
             for eid, x, y, _ in children(info, a, z):
                 if eid == TIMESCALE:
                     self.scale = uint(info[x:y]) or self.scale
+                elif eid == DURATION and y - x in (4, 8):
+                    duration = struct.unpack(">f" if y - x == 4 else ">d", info[x:y])[0]
+            self.duration_ms = int(duration * self.scale / 1e6)
 
     def _tracks(self, tracks: bytes):
         _, a, z = element(tracks, 0)

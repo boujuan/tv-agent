@@ -21,7 +21,7 @@ playback and progress sync. Also the `tv-agent` command line and the MCP server.
 | Subtitles, audio | "subtitles on", "subtitles off", "subtitles" (switches them over), "Spanish subtitles", "original audio", "audio in English", "ponlo en español" | The file's own track, else your subtitle addons for that release; a language the file lacks: the best other copy that has it, from the same moment (the TV says it's looking). Kept for the title's next episodes |
 | Language settings | "from now on, audio in Spanish", "a partir de ahora sin subtítulos", "always English subtitles", "subtítulos solo cuando no sea en español" | Your `audio_language`, `subtitles` and `subtitle_languages`, as the panel and the phone change them; what's playing follows |
 | Missed a line | "what did they say?", "say that again" | Back 10 s, subtitles on for a moment |
-| Intro, recap, credits | "skip the intro", "skip the recap", "skip the credits"; "auto skip on" / "off" | Jumps to the end of the part you're in, from TheIntroDB / IntroDB timestamps (or a chapter named "Opening"); an intro without either: 90 s ahead; credits: the next episode in binge mode. Auto skip (off by default, `auto_skip`) skips intros and recaps by themselves when their timestamps are sure |
+| Intro, recap, credits | "skip the intro", "skip the recap", "skip the credits"; "auto skip on" / "off" | Jumps to the end of the part you're in, found in the file itself (its chapters, other copies', the season's sound; below), else from TheIntroDB / IntroDB; before a sure intro: "The intro starts at 6:23: skipping it then"; an intro with no times at all: 90 s ahead; credits: the next episode in binge mode. Auto skip (off by default, `auto_skip`) skips sure intros and recaps by themselves. TV Agent Player shows a Skip intro button and, at the credits, a Next episode card (OK to accept; counting down with binge on) |
 | Lists | "what was I watching?", "what's new?", "new films", then "number 2" / "the second one" | A numbered list on the TV (posters); the remote's OK or number keys pick too |
 | A moment | "go to the part where they kiss", "ve a la parte en la que le disparan", "jump to when Paul rides the worm" | Found in the subtitles of what's playing, in the language you asked in; the line it was found by shows on the TV, then the player jumps there. Not sure where: the places to pick from. In the episode before or after: offered ("yes" goes there). [Finding an episode or a scene](#finding-an-episode-or-a-scene) |
 | An episode described | "the Simpsons episode where Mr. Burns gets shot", "el capítulo de Breaking Bad de la mosca", "the Community Halloween episode" | Found by its plot (Wikipedia's and TVmaze's summaries, kept a week) and checked in its subtitles; when more than one fits, or none, up to 3 are listed to pick from: never a guess played |
@@ -47,10 +47,18 @@ comes first; the best few copies that say nothing get their tracks read from the
 read each, at once). With `probe_streams` off only what the addons say counts. No copy with it: what's playing goes
 on, and the TV says so.
 
-Skipping asks TheIntroDB and IntroDB with the episode's IMDb id and the file's length, and only jumps when the part
-you asked about contains where you are: timestamps made on another cut of the episode can't send you somewhere
-wrong. Skipping by itself needs timestamps made on a file within 2 s of yours' length, from 3 or more people (or
-both databases agreeing). Rules and coverage: [research §2.6](../docs/research-2026-10-22.md).
+Intros, recaps and credits are found in the files themselves (`intros.py`): the services' own markers are named
+chapters in most web releases ("Intro", "Opening Credit", "Recap", "End Credits"), read from the file's header when
+it starts; other copies' headers ~20 s later, one per release group, and a marker is sure when two groups agree (one
+group's can be a minute off: FLUX's Pluribus); another cut's chapters are moved onto your file by matching a few
+seconds of their sound; and with no chapters anywhere, the season's intro is learned from the sound of two or three
+episodes' starts, as Plex and Jellyfin do (credits by sound find only the studios' logos at the end). In the
+background, at most 80 Mbit/s, pausing while TV Agent Player's buffer is low, the next episode's while this one
+plays; kept per file and per season in `~/.local/share/tv-agent/intros/`. Measured accuracy and cost:
+[docs/intros-2026-10-24.md](../docs/intros-2026-10-24.md). What a file lacks comes from TheIntroDB and IntroDB (the
+episode's IMDb id and the file's length), which only jump when the part you asked about contains where you are, and
+skip by themselves only with timestamps made on a file within 2 s of yours' length, from 3 or more people (or both
+databases agreeing). Rules and coverage: [research §2.6](../docs/research-2026-10-22.md).
 
 In Spanish too, with the multilingual speech model (`tv-agent setup stt parakeet-v3`): "pausa", "siguiente
 capítulo", "pon la casa de papel temporada dos capítulo tres", "sube el volumen", "¿qué hay de nuevo?", "salta la
@@ -619,6 +627,7 @@ rm -rf ~/.config/tv-agent ~/.local/share/tv-agent ~/.local/opt/llama.cpp ~/.loca
 | `src/tv_agent/decide/chain.py`, `chain.py` | Chains: reading one (rules, the LLM's checked proposal), running one (plan, proof of each step, stop, cancel) |
 | `src/tv_agent/tracing.py` | Each command's whole trace: its steps, timed and labelled, and its big parts |
 | `src/tv_agent/finding.py` | Finding an episode or a scene from a description: plots (TVmaze, Wikipedia), subtitles kept, ranking, the LLM's answers compared |
+| `src/tv_agent/intros.py`, `skips.py` | Intros, recaps and credits: files' chapters and release groups' votes, sound fingerprints, the season's intro, kept; the timestamp databases |
 | `src/tv_agent/tv/` | `adb.py` (the only shell path), `apps.py`, `media.py`, `kodi.py`, `justplayer.py` |
 | `src/tv_agent/stremio/` | `account.py` (API, link login), `cinemeta.py`, `streams.py`, `subtitles.py`, `library.py`, `progress.py` |
 | `src/tv_agent/languages.py` | Audio/subtitle rule and track matching |

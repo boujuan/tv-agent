@@ -18,7 +18,7 @@ import httpx
 from rapidfuzz import fuzz
 
 from . import __version__, activity, languages, skips, twitch, youtube
-from . import chain, episode_check, finding, subsync, tracing
+from . import chain, episode_check, finding, intros, subsync, tracing
 from .actions import (Action, AutoSkip, Binge, Cancel, ContinueWatching, FindScene, Help, Home, Info, LibraryEdit,
                       NextEpisode, OpenApp,
                       OpenInStremio, Pick, PlayTitle, Recommend, Replay, Sequence, ShowList, Skip, Timer, Tracks,
@@ -62,10 +62,13 @@ PICTURE_EVERY = 15
 DECODER_FAILED = re.compile(r"dequeue(Output|Input)Buffer failed|Reset: flush failed")
 DUCK = 0.4                  # TV Agent Player's own volume while the pill listens
 SKIPS_WHERE = "Skipping works in TV Agent Player and Kodi, for what the agent started"
-# "Skip the intro" with no times known for it (no TheIntroDB/IntroDB entry, no chapter): about an opening's length
-# ahead, instead of nothing (3 of the 190 voice tests, 2026-10-24)
+# "Skip the intro" with no times known for it (none found in the file, no TheIntroDB/IntroDB entry): about an
+# opening's length ahead, instead of nothing (3 of the 190 voice tests, 2026-10-24)
 INTRO_GUESS_MS = 90_000
 PRELOAD_BEFORE = 150_000    # the next episode opens in the background this long before the end (binge)
+PRELOAD_CREDITS = 30_000    # or this long before its credits start, if that's earlier (the Next episode card)
+MARKERS_AFTER = 20.0        # s after a start before another copy or the sound is read for its markers (intros.py)
+NEXT_COUNTDOWN_MS = 10_000  # the Next episode card's countdown with binge on
 LIST_SIZE = 6                # rows that fit the TV app's list
 PLOTS_AHEAD = 8             # the shows of Continue Watching whose episode plots are kept ahead (finding.py)
 STARTS = {"play_title", "continue_watching", "next_episode", "pick"}     # actions that start playback
@@ -335,6 +338,11 @@ class Agent:
         self._link_jobs: dict[str, asyncio.Task] = {}
         self._segments: dict[tuple[str, int], list[skips.Segment]] = {}
         self._skip_task: asyncio.Task | None = None
+        self._skip_also: str | None = None       # the part a skip watch skips because it was asked for
+        # Intros, recaps and credits found in the files (their chapters, other copies', the season's sound)
+        self.intros = intros.Finder(self.http, pause=self._line_free)
+        self._markers_task: asyncio.Task | None = None
+        self._next_markers: asyncio.Task | None = None
         self._starting = asyncio.Lock()          # one start at a time replaces the previous session
         self._user_stopped = False               # a stop that was asked for isn't the end of an episode
         self._again: tuple[NowPlaying, float, object] | None = None    # the last Kodi start: (session, when, redo)
@@ -392,7 +400,13 @@ class Agent:
             return
         if msg.get("item") != self.tvplayer.item:
             return
-        if t == "closed":
+        if t == "next_episode":             # the Next episode card at the credits: OK, or its countdown (binge)
+            log.info("next episode from the credits card (%s)", msg.get("how"))
+            asyncio.create_task(self._next_episode(NextEpisode(offset=1)))
+        elif t == "skipped":
+            log.info("TV Agent Player skipped the %s of %s: %s to %s (%s)", msg.get("kind"), np.video_id,
+                     _clock(int(msg.get("from") or 0)), _clock(int(msg.get("to") or 0)), msg.get("how"))
+        elif t == "closed":
             np.stopped_at, np.stopped_mono = int(msg.get("pos") or 0), time.monotonic()
         elif t == "error" and msg.get("fatal"):
             log.warning("TV Agent Player: %s%s playing %s", msg.get("code"), f" (HTTP {msg['http']})" if msg.get("http")
@@ -1102,7 +1116,9 @@ class Agent:
                     await self.tvplayer.open(link, resume_ms, item=video, title=label,
                                              headers=chosen.headers or None, audio=plan.audio,
                                              subs=plan.subs_for(plan.audio),
-                                             info=_title_screen(name, meta, video) | _stream_screen(chosen))
+                                             info=_title_screen(name, meta, video) | _stream_screen(chosen),
+                                             markers=self._marker_list(
+                                                 self.intros.known(imdb, chosen.filename, chosen.size) or []))
                 except tvplayer.PlayerError:
                     if self.tvplayer.up:
                         raise
@@ -1123,6 +1139,9 @@ class Agent:
                         self.state.now_playing, chosen, None, (imdb, kind, name, video, label, meta), link))
                 self._tracks_task = asyncio.create_task(self._player_subs(plan, addon_subs, label,
                                                                           self.state.now_playing, link))
+                if kind == "series":
+                    self._markers_task = asyncio.create_task(self._find_markers(self.state.now_playing, chosen, link,
+                                                                                meta))
                 if kind == "series" and self.cfg.auto_skip:
                     self._start_skip_watch(self.state.now_playing)
                 self._started(imdb, name, kind, video, meta)
@@ -1211,6 +1230,9 @@ class Agent:
                     (lambda: self.play(imdb, kind, name, video, label, meta, resume_ms, prepared=chosen))
                 self._again = (self.state.now_playing, time.monotonic(), again)     # a retry isn't retried
                 self._tracks_task = asyncio.create_task(self._set_tracks(meta, label, addon_subs))
+                if kind == "series":
+                    self._markers_task = asyncio.create_task(self._find_markers(self.state.now_playing, chosen, link,
+                                                                                meta))
                 if kind == "series" and self.cfg.auto_skip:
                     self._start_skip_watch(self.state.now_playing)
                 self._started(imdb, name, kind, video, meta)
@@ -1268,7 +1290,7 @@ class Agent:
         self._stop_following()
         self._user_stopped, self._after_this = False, None
         for task in (self._prefetch, self._tracks_task, self._skip_task, self._picture_task, self._verify_task,
-                     self._preload_task):
+                     self._preload_task, self._markers_task, self._next_markers):
             if task and not task.done() and task is not asyncio.current_task():
                 task.cancel()
         return resume_ms
@@ -1622,6 +1644,9 @@ class Agent:
             if chosen:
                 log.info("next up: %s (%s)", self._next_up[1], chosen.filename or chosen.name)
                 np = self.state.now_playing
+                if np and np.video_id == video:
+                    await self._send_markers(np)          # the Next episode card can name it now
+                    self._next_markers = asyncio.create_task(self._markers_ahead(imdb, name, nxt["id"], chosen, meta))
                 if np and np.player == "tvplayer" and np.video_id == video and self.cfg.binge:
                     self._preload_task = asyncio.create_task(self._preload_next(np, nxt["id"], chosen, meta))
         except asyncio.CancelledError:
@@ -1638,13 +1663,19 @@ class Agent:
                 now = self.tvplayer.now()
                 if self.state.now_playing is not np or now is None:
                     return
-                if now[1] and now[0] >= now[1] - PRELOAD_BEFORE:
+                credits = next((x.start_ms for x in self.intros.known(np.imdb_id, np.filename, np.size) or []
+                                if x.kind == "credits"), None)
+                at = now[1] - PRELOAD_BEFORE if credits is None else min(now[1] - PRELOAD_BEFORE,
+                                                                        credits - PRELOAD_CREDITS)
+                if now[1] and now[0] >= at:
                     break
             link = await self.link(s) or s.url
             plan = self.track_plan(meta)
             await self.tvplayer.preload(link, item=video, headers=s.headers or None, audio=plan.audio,
                                         subs=plan.subs_for(plan.audio),
-                                        info=_title_screen(np.name, meta, video) | _stream_screen(s))
+                                        info=_title_screen(np.name, meta, video) | _stream_screen(s),
+                                        markers=self._marker_list(self.intros.known(np.imdb_id, s.filename, s.size)
+                                                                  or []))
             self._preloaded = (video, s.url, link)
             log.info("next episode %s preloaded in the player", video)
         except asyncio.CancelledError:
@@ -1972,6 +2003,8 @@ class Agent:
         set_value(self.cfg, "binge", a.on)
         if a.on:
             self._after_this = None
+        if np := self.state.now_playing:
+            await self._send_markers(np)          # the Next episode card counts down with binge on
         return Outcome(True, "Binge mode on: the next episode starts by itself" if a.on else "Binge mode off")
 
     async def _timer(self, a: Timer) -> Outcome:
@@ -2928,17 +2961,114 @@ class Agent:
             if it.at_ms and (m := re.match(r"^tt\d+:(\d+):(\d+)$", video)) else it.label
         return await self.play(it.imdb, it.kind, it.name, video, label, meta, resume)
 
-    # ---- skipping intros, recaps and credits (skips.py) ----
+    # ---- skipping intros, recaps and credits (intros.py, skips.py) ----
+
+    async def _find_markers(self, np: NowPlaying, s: streams.Stream, link: str, meta: dict):
+        """The intro, recap and credits of the file playing (intros.py): what its chapters name at once (one read of
+        its header), the rest from another copy's chapters or the season's sound once the TV has buffered. Each
+        find goes to TV Agent Player (its Skip intro button and Next episode card) and to auto skip."""
+        try:
+            f = self.intros.copy(s.filename, s.size, link, s.headers)
+            await self.intros.chapters_of(np.imdb_id, np.name, f)
+            await self._send_markers(np)
+            if self.intros.store.file(np.imdb_id, s.filename, s.size) is not None:
+                return                                  # looked for before
+            await asyncio.sleep(MARKERS_AFTER)
+            if self.state.now_playing is not np:
+                return
+            await self.intros.find(np.imdb_id, np.video_id, np.name, f, self._copies(meta),
+                                   self._season_neighbours(meta, np.video_id), self.track_plan(meta).audio)
+            await self._send_markers(np)
+            if self.cfg.auto_skip and self.state.now_playing is np and not (
+                    np.player == "tvplayer" and self.tvplayer.has_markers):
+                self._start_skip_watch(np, also=self._skip_also)     # with what was found
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.info("intros of %s: %s", np.video_id, type(e).__name__)
+
+    async def _markers_ahead(self, imdb: str, name: str, video: str, s: streams.Stream, meta: dict):
+        """The next episode's markers, looked for while this one plays (after this one's: one search at a time), so
+        its Skip intro and auto skip work from its first second and binge's preload carries them."""
+        try:
+            if self.intros.store.file(imdb, s.filename, s.size) is not None:
+                return
+            if not (link := await self.link(s)):
+                return
+            await self.intros.find(imdb, video, name, self.intros.copy(s.filename, s.size, link, s.headers),
+                                   self._copies(meta), self._season_neighbours(meta, video),
+                                   self.track_plan(meta).audio)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.info("intros of %s ahead: %s", video, type(e).__name__)
+
+    def _copies(self, meta: dict):
+        """For intros.Finder: an episode's cached Matroska copies, smallest first, as (file name, size, open);
+        open() finds the link (self.link: kept 20 minutes) only when that copy is read."""
+        async def copies(video: str) -> list:
+            found = [s for s in await self.streams_for("series", video, meta) if not s.why_dropped
+                     and s.filename and not s.filename.lower().endswith((".mp4", ".avi", ".ts", ".m2ts"))]
+
+            def opener(s: streams.Stream):
+                async def open_():
+                    link = await self.link(s)
+                    return self.intros.copy(s.filename, s.size, link, s.headers) if link else None
+                return open_
+            return [(s.filename, s.size, opener(s)) for s in sorted(found, key=lambda s: s.size or 1 << 62)]
+        return copies
+
+    @staticmethod
+    def _season_neighbours(meta: dict, video: str) -> list[str]:
+        """The episodes of the same season nearest this one: the next, the one before, then two either way."""
+        m = re.match(r"^tt\d+:(\d+):\d+$", video)
+        ids = [v["id"] for v in cinemeta.episodes(meta) if m and v.get("season") == int(m.group(1))]
+        return episode_check.neighbours(video, ids)
+
+    def _marker_list(self, segments: list[skips.Segment]) -> list[dict]:
+        """Markers as TV Agent Player takes them (PROTOCOL.md, `markers`): those found in the file (one group's
+        chapters only show the button), and the databases' sure ones; `auto` (it skips them itself) for a sure
+        intro or recap with auto_skip on."""
+        return [{"kind": s.kind, "start": s.start_ms, "end": s.end_ms,
+                 "auto": bool(self.cfg.auto_skip and s.sure and s.kind in ("intro", "recap"))}
+                for s in segments if s.sure or s.source in intros.SOURCES]
+
+    async def _send_markers(self, np: NowPlaying):
+        """What's known of the file playing to TV Agent Player, with the episode its Next episode card offers at the
+        credits (counting down with binge on)."""
+        if np is not self.state.now_playing or np.player != "tvplayer" or not self.tvplayer.has_markers:
+            return
+        now = self.tvplayer.now()
+        found = await self.segments(np, now[1] if now else 0)
+        nxt = None
+        credits = next((x for x in found if x.kind == "credits"), None)
+        if self._next_up and self._next_up[2] is not None and credits is not None:
+            nxt = {"title": self._next_up[1], "countdown_ms": NEXT_COUNTDOWN_MS if self.cfg.binge and credits.sure
+                   else 0}
+        self.tvplayer.set_markers(self._marker_list(found), nxt)
+
+    async def _line_free(self):
+        """Background reads (intros.py) wait while TV Agent Player has under 20 s of the film buffered, 30 s at most
+        each time: the line and the Wi-Fi are the TV's first."""
+        for _ in range(30):
+            pos, state = self.tvplayer.last.get("pos") or {}, self.tvplayer.last.get("state") or {}
+            if not self.tvplayer.up or not state.get("playing") or int(pos.get("buf", 60_000)) >= 20_000:
+                return
+            await asyncio.sleep(1)
 
     async def segments(self, np: NowPlaying, total_ms: int) -> list[skips.Segment]:
-        """The episode's intro, recap and credits timestamps for this file's length (the last episode's are kept)."""
+        """The episode's intro, recap and credits in this file: found in it (intros.py: its chapters, another copy's,
+        the season's sound), then the timestamp databases' for this file's length for what isn't (the last
+        episode's are kept)."""
+        own = (self.intros.known(np.imdb_id, np.filename, np.size) or []) if np.kind == "series" else []
         m = re.match(r"^(tt\d+):(\d+):(\d+)$", np.video_id)
         if np.kind != "series" or not m or not total_ms:
-            return []
+            return own
         key = (np.video_id, total_ms // 1000)
         if key not in self._segments:
             self._segments = {key: await skips.fetch(self.http, m.group(1), int(m.group(2)), int(m.group(3)), total_ms)}
-        return self._segments[key]
+        kinds = {s.kind for s in own}
+        return own + [s for s in self._segments[key] if s.kind not in kinds]
 
     async def _skip(self, a: Skip) -> Outcome:
         pid = await self._player_id()
@@ -2962,7 +3092,18 @@ class Agent:
         if seg := skips.around(found, what, pos):
             await ctl.seek_to(pid, seg.end_ms)
             log.info("skip: %s %s %s-%s (%s)", np.video_id, what, _clock(seg.start_ms), _clock(seg.end_ms), seg.source)
+            tracing.step("skip", "times", label=f"The {what}", method=tracing.method("local", seg.source),
+                         start=_clock(seg.start_ms), end=_clock(seg.end_ms), verdict="skipped")
             return Outcome(True, f"Skipped the {what}")
+        own = next((s for s in found if s.kind == what and s.sure and s.source in intros.SOURCES), None)
+        if own is not None:                     # found in this very file, and sure: it's ahead, or it's over
+            tracing.step("skip", "times", label=f"The {what}", method=tracing.method("local", own.source),
+                         start=_clock(own.start_ms), end=_clock(own.end_ms),
+                         verdict="ahead" if pos < own.start_ms else "past")
+            if pos < own.start_ms:
+                self._start_skip_watch(np, also=what)
+                return Outcome(True, f"The {what} starts at {_clock(own.start_ms)}: skipping it then")
+            return Outcome(True, f"Already past the {what}")
         if pid != tvplayer.PID and await self._skip_chapter(what):
             return Outcome(True, f"Skipped the {what} (chapter)")
         if a.what == "credits":
@@ -2999,18 +3140,21 @@ class Agent:
 
     async def _auto_skip(self, a: AutoSkip) -> Outcome:
         set_value(self.cfg, "auto_skip", a.on)
+        if np := self.state.now_playing:
+            await self._send_markers(np)          # TV Agent Player skips the sure ones itself
         if a.on and (np := self.state.now_playing) and np.kind == "series" and np.player in ("kodi", "tvplayer"):
             self._start_skip_watch(np)
-        return Outcome(True, "Auto skip on: intros and recaps go by themselves when their timestamps are sure"
+        return Outcome(True, "Auto skip on: intros and recaps go by themselves when their times are sure"
                        if a.on else "Auto skip off")
 
     def _start_skip_watch(self, np: NowPlaying, also: str | None = None):
         if self._skip_task and not self._skip_task.done():
             self._skip_task.cancel()
+        self._skip_also = also
         self._skip_task = asyncio.create_task(self._skip_watch(np, also=also))
 
     async def _skip_watch(self, np: NowPlaying, sleep=asyncio.sleep, also: str | None = None):
-        """auto_skip: the episode's intro and recap skipped as they come, when their timestamps are sure. `also`:
+        """auto_skip: the episode's intro and recap skipped as they come, when their times are sure. `also`:
         that part too, sure or not, because it was asked for ("play The Bear and skip the intro")."""
         try:
             await sleep(4)                               # the file is open and moving
@@ -3018,6 +3162,8 @@ class Agent:
                 return
             _, total, _ = await self._ctl(pid).position(pid)
             auto = ("intro", "recap") if self.cfg.auto_skip else ()
+            if np.player == "tvplayer" and self.tvplayer.has_markers:
+                auto = ()                                # it skips the sure ones itself (sent marked auto)
             todo = sorted((s for s in await self.segments(np, total)
                            if (s.sure and s.kind in auto) or s.kind == also), key=lambda s: s.start_ms)
             for seg in todo:

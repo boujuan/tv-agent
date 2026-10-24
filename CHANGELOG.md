@@ -37,6 +37,26 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 ## server — unreleased
 
 ### Added
+- Intros, recaps and credits found in the files themselves (`intros.py`): "skip the intro" no longer depends on the
+  timestamp databases knowing the episode. The services' markers are named chapters in most web releases, read from
+  the file's header as it starts (TV Agent Player's chapters were never looked at before); other copies' headers are
+  compared, one per release group, and a marker is sure when two groups agree (FLUX's Pluribus S1E3 intro is 55 s
+  late in all three of its releases); another cut's chapters (a Blu-ray remux numbers its own) are moved onto the
+  file by matching their sound; with no chapters anywhere, the season's intro is learned from the sound of two or
+  three episodes' starts and kept, so a later episode only has its own start read. In the background, at most
+  80 Mbit/s, pausing while TV Agent Player's buffer is low, the next episode's while this one plays; kept in
+  `~/.local/share/tv-agent/intros/`. Measured on Community, Breaking Bad, Pluribus and The Bear: by sound alone,
+  11 of 11 intros within 0.2–4.9 s of the services' marks, and none in the 5 episodes without one; 1.6 to 230 MB
+  per episode with chapters, 0.5–1.3 GB once per season without (`docs/intros-2026-10-24.md`).
+- "Skip the intro" before a sure intro: "The intro starts at 6:23: skipping it then"; after it: "Already past the
+  intro". auto_skip uses the files' sure markers too.
+- TV Agent Player gets the markers with the load and as they're found (`markers`; `features: ["markers"]` in its
+  hello): its Skip intro button, its own auto skips, and a Next episode card at the credits (OK, or a 10 s countdown
+  with binge on and the credits sure) that starts the next episode, preloaded by then (30 s before the credits).
+
+### Fixed
+- AIOStreams' newer error video (`/status/video/error.mp4`, sent after many links are opened in a few minutes) was
+  taken for a playable file.
 - Subtitles from your addons in time with the file (`subsync.py`): a few seconds after a start, the file's own
   subtitles (half a minute of them, any language; read once with the episode check) are lined up with the addon's
   lines by when they start, and TV Agent Player is told that track's delay (`sub_delay`, player 0.7.0). In the file's

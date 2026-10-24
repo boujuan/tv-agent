@@ -193,6 +193,8 @@ def test_playable_follows_redirects_but_not_to_a_problem_video():
             return httpx.Response(307, headers={"location": "https://cdn.example/file.mkv"})
         if request.url.path == "/play/uncached":
             return httpx.Response(307, headers={"location": "/static/downloading.mp4"})
+        if request.url.path == "/play/failed":
+            return httpx.Response(307, headers={"location": "/status/video/error.mp4"})
         return httpx.Response(206, headers={"content-type": "application/force-download"}, content=b"\0")
 
     async def check(path):
@@ -202,6 +204,7 @@ def test_playable_follows_redirects_but_not_to_a_problem_video():
 
     assert asyncio.run(check("/play/ok")) is True
     assert asyncio.run(check("/play/uncached")) is False
+    assert asyncio.run(check("/play/failed")) is False
 
 
 def test_progress_update_marks_watched_at_90_percent():

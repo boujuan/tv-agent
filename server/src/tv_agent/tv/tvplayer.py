@@ -72,6 +72,7 @@ class TvPlayer:
         self.allowed = allowed                  # the TV's addresses, as of now
         self.version = version
         self.app: str | None = None             # the connected player's version
+        self.features: set[str] = set()         # what it says it does beyond the protocol's first version ("markers")
         self._writer: asyncio.StreamWriter | None = None
         self._ids = itertools.count(1)
         self._acks: dict[int, asyncio.Future] = {}
@@ -119,6 +120,7 @@ class TvPlayer:
                 await self._write(old, {"t": "bye", "error": "replaced"})
                 old.close()
             self.app = str(hello.get("app") or "")
+            self.features = {str(f) for f in hello.get("features") or [] if isinstance(f, str)}
             await self._write(writer, {"t": "welcome", "v": PROTOCOL, "agent": self.version})
             self.connected.set()
             log.info("player %s connected from %s", self.app, peer)
@@ -292,11 +294,12 @@ class TvPlayer:
 
     async def open(self, url: str, resume_ms: int = 0, *, item: str, title: str = "", headers: dict | None = None,
                    audio: str | None = None, subs: list[str] | None = None, bitrate: int = 0, play: bool = True,
-                   http: str | None = None, info: dict | None = None):
+                   http: str | None = None, info: dict | None = None, markers: list[dict] | None = None):
         """Loads it in place (the screen stays: no relaunch). `audio` and `subs` are the track plan
         (languages.TrackPlan), applied in the player's own first choice. Each load gets its own id (`item`#run-n,
         the one its loading screen had), so an event about the one before, even one this agent opened before a
-        restart, can't be taken for this one's. `info` is what the pause screen shows (PROTOCOL.md, `info`)."""
+        restart, can't be taken for this one's. `info` is what the pause screen shows (PROTOCOL.md, `info`);
+        `markers` the intro, recap and credits known when it opens (set_markers sends what's found later)."""
         coming, self._coming = self._coming, None
         self.item = coming[1] if coming and coming[0] == item else f"{item}#{self._run}-{next(self._loads)}"
         self.last, self._adopt = {}, None
@@ -311,7 +314,35 @@ class TvPlayer:
             fields["http"] = http
         if info:
             fields["info"] = info
+        if markers:
+            fields["markers"] = markers
         await self.call("load", timeout=6, **fields)
+
+    @property
+    def has_markers(self) -> bool:
+        """Whether the connected player shows markers (its "Skip intro" button and "Next episode" card) and skips the
+        ones marked `auto` itself."""
+        return self.up and "markers" in self.features
+
+    def set_markers(self, markers: list[dict], next_up: dict | None = None) -> bool:
+        """The intro, recap and credits of the file playing (PROTOCOL.md, `markers`), and the episode the "Next
+        episode" card offers at the credits. Written at once, answered in the background. False when the player
+        doesn't show markers."""
+        if self._writer is None or self.item is None or not self.has_markers:
+            return False
+        cid, fut = self._send("markers", item=self.item, markers=markers, next=next_up)
+        asyncio.create_task(self._markers_answered(cid, fut))
+        return True
+
+    async def _markers_answered(self, cid: int, fut: asyncio.Future):
+        try:
+            answer = await asyncio.wait_for(fut, 4)
+        except (asyncio.TimeoutError, PlayerError):
+            return
+        finally:
+            self._acks.pop(cid, None)
+        if answer.get("error"):
+            log.info("markers: %s", answer["error"])
 
     async def _thumb(self, req: dict):
         """A preview picture for a held ←/→ (PROTOCOL.md, `thumb_req`): the keyframe at or before `ms` of the file
@@ -340,8 +371,10 @@ class TvPlayer:
 
     async def preload(self, url: str, start_ms: int = 0, *, item: str, headers: dict | None = None,
                       audio: str | None = None, subs: list[str] | None = None, bitrate: int = 0,
-                      info: dict | None = None):
+                      info: dict | None = None, markers: list[dict] | None = None):
         fields = {"url": url, "item": f"{item}#preload", "start_ms": max(0, int(start_ms)), "audio": audio, "subs": subs}
+        if markers:
+            fields["markers"] = markers
         if headers:
             fields["headers"] = headers
         if bitrate:

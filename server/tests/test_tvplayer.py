@@ -4,11 +4,13 @@ import asyncio
 import hashlib
 import json
 import ssl
+import tempfile
 import types
+from pathlib import Path
 
 import pytest
 
-from tv_agent import clients, languages
+from tv_agent import clients, intros, languages
 from tv_agent import agent as agent_mod
 from tv_agent.actions import Transport
 from tv_agent.agent import Agent
@@ -212,6 +214,11 @@ def bare_agent(player: FakeTvPlayer) -> Agent:
                                   binge=True)
     a._progress, a._starting, a._user_stopped = None, asyncio.Lock(), False
     a._streams, a._stream_jobs = {}, {}
+    a.intros = intros.Finder(None, intros.Store(Path(tempfile.mkdtemp())))
+
+    async def no_markers(*args):
+        return None
+    a._find_markers = no_markers
     return a
 
 
@@ -265,6 +272,7 @@ def test_play_brings_the_player_up_during_the_search_and_loads_in_place():
                           "step": "Finding streams…"}
     load = next(d for d in did if d[0] == "open")
     info = load[3].pop("info")
+    assert load[3].pop("markers") == []                      # none known for this file yet
     assert load == ("open", "https://x/1", 90_000, {"item": "tt1:1:2", "title": "X S1E2",
                                                   "headers": {"Authorization": "Bearer t"}, "audio": "eng",
                                                   "subs": None})

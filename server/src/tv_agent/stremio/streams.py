@@ -47,8 +47,9 @@ HDR10_PLUS = re.compile(r"hdr10(\+|plus|p\b)", re.I)
 DV_REMUX = re.compile(r"(\bdv\b|dolby ?vision|\bdovi\b).*\bremux\b|\bremux\b.*(\bdv\b|dolby ?vision|\bdovi\b)", re.I)
 UNIT = {"tb": 1e12, "gb": 1e9, "gib": 2**30, "mb": 1e6, "mib": 2**20}
 CAM_QUALITIES = {"cam", "ts", "tc", "scr"}
-# AIOStreams sends these when a link can't play (uncached, failed, 429…): a short video explaining it.
-PROBLEM_VIDEO = re.compile(r"/static/[\w-]+\.mp4$")
+# AIOStreams sends these when a link can't play (uncached, failed, 429…): a short video explaining it. Newer ones
+# send /status/video/error.mp4 (seen 2026-10-24 after many links were opened in a few minutes).
+PROBLEM_VIDEO = re.compile(r"/(?:static|status/video)/[\w-]+\.mp4$")
 # What the pause screen shows that the file's header can't tell TV Agent Player (its PROTOCOL.md, `info`)
 BADGES = [("atmos", re.compile(r"\batmos\b", re.I)), ("dtsx", re.compile(r"\bdts[ :._-]?x\b", re.I)),
           ("hdr10+", HDR10_PLUS), ("imax", re.compile(r"\bimax\b", re.I)), ("remux", re.compile(r"\bremux\b", re.I))]

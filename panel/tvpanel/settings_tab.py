@@ -163,8 +163,9 @@ class Settings(QScrollArea):
         self.probe.setToolTip("Turn off while the TV uses a VPN (debrid services allow one IP at a time)")
         self.binge = QCheckBox("Binge mode: when an episode ends, the next one starts")
         self.binge.setToolTip("Also by voice: “binge mode on / off”. “Stop after this episode” wins for one episode.")
-        self.auto_skip = QCheckBox("Skip intros and recaps by themselves when their timestamps are sure")
-        self.auto_skip.setToolTip("From TheIntroDB and IntroDB; “skip the intro” works either way. "
+        self.auto_skip = QCheckBox("Skip intros and recaps by themselves when their times are sure")
+        self.auto_skip.setToolTip("Found in the file (its chapters, other copies', the season's sound), else from "
+                                  "TheIntroDB and IntroDB; “skip the intro” works either way. "
                                   "Also by voice: “auto skip on / off”.")
         f1.addRow("Player", self.player)
         self.player_state = dim("", wrap=False)     # is it installed on the TV
