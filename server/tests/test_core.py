@@ -1678,31 +1678,6 @@ def test_play_and_pause_go_to_the_app_in_front_not_to_kodi_behind_it():
     assert not asyncio.run(Agent._transport(me, A.Transport(op="seek_to", seconds=60))).ok
 
 
-def test_an_episode_by_its_name_or_by_what_happens_in_it():
-    import asyncio
-    import types
-    from tv_agent.agent import Agent
-    eps = [{"id": "tt1:2:13", "season": 2, "episode": 13, "name": "Celebrity Pharmacology", "overview": "A play."},
-           {"id": "tt1:2:14", "season": 2, "episode": 14, "name": "Advanced Dungeons & Dragons",
-            "overview": "Abed invites Fat Neil to play Dungeons & Dragons."},
-           {"id": "tt1:6:25", "season": 6, "episode": 25, "name": "Who Shot Mr. Burns? (1)",
-            "overview": "When Burns winds up shot, everyone is a suspect."}]
-
-    class Llm:
-        asked = []
-
-        async def pick_episode(self, series, wanted, candidates):
-            self.asked.append([c[0] for c in candidates])
-            return "tt1:6:25"
-    me = types.SimpleNamespace(llm=None)
-    # by name: matched here, no model needed ("and" for "&")
-    assert asyncio.run(Agent._find_episode(me, "Community", eps, "Advanced Dungeons and Dragons"))["id"] == "tt1:2:14"
-    assert asyncio.run(Agent._find_episode(me, "Community", eps, "Mr. Burns gets shot")) is None   # no LLM to ask
-    me.llm = Llm()
-    assert asyncio.run(Agent._find_episode(me, "The Simpsons", eps, "Mr. Burns gets shot"))["id"] == "tt1:6:25"
-    assert me.llm.asked[0][0] == "tt1:6:25"            # the one whose summary shares the words comes first
-
-
 @pytest.mark.parametrize("text", [
     "Can you play The Simpsons, um, that episode where Mr. Burns is killed?",
     "Can you play the scenes um in that episode where Mr. Burns is killed?",
@@ -1740,64 +1715,6 @@ def test_subtitle_cues_are_read_with_their_times():
     srt = "1\n00:00:01,500 --> 00:00:03,000\n<i>Hello</i> there\n\n2\n00:21:05,040 --> 00:21:07,000\n{\\an8}Who shot me?\n"
     assert S.cues(srt) == [(1500, "Hello there"), (1265040, "Who shot me?")]
     assert S.cues("WEBVTT\n\n01:02:03.250 --> 01:02:04.000\nLong &amp; form\n") == [(3723250, "Long & form")]
-
-
-def test_the_scene_search_jumps_to_where_the_llm_found_the_moment(monkeypatch):
-    import asyncio
-    import types
-    from tv_agent import agent as agent_mod
-    from tv_agent.agent import Agent, Outcome
-    from tv_agent.stremio import subtitles as S
-    lines = "".join(f"{n}\n00:{n // 60:02d}:{n % 60:02d},000 --> 00:{n // 60:02d}:{n % 60:02d},900\nline {n}\n\n"
-                    for n in range(1, 40))
-
-    async def fetch(*a, **k):
-        return [S.Subtitle("u", "eng", "x", "SubSense")]
-
-    async def download(http, url):
-        return lines
-    monkeypatch.setattr(agent_mod.subtitles, "fetch", fetch)
-    monkeypatch.setattr(agent_mod.subtitles, "download", download)
-    seen, jumped = {}, []
-
-    class Llm:
-        async def find_moment(self, title, wanted, text):
-            seen.update(title=title, wanted=wanted, first=text.splitlines()[0])
-            return "0:30", "0:30 line 30", "words"      # the time it was listed with, copied into the line too
-
-    async def addons():
-        return []
-
-    async def transport(a):
-        jumped.append(a)
-        return Outcome(True, "To 0:28")
-    from tv_agent.episode_check import Verdict
-
-    async def no_subs(video, lang="eng"):
-        return []                               # nothing kept from a check: the addons are asked as before
-    shown = []
-
-    async def notify(text):
-        shown.append((text, list(jumped)))
-    monkeypatch.setattr(agent_mod.chain, "SCENE_SHOWN", 0)
-    np = NowPlaying("tt1", "series", "tt1:6:25", "The Simpsons")
-    me = types.SimpleNamespace(state=types.SimpleNamespace(now_playing=np), llm=Llm(), http=None, addons=addons,
-                               cfg=types.SimpleNamespace(subtitle_languages=["eng"]), _transport=transport,
-                               checks=types.SimpleNamespace(get=lambda *a: None), episode_subs=no_subs, notify=notify)
-    out = asyncio.run(Agent._find_scene(me, A.FindScene(what="Mr. Burns gets shot")))
-    assert out.ok and jumped == [A.Transport(op="seek_to", seconds=27)]      # a moment before it
-    assert shown == [("0:30: “line 30”", [])] and out.details == {"scene_ms": 27_000}    # the line before the jump
-    assert seen == {"title": "The Simpsons S6E25", "wanted": "Mr. Burns gets shot", "first": "0:01 line 1"}
-
-    async def kept(video, lang="eng"):          # the episode's subtitles from checking the file, 3 s later than it
-        return S.cues(lines)
-    me.episode_subs = kept
-    me.checks = types.SimpleNamespace(get=lambda *a: Verdict("tt1:6:25", True, shift=3.0))
-    jumped.clear()
-    asyncio.run(Agent._find_scene(me, A.FindScene(what="Mr. Burns gets shot")))
-    assert jumped == [A.Transport(op="seek_to", seconds=24)]      # 3 s earlier in this file, 3 s before the line
-    me.state.now_playing = None
-    assert asyncio.run(Agent._find_scene(me, A.FindScene(what="x"))).say == "Nothing of yours is playing to search"
 
 
 def test_a_stuck_kodi_is_restarted_and_the_file_opened_again_once():

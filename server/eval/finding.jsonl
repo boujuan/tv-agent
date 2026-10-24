@@ -1,0 +1,17 @@
+{"find": "episode", "imdb": "tt0096697", "name": "The Simpsons", "wanted": "the episode where Mr. Burns gets shot", "expect": ["tt0096697:6:25"]}
+{"find": "episode", "imdb": "tt0096697", "name": "The Simpsons", "wanted": "the one where they sing the monorail song", "expect": ["tt0096697:4:12"]}
+{"find": "episode", "imdb": "tt0096697", "name": "The Simpsons", "wanted": "el capítulo en el que Homer sueña con una tierra de chocolate", "expect": ["tt0096697:3:11"]}
+{"find": "episode", "imdb": "tt0903747", "name": "Breaking Bad", "wanted": "the episode where Walt throws the fake meth at Tuco", "expect": ["tt0903747:1:6"]}
+{"find": "episode", "imdb": "tt0903747", "name": "Breaking Bad", "wanted": "el capítulo de la mosca", "expect": ["tt0903747:3:10"]}
+{"find": "episode", "imdb": "tt1439629", "name": "Community", "wanted": "the Halloween episode", "expect": ["ask"]}
+{"find": "episode", "imdb": "tt1439629", "name": "Community", "wanted": "the paintball episode", "expect": ["ask"]}
+{"find": "episode", "imdb": "tt1439629", "name": "Community", "wanted": "el episodio en el que juegan a Dungeons and Dragons", "expect": ["tt1439629:2:14", "ask"]}
+{"find": "episode", "imdb": "tt1439629", "name": "Community", "wanted": "Mr. Chang goes to dance with his ex-wife", "expect": []}
+{"find": "episode", "imdb": "tt22202452", "name": "Pluribus", "wanted": "Carol finds out they eat human remains", "expect": []}
+{"find": "scene", "video": "tt15239678", "name": "Dune: Part Two", "wanted": "paul rides the worm", "expect": [3050, 3250]}
+{"find": "scene", "video": "tt15239678", "name": "Dune: Part Two", "wanted": "Paul monta el gusano", "expect": [3050, 3250]}
+{"find": "scene", "video": "tt0096697:6:25", "name": "The Simpsons", "wanted": "Mr. Burns gets shot", "expect": []}
+{"find": "scene", "video": "tt0096697:4:12", "name": "The Simpsons", "wanted": "they sing the monorail song", "expect": [440, 520]}
+{"find": "scene", "video": "tt0903747:1:6", "name": "Breaking Bad", "wanted": "Walt throws the crystal and it explodes", "expect": [2590, 2680]}
+{"find": "scene", "video": "tt22202452:1:2", "name": "Pluribus", "wanted": "carol se entera de que comen carne humana", "expect": []}
+{"find": "scene", "video": "tt1439629:2:6", "name": "Community", "wanted": "Mr. Chang dances", "expect": []}

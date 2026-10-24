@@ -15,7 +15,7 @@ import httpx
 from rapidfuzz import fuzz
 
 from . import __version__, activity, languages, skips, twitch, youtube
-from . import chain, episode_check
+from . import chain, episode_check, finding
 from .actions import (Action, AutoSkip, Binge, Cancel, ContinueWatching, FindScene, Help, Home, Info, LibraryEdit,
                       NextEpisode, OpenApp,
                       OpenInStremio, Pick, PlayTitle, Recommend, Replay, Sequence, ShowList, Skip, Timer, Tracks,
@@ -64,6 +64,7 @@ SKIPS_WHERE = "Skipping works in TV Agent Player and Kodi, for what the agent st
 INTRO_GUESS_MS = 90_000
 PRELOAD_BEFORE = 150_000    # the next episode opens in the background this long before the end (binge)
 LIST_SIZE = 6                # rows that fit the TV app's list
+PLOTS_AHEAD = 8             # the shows of Continue Watching whose episode plots are kept ahead (finding.py)
 STARTS = {"play_title", "continue_watching", "next_episode", "pick"}     # actions that start playback
 LIST_TTL = 300              # "number 2" refers to a list shown in the last 5 minutes
 STREAMS_TTL = 1800          # an addon's answer for a video is reused for 30 minutes (links resolve when played)
@@ -132,6 +133,8 @@ class ListItem:
     poster: str = ""
     video: str | None = None  # the episode to play; None: carry on where you were (or the film)
     ask: PlayTitle | None = None    # a title asked about (not sure which): played as that request asked
+    at_ms: int = 0                  # where in it (a scene found in another episode than the one playing)
+    then: tuple = ()                # a chain's steps after its play, done once this is picked
 
 
 @dataclass(frozen=True)
@@ -434,10 +437,14 @@ class Agent:
             await self.addons(max_age=3000)
             if time.monotonic() - self.library._at > 480:
                 await self.library.items(fresh=True)
-            for item in (await self.library.continue_watching())[:WARM_ITEMS]:
+            watching = await self.library.continue_watching()
+            for item in watching[:WARM_ITEMS]:
                 target = await self._continue_target(item)
                 if not isinstance(target, Outcome):
                     self.prefetch(item["type"], target[0])
+            if not self.dry_run:                 # "the episode where…" of a show you're watching: its plots kept
+                finding.prefetch_plots(self.http, [(i["_id"], i.get("name", "")) for i in watching
+                                                   if i.get("type") == "series"][:PLOTS_AHEAD])
         except Exception as e:
             log.info("warming up: %s", type(e).__name__)
 
@@ -1125,6 +1132,9 @@ class Agent:
         self._save_now_playing()
         if kind == "series":
             self._prefetch = asyncio.create_task(self._prepare_next(imdb, name, video, meta))
+        if not self.dry_run and (np := self.state.now_playing):     # a scene asked for later is found at once
+            finding.prefetch_subs(self.http, self.addons, video, streams.Stream(
+                "", np.url, "", "", np.filename, 0, size=np.size, video_hash=np.video_hash))
 
     def _not_started(self, why: str, ready: asyncio.Task, loading: Loading | None):
         """A start that didn't happen, with the player brought up for it. TV Agent Player's loading screen says why
@@ -2123,9 +2133,10 @@ class Agent:
             if not eps:
                 return Outcome(False, f"No episodes listed for {name}")
             if a.episode_name and (a.season is None or a.episode is None):
-                v = await self._find_episode(name, eps, a.episode_name)
-                if v is None:
-                    return Outcome(False, f"Couldn't find that episode of {name}: “{a.episode_name}”")
+                found = await self.find_episode(imdb, name, eps, a.episode_name)
+                if found.episode is None:
+                    return await self._ask_episode(a, imdb, name, found)
+                v = found.episode
                 resume = state.get("timeOffset", 0) if state.get("video_id") == v["id"] and not a.restart else 0
                 self.prefetch(kind, v["id"])
                 return await self.play(imdb, kind, name, v["id"], _episode_label(name, v), meta, resume)
@@ -2158,35 +2169,42 @@ class Agent:
             return next((x for x in eps if x["id"] == state["video_id"]), eps[0])   # "play the bear": where you were
         return eps[0]
 
-    async def _find_episode(self, series: str, eps: list[dict], wanted: str) -> dict | None:
-        """An episode by its name ("Advanced Dungeons & Dragons": matched here), or by what happens in it ("Mr. Burns
-        gets shot": the episodes whose name and summary share its words, and the LLM picks one of them)."""
-        def norm(t: str) -> str:
-            return re.sub(r"\s+", " ", re.sub(r"[^\w ]", " ", cinemeta.norm(t.replace("&", " and ")))).strip()
-        want = norm(wanted)
-        named = sorted(((fuzz.token_set_ratio(want, norm(v.get("name") or "")), i) for i, v in enumerate(eps)),
-                       reverse=True)
-        if named and named[0][0] >= 90 and (len(named) == 1 or named[1][0] < named[0][0]):
-            return eps[named[0][1]]
-        if self.llm is None:
-            return None
-        words = [w for w in want.split() if len(w) >= 3 and w not in EPISODE_STOPWORDS]
-        scored = []
-        for i, v in enumerate(eps):
-            about = norm(f"{v.get('name') or ''} {v.get('overview') or v.get('description') or ''}")
-            title = norm(v.get("name") or "")
-            hits = sum(2 if w in title else 1 for w in words if w in about)
-            scored.append((hits + named[[n[1] for n in named].index(i)][0] / 100, i))
-        top = [eps[i] for _, i in sorted(scored, reverse=True)[:40]]
-        candidates = [(v["id"], f"S{v['season']}E{v.get('episode')} {v.get('name') or ''}: "
-                                f"{(v.get('overview') or v.get('description') or '')[:160]}") for v in top]
-        try:
-            got = await self.llm.pick_episode(series, wanted, candidates)
-        except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError) as e:
-            log.info("episode choice unavailable (%s)", type(e).__name__)
-            return None
-        log.info("episode “%s” of %s: %s", wanted, series, got)
-        return next((v for v in top if v["id"] == got), None)
+    async def find_episode(self, imdb: str, name: str, eps: list[dict], wanted: str) -> finding.EpisodeFind:
+        """An episode by its name ("Advanced Dungeons & Dragons") or by what happens in it ("Mr. Burns gets shot"):
+        the one, or the ones to pick from (finding.py)."""
+        es = T.spanish(HEARD.get() or wanted)
+        asyncio.create_task(self.notify(f"Buscando ese capítulo de {name}…" if es else
+                                        f"Looking for that episode of {name}…"))
+        t = time.perf_counter()
+        found = await finding.episode(self, imdb, name, eps, wanted)
+        _step("title", "episode", _ms(t), wanted=wanted, episode=found.episode["id"] if found.episode else None,
+              choices=[v["id"] for v in found.choices] or None, by=found.why)
+        return found
+
+    async def _ask_episode(self, a: PlayTitle, imdb: str, name: str, found: finding.EpisodeFind) -> Outcome:
+        """Not sure which episode was meant, or none fits: the likeliest listed on the TV instead of a guess played;
+        "number 2" plays that one (and a chain goes on from there)."""
+        es = T.spanish(HEARD.get() or a.episode_name or "")
+        if not found.choices:
+            return Outcome(False, (f"No encontré ese capítulo de {name}: “{a.episode_name}”" if es else
+                                   f"Couldn't find that episode of {name}: “{a.episode_name}”")
+                           + (f" ({found.why})" if found.why and not es else ""))
+        then = tuple(chain.REST.get())
+        items = [ListItem(imdb, "series", name, _episode_label(name, v),
+                          (v.get("overview") or v.get("description") or "")[:90], v.get("thumbnail") or "",
+                          video=v["id"], then=then) for v in found.choices]
+        none = found.why in ("none fits", "found in the subtitles")
+        title = ((f"No encontré ese capítulo de {name}. ¿Alguno de estos?" if es else
+                  f"Couldn't find that episode of {name}. One of these?") if none else
+                 (f"¿Qué capítulo de {name}?" if es else f"Which episode of {name}?"))
+        self._shown = Shown(title, items, time.monotonic())
+        await self._show_on_tv(self._shown)
+        log.info("episode %r of %s: %s, %d listed", a.episode_name, name, found.why, len(items))
+        say = "di un número" if es else "say a number"
+        # In a chain the steps after the play wait for the pick (`then`): the chain stops here, saying why
+        return Outcome(not chain.PLAN.get(), (f"No estoy seguro de qué capítulo: {say}" if es else
+                                              f"Not sure which episode: {say}") if not none else
+                       (f"No lo encontré: {say} si es uno de estos" if es else f"Couldn't find it: {say} if it's one"))
 
     async def _continue_watching(self, a: ContinueWatching) -> Outcome:
         if not a.title and (pid := await self._player_id()) is not None:
@@ -2287,8 +2305,8 @@ class Agent:
         return Outcome(True, f"{title}: say a number")
 
     async def _find_scene(self, a: FindScene) -> Outcome:
-        """"Go to the part where Mr. Burns gets shot": the subtitles of what's playing (your subtitle addons, English
-        first) go to the LLM with their times; it says when that moment is, and the player jumps there."""
+        """"Go to the part where Mr. Burns gets shot": found in the subtitles of what's playing (finding.py), the line
+        it was found by shown on the TV, then the jump. Found in the episode before or after instead: offered."""
         np = self.state.now_playing
         if np is None:
             return Outcome(False, "Nothing of yours is playing to search")
@@ -2296,58 +2314,68 @@ class Agent:
             return Outcome(False, "Finding a moment needs the LLM (Settings › API keys: OpenRouter)")
         if chain.cut_off(a.what) or chain.cut_off(HEARD.get()):          # "… where Paul rides the"
             return Outcome(False, f"“{a.what}” sounds cut off: say it again")
-        # The episode's subtitles kept from checking the file (episode_check.py), with how far their times are from
-        # this file's; else what the addons have for it now.
-        shift = (v.shift or 0.0) if (v := self.checks.get(np.filename, np.size, np.video_id)) and v.ok else 0.0
-        found: list[tuple[int, str]] = []
-        try:
-            found = await self.episode_subs(np.video_id)
-        except Exception as e:
-            log.info("subtitles for the scene search: %s", type(e).__name__)
-        subs = []
-        if len(found) < 20:
-            shift = 0.0
-            stream = streams.Stream("", np.url, "", "", np.filename, 0, size=np.size, video_hash=np.video_hash)
-            try:
-                subs = await subtitles.fetch(self.http, await self.addons(), np.kind, np.video_id, stream)
-            except Exception as e:
-                log.info("subtitles for the scene search: %s", type(e).__name__)
-        for _, sub in (subtitles.choose(subs, ["eng", "spa", *self.cfg.subtitle_languages]) or
-                       [("", s) for s in subs])[:3]:
-            try:
-                found = subtitles.cues(await subtitles.download(self.http, sub.url))
-            except (httpx.HTTPError, OSError, ValueError) as e:
-                log.info("subtitles from %s: %s", sub.addon, type(e).__name__)
-                continue
-            if len(found) >= 20:
-                break
-        if len(found) < 20:
-            return Outcome(False, "No subtitles to search in this one")
         m = re.match(r"^tt\d+:(\d+):(\d+)$", np.video_id)
         title = np.name + (f" S{m.group(1)}E{m.group(2)}" if m else "")
-        lines = "\n".join(f"{_clock(ms)} {words[:90]}" for ms, words in found[:3000])
-        try:
-            at, line, how = await self.llm.find_moment(title, a.what, lines)
-        except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError) as e:
-            log.info("scene search unavailable (%s)", type(e).__name__)
-            return Outcome(False, "Couldn't search for that moment right now")
-        if not at and not line:
-            return Outcome(False, f"Couldn't find “{a.what}”")
-        line = re.sub(r"^\d+:\d\d(?::\d\d)?\s+", "", line)       # the time it was listed with, copied too
-        ms, why = chain.place_scene(at, line, how, found)
-        if ms is None:
-            log.info("moment %r of %s refused: %s (%s, %r, %s)", a.what, title, why, at, line, how)
-            return Outcome(False, f"Not sure where “{a.what}” is: {why}")
-        log.info("moment %r of %s at %s (%r, %s)%s", a.what, title, _clock(ms), line, how,
-                 f", {shift:+.1f} s in the subtitles" if shift else "")
-        secs = max(0, round(ms / 1000 - shift))
-        await self.notify(f"{_clock(secs * 1000)}: “{line}”")     # the line it's placed by, shown before the jump
+        stream = streams.Stream("", np.url, "", "", np.filename, 0, size=np.size, video_hash=np.video_hash)
+        found = await finding.scene(self, np.video_id, title, a.what, HEARD.get(), stream)
+        if found.ms is None:
+            return Outcome(False, found.why if found.why.startswith(("No subtitles", "Couldn't", "Finding")) else
+                           f"Not sure where “{a.what}” is: {found.why}")
+        if found.video and found.video != np.video_id:
+            return await self._offer_scene(np, found)
+        if found.others:                                     # two answers, two places: which?
+            return await self._which_moment(np, found)
+        secs = max(0, round((found.ms + self._subtitle_shift(np, found.cues)) / 1000))
+        await self.notify(f"{_clock(secs * 1000)}: “{found.shown}”")   # the line it's placed by, shown before the jump
         await asyncio.sleep(chain.SCENE_SHOWN)
         target = max(0, secs - chain.SCENE_BEFORE)
         out = await self._transport(Transport(op="seek_to", seconds=target))
         if not out.ok:
             return out
-        return Outcome(True, f"To {_clock(secs * 1000)}: “{line}”", {"scene_ms": target * 1000})
+        return Outcome(True, f"To {_clock(secs * 1000)}: “{found.shown}”", {"scene_ms": target * 1000})
+
+    def _subtitle_shift(self, np: NowPlaying, cues: list[tuple[int, str]]) -> int:
+        """ms to add to a time in these subtitles for the file playing. The episode check measured how far its own
+        subtitles of the episode (English, by its id) are from the file's; these are matched to those by their
+        lines. 0 when there's no measure, or too few lines in common (another language)."""
+        v = self.checks.get(np.filename, np.size, np.video_id)
+        kept = self._episode_cues.get((np.video_id, "eng"))
+        if not (v and v.ok and v.shift and kept and cues):
+            return 0
+        at = {f: ms for ms, w in kept if len(f := finding.fold(w)) > 12}
+        deltas = sorted(at[f] - ms for ms, w in cues if (f := finding.fold(w)) in at)
+        if len(deltas) < 5:
+            return 0
+        return deltas[len(deltas) // 2] - round(v.shift * 1000)
+
+    async def _which_moment(self, np: NowPlaying, found: finding.SceneFind) -> Outcome:
+        """The moment placed in more than one place (or once, and not at all the other time): the places listed, the
+        jump made by the pick ("number 2", "yes" for the first)."""
+        es = T.spanish(HEARD.get())
+        shift = self._subtitle_shift(np, found.cues)
+        places = [f for f in (found, *found.others) if f.ms is not None]
+        items = [ListItem(np.imdb_id, np.kind, np.name, _clock(max(0, f.ms + shift)), f"“{f.shown}”",
+                          video=np.video_id, at_ms=max(0, f.ms + shift)) for f in places]
+        self._shown = Shown("¿Qué momento?" if es else "Which moment?", items, time.monotonic())
+        await self._show_on_tv(self._shown)
+        log.info("moment of %s: not sure, %s listed", np.video_id, [i.label for i in items])
+        if len(items) == 1:
+            return Outcome(False, "¿Es este? di «sí» para ir" if es else "Is it this one? Say yes to go there")
+        return Outcome(False, "No estoy seguro de qué momento: di un número" if es else
+                       "Not sure which moment: say a number")
+
+    async def _offer_scene(self, np: NowPlaying, found: finding.SceneFind) -> Outcome:
+        """A moment found in the episode before or after the one playing: offered, not played (a list of one: "yes"
+        or "number 1" goes there)."""
+        es = T.spanish(HEARD.get())
+        m = re.match(r"^tt\d+:(\d+):(\d+)$", found.video)
+        where = f"S{m.group(1)}E{m.group(2)}" if m else found.video
+        item = ListItem(np.imdb_id, np.kind, np.name, f"{np.name} · {where} · {_clock(found.ms)}", f"“{found.shown}”",
+                        video=found.video, at_ms=found.ms)
+        self._shown = Shown("¿Ir ahí?" if es else "Go there?", [item], time.monotonic())
+        await self._show_on_tv(self._shown)
+        return Outcome(False, f"Está en el {where}, en {_clock(found.ms)}: di «sí» para ir" if es else
+                       f"It's in {where} at {_clock(found.ms)}: say yes to go there")
 
     async def _recommend(self, a: Recommend) -> Outcome:
         """Suggestions for a request ("something like Dark", "a short comedy"): the LLM proposes titles, with your
@@ -2629,6 +2657,12 @@ class Agent:
         title asked about, as its request said."""
         if it.ask is not None:
             return await self._play_found(it.ask, it.imdb, it.kind, it.name)
+        if it.at_ms and (np := self.state.now_playing) and it.video == np.video_id \
+                and await self._player_id() is not None:                          # a moment of what's playing
+            return await self._transport(Transport(op="seek_to", seconds=max(0, it.at_ms // 1000 - chain.SCENE_BEFORE)))
+        if it.then and it.video and (m := re.match(r"^tt\d+:(\d+):(\d+)$", it.video)):   # a chain goes on from it
+            first = PlayTitle(title=it.name[:120], season=int(m.group(1)), episode=int(m.group(2)), kind="series")
+            return await self._sequence(Sequence(steps=[first, *it.then]))
         if it.video is None and (item := await self.library.get(it.imdb)) and library_mod.in_continue_watching(item):
             return await self._continue_item(item)
         if it.video is None and it.kind == "series":        # a recommended series: where you were, or episode 1
@@ -2638,7 +2672,11 @@ class Agent:
         state = ((await self.library.get(it.imdb)) or {}).get("state") or {}
         video = it.video or it.imdb
         resume = state.get("timeOffset", 0) if state.get("video_id") == video else 0
-        return await self.play(it.imdb, it.kind, it.name, video, it.label, meta, resume)
+        if it.at_ms:                                         # a scene found there: a moment before its line
+            resume = max(0, it.at_ms - chain.SCENE_BEFORE * 1000)
+        label = _episode_label(it.name, {"season": int(m.group(1)), "episode": int(m.group(2)), "name": ""}) \
+            if it.at_ms and (m := re.match(r"^tt\d+:(\d+):(\d+)$", video)) else it.label
+        return await self.play(it.imdb, it.kind, it.name, video, label, meta, resume)
 
     # ---- skipping intros, recaps and credits (skips.py) ----
 

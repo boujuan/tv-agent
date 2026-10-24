@@ -132,22 +132,6 @@ run when they set a limit ("under 90 minutes": 90, "menos de hora y media": 90, 
 Answer only with the JSON object."""
 
 
-EPISODE_SYSTEM = """Someone asked their TV for one episode of a series by its name or by what happens in it
-("wanted"). Which of these episodes is it? Use the episode names and summaries, and what you know about the series.
-People misremember details ("killed" for "shot", the wrong character): pick the closest episode. When a story spans
-several episodes, the first one. Answer only with the JSON object: its id, or null only when nothing is close."""
-
-
-SCENE_SYSTEM = """Someone watching a film or episode ("watching") asked to jump to a moment they described
-("wanted", maybe misremembered). Below are its subtitles, one cue per line: "m:ss text" (or "h:mm:ss"). Find where
-that moment starts: what's said just before or as it happens; a moment without words (a gunshot, a kiss) is between
-the lines around it, and what you know about the story helps place it. Answer only with the JSON object: "line", the
-subtitle you placed it by (said in the moment, or the last line before it), copied exactly without its time; "at",
-the time listed before that line, copied exactly ("51:25"); and "how": "words" when that line is said in the moment
-itself or right as it happens, "around" when the moment has no words of its own and the lines around it place it,
-"guess" when these lines don't show it and only the story would; all null when it isn't there."""
-
-
 class Llm:
     def __init__(self, http: httpx.AsyncClient, key: str, model: str, rules: Rules, reasoning: str = "minimal",
                  private: bool = False):
@@ -240,44 +224,6 @@ class Llm:
                 out.append({"title": t["title"].strip()[:120], "year": year, "kind": t["kind"],
                             "why": str(t.get("why") or "").strip()[:80]})
         return out[:10], limit if isinstance(limit, int) and 20 <= limit <= 400 else None
-
-    async def pick_episode(self, series: str, wanted: str, candidates: list[tuple[str, str]]) -> str | None:
-        """Which of a series' episodes (id, "S6E25 name: summary") is the one named or described; None if none."""
-        ids = [c[0] for c in candidates]
-        schema = {"type": "object", "additionalProperties": False, "required": ["id"],
-                  "properties": {"id": {"type": ["string", "null"], "enum": [*ids, None]}}}
-        data = await self._post({
-            "max_tokens": 60,
-            "response_format": {"type": "json_schema",
-                                "json_schema": {"name": "episode", "strict": True, "schema": schema}},
-            "messages": [{"role": "system", "content": EPISODE_SYSTEM},
-                         {"role": "user", "content": json.dumps({"series": series, "wanted": wanted,
-                                                                 "episodes": [{"id": i, "about": t} for i, t in candidates]},
-                                                                ensure_ascii=False)}]}, 6.0)
-        self.last_usage = data.get("usage") or {}
-        content = data["choices"][0]["message"]["content"]
-        got = (json.loads(content) if isinstance(content, str) else content).get("id")
-        return got if got in ids else None
-
-    async def find_moment(self, title: str, wanted: str, lines: str) -> tuple[str, str, str]:
-        """Which subtitle line a described moment is placed by, from the subtitles ("m:ss line" per cue): (its time as
-        listed, the line, how it was placed: "words", "around" or "guess"); empty when it isn't there. Its time is
-        the listed one, copied: the agent finds the line itself (a model's own arithmetic was hours off)."""
-        schema = {"type": "object", "additionalProperties": False, "required": ["line", "at", "how"],
-                  "properties": {"line": {"type": ["string", "null"]}, "at": {"type": ["string", "null"]},
-                                 "how": {"type": ["string", "null"], "enum": ["words", "around", "guess", None]}}}
-        data = await self._post({
-            "max_tokens": 120,
-            "response_format": {"type": "json_schema",
-                                "json_schema": {"name": "moment", "strict": True, "schema": schema}},
-            "messages": [{"role": "system", "content": SCENE_SYSTEM},
-                         {"role": "user", "content": json.dumps({"watching": title, "wanted": wanted},
-                                                                ensure_ascii=False) + "\n\nSubtitles:\n" + lines}]},
-            20.0)
-        self.last_usage = data.get("usage") or {}
-        content = data["choices"][0]["message"]["content"]
-        got = json.loads(content) if isinstance(content, str) else content
-        return str(got.get("at") or "")[:12], str(got.get("line") or "")[:160], str(got.get("how") or "")
 
     async def answer(self, said: str, context: dict) -> tuple[bool, A.Action | None]:
         """(whether it answered, its action or None for "not a command")."""

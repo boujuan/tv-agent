@@ -29,6 +29,8 @@ from .tv import media, tvplayer
 
 log = logging.getLogger(__name__)
 PLAN: ContextVar[str] = ContextVar("plan", default="")   # what comes after the play, said while it starts
+# The steps after the play, while it starts: a list shown instead (which episode?) keeps them for the pick
+REST: ContextVar[tuple] = ContextVar("rest", default=())
 # Whether the command being run replaced one still on its way (server.Service.start): "cancel" then has a start to stop
 INTERRUPTED: ContextVar[bool] = ContextVar("interrupted", default=False)
 PLAY_WAIT = 75.0            # the play step: the title found, its streams, the player's first frame
@@ -186,6 +188,7 @@ async def _steps(agent, r: Run, details: dict, heard: str):
     r.at = 1
     before = agent.state.now_playing
     PLAN.set(", then ".join(r.labels[1:]))
+    REST.set(tuple(rest))
     t0, why = time.monotonic(), None
     try:
         out = await r.within(agent.execute(first, heard), PLAY_WAIT)
@@ -196,6 +199,7 @@ async def _steps(agent, r: Run, details: dict, heard: str):
         return False, f"Step 1 ({r.labels[0]}) didn't start within {PLAY_WAIT:.0f} s · not done: {r.left()}", details
     finally:
         PLAN.set("")
+        REST.set(())
     details.update({k: v for k, v in (out.details or {}).items() if k not in details})
     if not out.ok:
         return False, f"Step 1 ({r.labels[0]}): {out.say} · not done: {', '.join(r.labels[1:])}", details

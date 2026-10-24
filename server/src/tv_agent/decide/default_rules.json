@@ -766,6 +766,29 @@
       "note": "complaints that mean louder"
     },
     {
+      "id": "yes",
+      "say": [
+        "yes",
+        "yeah",
+        "yep",
+        "yes go there",
+        "go there",
+        "sí",
+        "si",
+        "vale",
+        "sí vale",
+        "venga",
+        "ve ahí",
+        "vete ahí",
+        "ahí"
+      ],
+      "do": {
+        "type": "pick",
+        "number": 1
+      },
+      "note": "the first (or only) thing on the list on screen: a scene found in another episode"
+    },
+    {
       "id": "cancel",
       "say": [
         "cancel",

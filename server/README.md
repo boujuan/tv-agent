@@ -23,7 +23,8 @@ playback and progress sync. Also the `tv-agent` command line and the MCP server.
 | Missed a line | "what did they say?", "say that again" | Back 10 s, subtitles on for a moment |
 | Intro, recap, credits | "skip the intro", "skip the recap", "skip the credits"; "auto skip on" / "off" | Jumps to the end of the part you're in, from TheIntroDB / IntroDB timestamps (or a chapter named "Opening"); an intro without either: 90 s ahead; credits: the next episode in binge mode. Auto skip (off by default, `auto_skip`) skips intros and recaps by themselves when their timestamps are sure |
 | Lists | "what was I watching?", "what's new?", "new films", then "number 2" / "the second one" | A numbered list on the TV (posters); the remote's OK or number keys pick too |
-| A moment | "go to the part where they kiss", "ve a la parte en la que le disparan" | Found in the subtitles of what's playing (the LLM reads them with their times); the line it was found by shows on the TV, then the player jumps there. A weak match is refused ([Chains](#chains-a-play-and-what-follows)) |
+| A moment | "go to the part where they kiss", "ve a la parte en la que le disparan", "jump to when Paul rides the worm" | Found in the subtitles of what's playing, in the language you asked in; the line it was found by shows on the TV, then the player jumps there. Not sure where: the places to pick from. In the episode before or after: offered ("yes" goes there). [Finding an episode or a scene](#finding-an-episode-or-a-scene) |
+| An episode described | "the Simpsons episode where Mr. Burns gets shot", "el capítulo de Breaking Bad de la mosca", "the Community Halloween episode" | Found by its plot (Wikipedia's and TVmaze's summaries, kept a week) and checked in its subtitles; when more than one fits, or none, up to 3 are listed to pick from: never a guess played |
 | Suggestions | "recommend something like Dark", "what should we watch?", "put on a comedy under 90 minutes", "recomiéndame una serie de miedo", "algo como La casa de papel" | The LLM suggests titles that fit, with what you watched lately as taste; each is checked by the title search (and its length, when you gave a limit), and the ones you've seen are left out; a numbered list on the TV, "number 2" plays it |
 | What's on | "what am I watching?", "where am I in Severance?" | The title, how far in and when it ends; your last episode of a title and how far in |
 | A few in one go | "pon el capítulo 5 de la segunda temporada de The Bear y vete al minuto 12", "play Dune Part Two and go to the scene where Paul rides the worm", "pon Oppenheimer desde el principio con subtítulos en español", "cancel" | A play, then up to two steps on what it plays, each once the last one is done: [Chains](#chains-a-play-and-what-follows) |
@@ -113,18 +114,60 @@ commands that can't be chained runs **the first one alone**, and the TV says wha
    playing goes on. In Kodi and Just Player, Back isn't seen: say "cancel". "Cancel" also stops a single start on
    its way, and says "Nothing to cancel" when there's none.
 
-**Scenes**: the subtitles searched are your subtitle addons' for that episode or film (the ones the episode check
-kept, with their measured shift, else the addons' for that file; a file's own embedded subtitles would mean reading
-the whole file). The LLM quotes the subtitle line it places the moment by, with the time listed before it, and says
-how: said in the moment, the line just before a moment without words, or a guess from the story. The agent finds
-that line in the subtitles itself and jumps 3 s before it (the model's own arithmetic was once 7 hours off). Refused:
-a guess, a line that isn't in the subtitles, one said in more than one place with no time to tell them apart, and a
-description cut off while it was said ("… where Paul rides the": say it again). The line shows on the TV for 2.5 s
-before the jump. Single "go to the part where …" commands get the same checks.
+**Scenes and episodes described** are found as [below](#finding-an-episode-or-a-scene); a chain's play that
+lists episodes to pick from stops there, and the pick goes on with the chain's other steps.
 
 `scripts/bench_chains.py` decides the chained sentences of `eval/chains.jsonl` with your setup (rules, the LLM) and
 judges each step; `--off llm` for the rules alone. Chained commands said to the TV become voice tests like any
 other (`scripts/bench_voice.py --seed`, below).
+
+## Finding an episode or a scene
+
+`finding.py`. Nothing other than what you asked for plays without asking: when it isn't clear, a list to pick from
+("number 2"; "yes" or "sí" for the first).
+
+**An episode** by its name ("Advanced Dungeons & Dragons") is matched at once. By what happens in it:
+
+1. Each episode's plot: Cinemeta's line, TVmaze's summary and English Wikipedia's ("List of … episodes" and each
+   season's page, which tell the side plots too), kept a week in `~/.local/share/tv-agent/finding/plots/`, and
+   fetched ahead for the shows in your Continue Watching when the mic opens (the first time for a long show takes
+   ~3 s: The Simpsons is 39 pages).
+2. Meanwhile the LLM gives the words to look for in English and Spanish, and up to 3 episodes it knows it could be.
+3. The plots are ranked by those words here (BM25, milliseconds); the best 10 and the LLM's guesses go to the LLM
+   with their whole plots. It says which fit, each "exactly" (what was asked happens in it) or "partly".
+4. Exactly one fits exactly: it plays, once its subtitles (fetched while the LLM chose) have some of the words; a
+   pick whose subtitles say none of them is listed instead. More than one (the Halloween episodes), or only partly
+   ones: listed. None: the subtitles of the likeliest 30 episodes are searched for 3 s, then the closest listed.
+
+**A scene** of what's playing:
+
+1. A description cut off while it was said ("… where Paul rides the") is refused: say it again.
+2. Its subtitles in the language you asked in first, hearing-impaired ones before plain (their [sound cues] tell
+   what happens), then the other language. Kept on disk (`finding/subs/`) and fetched ahead from every addon when a
+   title starts; a search doesn't wait for slow addons (OpenSubtitles PRO answers in 6-9 s): what the fast ones
+   (SubSense, ~0.5 s) give is used, and the rest is there next time.
+3. The words to look for, in both languages and the show's own names (Dune's worm is Shai-Hulud); the passages that
+   hold the most of them (your own words count more) go to the LLM: about 200 lines instead of 1,700.
+4. The LLM is asked twice at once and quotes the line it places the moment by; the agent finds that line in the
+   subtitles (the model's own arithmetic was once 7 hours off), and it must be among the passages with your words.
+   Both answers at the same place: the jump, 3 s before the line, after the line shows on the TV in your language
+   (translated when the subtitles were in the other). They differ: a third answer settles it, else the places are
+   listed to pick from.
+5. No passage has the words: the episodes before and after are searched the same way; found there, it's offered
+   (a list of one: "yes" goes there). Else: "it isn't in the subtitles": a moment without words or sounds in them
+   can't be found this way.
+
+Times are matched to the file playing: the episode check measured how far its subtitles are from the file, and the
+subtitles searched are matched to those line by line. `scripts/bench_finding.py` times both with your addons and
+the LLM on `eval/finding.jsonl` (cold: nothing kept; warm), nothing sent to the TV:
+
+| 2026-10-24 | episode, cold | episode, warm | scene, cold | scene, warm | right |
+|---|---|---|---|---|---|
+| Before (Cinemeta's lines, one LLM pick; all the subtitles to the LLM) | p50 0.40 s | p50 0.38 s | p50 0.75 s, p95 1.9 s | p50 0.36 s | episodes 4/8 (Spanish ones and "the Halloween episode" wrong), scenes 1/2 |
+| After | p50 2.0 s, p95 7.4 s | p50 1.2 s, p95 2.1 s | p50 1.9-5.2 s | p50 1.0 s, p95 1.8 s | episodes 7/8 (the Halloween, paintball and D&D ones listed), scenes 14 of 16 runs right, 1 listed |
+
+The cold numbers are a show's or a film's first time ever; a title started fetches its subtitles ahead, and the
+plots of what you're watching are kept, so a real request is usually the warm one.
 
 ## Player: TV Agent Player, Kodi or Just Player
 
@@ -476,6 +519,7 @@ rm -rf ~/.config/tv-agent ~/.local/share/tv-agent ~/.local/opt/llama.cpp ~/.loca
 | `src/tv_agent/decide/` | `router.py` (the decision path), `rules.py` + `default_rules.json` (the rules engine and defaults), `text.py`, `numbers.py`, `d1.py`, `evaluate.py` |
 | `src/tv_agent/actions.py`, `agent.py` | The closed action set and what each one does on the TV |
 | `src/tv_agent/decide/chain.py`, `chain.py` | Chains: reading one (rules, the LLM's checked proposal), running one (plan, proof of each step, stop, cancel) |
+| `src/tv_agent/finding.py` | Finding an episode or a scene from a description: plots (TVmaze, Wikipedia), subtitles kept, ranking, the LLM's answers compared |
 | `src/tv_agent/tv/` | `adb.py` (the only shell path), `apps.py`, `media.py`, `kodi.py`, `justplayer.py` |
 | `src/tv_agent/stremio/` | `account.py` (API, link login), `cinemeta.py`, `streams.py`, `subtitles.py`, `library.py`, `progress.py` |
 | `src/tv_agent/languages.py` | Audio/subtitle rule and track matching |
@@ -483,6 +527,6 @@ rm -rf ~/.config/tv-agent ~/.local/share/tv-agent ~/.local/opt/llama.cpp ~/.loca
 | `src/tv_agent/mcp_server.py` | MCP tools for Claude Code (`tv-agent-mcp`) |
 | `systemd/` | User services for a packaged install (`tv-agent setup services` writes them for a checkout) |
 | `src/tv_agent/voicetests.py` | Voice tests: labels for kept recordings, seeded from the history; comparing runs |
-| `scripts/` | `fetch-models.sh`; `bench_voice.py` (your voice tests), `bench_fallbacks.py` (decision paths and models on `eval/`), `bench_chains.py` (chained commands), Phase 0 benchmarks |
-| `eval/` | `utterances.jsonl` (107 labelled sentences, the panel's tests), `commands.jsonl` (654, made by `build_commands.py`: every action, titles made of command words, numbers in every form, fillers, mishearings, non-commands), `chains.jsonl` (chained commands, ones that aren't, ones refused) |
+| `scripts/` | `fetch-models.sh`; `bench_voice.py` (your voice tests), `bench_fallbacks.py` (decision paths and models on `eval/`), `bench_chains.py` (chained commands), `bench_finding.py` (episodes and scenes from a description, timed), Phase 0 benchmarks |
+| `eval/` | `utterances.jsonl` (107 labelled sentences, the panel's tests), `commands.jsonl` (654, made by `build_commands.py`: every action, titles made of command words, numbers in every form, fillers, mishearings, non-commands), `chains.jsonl` (chained commands, ones that aren't, ones refused), `finding.jsonl` (episodes and scenes described, with the right answers) |
 | `tests/` | Offline unit tests |

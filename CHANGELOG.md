@@ -6,6 +6,20 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 
 ## server — unreleased
 
+### Added
+- Episodes described ("the one where Mr. Burns gets shot", "el capítulo de la mosca") are found by their plots:
+  TVmaze's and English Wikipedia's summaries (side plots too), kept a week and fetched ahead for the shows you're
+  watching; the LLM gives the words to look for in English and Spanish and its own guesses, the plots are ranked
+  locally, and it says which candidates fit exactly. One that fits exactly plays once its subtitles have some of the
+  words; more than one (the Halloween episodes), only partly ones, or none: up to 3 listed to pick from (after a
+  3-second search of the likeliest episodes' subtitles). A chain stopped at the list goes on after the pick.
+- Scenes are searched in the subtitles of the language you asked in, hearing-impaired ones first, kept on disk and
+  fetched ahead when a title starts; only the passages with the words go to the LLM (~200 lines), which is asked
+  twice at once: two places, a third answer; still two, both listed to pick from. In the episode before or after
+  instead: offered ("yes" goes there). The line shows on the TV in your language. "Yes" / "sí" picks the first of a
+  list. `scripts/bench_finding.py`, `eval/finding.jsonl`: before 4/8 episodes right, after 7/8; README "Finding an
+  episode or a scene" has the timings.
+
 ### Fixed
 - Binge mode: the next episode didn't start at the end of an episode ("Couldn't start the next episode"): a start
   made in the background wrote into the finished record of the command before it (since server 0.6.0). The same
