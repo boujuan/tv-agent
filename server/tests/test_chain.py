@@ -259,15 +259,16 @@ class Agent:
 
     def __init__(self, started="tt1:2:5", hang=(), fail=()):
         self.tvplayer, self.state, self.cfg = Player(), State(), types.SimpleNamespace(player="tvplayer")
-        self.done, self.shown, self.chain, self._verify_task = [], [], None, None
+        self.done, self.shown, self.chain, self._verify_task, self.heard = [], [], None, None, []
         self.started, self.hang, self.fail = started, hang, fail
         self.went_home = False
 
     async def notify(self, text):
         self.shown.append(text)
 
-    async def execute(self, a):
+    async def execute(self, a, heard=""):
         self.done.append(a.type)
+        self.heard.append(heard)
         if a.type in self.hang:
             await asyncio.Event().wait()
         if a.type in self.fail:
@@ -304,7 +305,7 @@ class Agent:
 
 def run(agent, *steps, during=None):
     async def go():
-        task = asyncio.create_task(chain.run(agent, A.Sequence(steps=list(steps))))
+        task = asyncio.create_task(chain.run(agent, A.Sequence(steps=list(steps)), "what was said"))
         if during:
             await during(agent, task)
         return await task
@@ -324,6 +325,7 @@ def test_the_plan_shows_first_then_each_step_once_the_last_is_done():
     assert agent.shown[0] == "The Bear S2E5, then 12:00, then pause · “cancel” or Back stops it"
     assert say == "Playing The Bear · S2E5 · To 12:00 · Pause" and agent.tvplayer.pos == 720_000
     assert details["chain"] == ["The Bear S2E5", "12:00", "pause"] and details["stages"]   # the start's record kept
+    assert agent.heard[0] == "what was said"            # the play gets the sentence (its loading screen quotes it)
 
 
 def test_a_failed_step_stops_the_chain_and_says_which_and_why():
@@ -400,6 +402,34 @@ def test_cancel_during_the_start_closes_its_loading_screen():
     assert not ok and say.startswith("Stopped: you said cancel") and agent.tvplayer.stopped
 
 
+def test_cancel_with_nothing_on_its_way_says_so_and_touches_nothing():
+    agent = Agent()
+    agent.tvplayer.pos, agent.tvplayer.last = 600_000, {"pos": {"pos": 600_000}}     # a title plays
+    assert asyncio.run(chain.cancel(agent)) == (False, "Nothing to cancel") and not agent.tvplayer.stopped
+
+
+def test_cancel_after_a_replaced_start_closes_its_loading_screen():
+    """server.start cancelled a start still finding streams; the player had kept an item it never loaded."""
+    agent = Agent()
+    agent.tvplayer.pos, agent.tvplayer.last, agent.tvplayer._coming = 0, {}, ("tt2", "tt2#1")
+
+    async def go():
+        chain.INTERRUPTED.set(True)
+        return await chain.cancel(agent)
+    assert asyncio.run(go()) == (True, "Cancelled") and agent.tvplayer.stopped
+
+
+def test_cancel_leaves_what_plays_behind_the_loading_screen():
+    agent = Agent()
+    agent.tvplayer.pos, agent.tvplayer.last, agent.tvplayer._coming = 600_000, {"pos": {}}, ("tt2", "tt2#1")
+    cleared = []
+
+    async def clear_loading():
+        cleared.append(True)
+    agent.tvplayer.clear_loading = clear_loading
+    assert asyncio.run(chain.cancel(agent)) == (True, "Cancelled") and cleared and not agent.tvplayer.stopped
+
+
 def test_back_in_the_player_stops_the_chain():
     agent = Agent(hang=("transport",))
 
@@ -445,9 +475,9 @@ def test_a_language_step_waits_for_the_episode_check_and_is_checked():
         agent._verify_task = asyncio.create_task(verdict())
     real = agent.execute
 
-    async def execute(a):
+    async def execute(a, heard=""):
         order.append(a.type)
-        return await real(a)
+        return await real(a, heard)
     agent.execute = execute
     ok, say, _ = run(agent, BEAR, A.Tracks(subtitles="spa"), during=with_check)
     assert ok and order == ["play_title", "verdict", "tracks"]
@@ -457,8 +487,8 @@ def test_a_language_that_doesnt_take_fails_the_step():
     agent = Agent()
     real = agent.execute
 
-    async def execute(a):
-        out = await real(a)
+    async def execute(a, heard=""):
+        out = await real(a, heard)
         agent.tvplayer.subtitle = None if a.type == "tracks" else agent.tvplayer.subtitle
         return out
     agent.execute = execute
@@ -466,22 +496,58 @@ def test_a_language_that_doesnt_take_fails_the_step():
     assert not ok and say.startswith("Step 2 (Spanish subtitles) didn't finish within")
 
 
-# ---- a scene: weak matches refused ----
+# ---- a scene: placed by the line quoted, weak matches refused ----
 
 CUES = [(n * 1000, f"line number {n}") for n in range(1, 300)] + [(280_000, "Long live the fighters!")]
+CUES += [(7 * 60_000 + 20_000, "We don't kill. We never kill."), (500_000, "Then we'll eat"), (502_000, "what's left.")]
+CUES.sort()
 
 
-@pytest.mark.parametrize("secs,line,how,why", [
-    (100, "line number 100", "guess", "the subtitles don't show it"),
-    (100, "line number 100", "", "no reason given"),
-    (100, "ok", "words", "no line to place it by"),
-    (100, "we ride the worm at dawn", "words", "isn't in the subtitles there"),     # made up
-    (100, "long live the fighters", "words", "isn't in the subtitles there"),       # from another part
+@pytest.mark.parametrize("at,line,how,why", [
+    ("1:40", "line number 100", "guess", "the subtitles don't show it"),
+    ("1:40", "line number 100", "", "no reason given"),
+    ("1:40", "ok", "words", "no line to place it by"),
+    ("1:40", "we ride the worm at dawn", "words", "isn't in the subtitles"),               # made up
 ])
-def test_weak_scene_matches_are_refused(secs, line, how, why):
-    assert why in chain.weak_scene(secs, line, how, CUES)
+def test_weak_scene_matches_are_refused(at, line, how, why):
+    ms, said = chain.place_scene(at, line, how, CUES)
+    assert ms is None and why in said
 
 
-def test_a_scene_placed_by_its_line_is_trusted():
-    assert chain.weak_scene(100, "Line number 101!", "words", CUES) is None
-    assert chain.weak_scene(100, "<i>line number 99</i>", "around", CUES) is None
+def test_a_scene_is_placed_by_the_line_quoted_not_the_models_arithmetic():
+    assert chain.place_scene("1:41", "Line number 101!", "words", CUES) == (101_000, "")
+    assert chain.place_scene("1:39", "<i>line number 99</i>", "around", CUES) == (99_000, "")
+    # 2026-10-24, Pluribus: the model said 26400 s for a line listed at 7:20; the line is what counts
+    assert chain.place_scene("7:20:00", "We don't kill.", "words", CUES) == (440_000, "")
+    assert chain.place_scene("", "Then we'll eat what's left.", "around", CUES) == (500_000, "")   # two cues
+
+
+def test_a_line_said_in_two_places_needs_its_time():
+    cues = [(60_000, "Run!"), (61_000, "Get to the choppa now"), (900_000, "Get to the choppa now")]
+    assert chain.place_scene("15:00", "Get to the choppa now", "words", cues) == (900_000, "")
+    ms, why = chain.place_scene("3:00", "Get to the choppa now", "words", cues)
+    assert ms is None and why == "that line is said in more than one place"
+
+
+@pytest.mark.parametrize("text,cut", [
+    ("paul rides the", True), ("Mr. Chang dances with", True), ("Play Dune: Part Two and go to the scene where "
+                                                                 "Paul rides the", True),
+    ("carol se entera de que", True), ("paul rides the worm", False),
+    ("carol se entera de que comen carne humana", False), ("they kiss", False), ("", False),
+])
+def test_a_description_cut_off_while_it_was_said(text, cut):
+    assert chain.cut_off(text) is cut
+
+
+def test_a_start_made_later_in_the_background_writes_nothing_into_a_finished_record():
+    """The next episode (binge), another copy: started from the context of the command that started the first one,
+    whose record was already handed over (2026-10-24: "after … ended: KeyError", the next episode never started)."""
+    from tv_agent import agent as agent_mod
+
+    async def go():
+        record = {"title": {"name": "Community"}}            # handed over: its "_t0" is gone
+        agent_mod.START.set(record)
+        agent_mod._step("start", "streams", 5)
+        agent_mod._note_title(by="search")
+        return record
+    assert asyncio.run(go()) == {"title": {"name": "Community"}}

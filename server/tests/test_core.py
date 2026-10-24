@@ -1763,7 +1763,7 @@ def test_the_scene_search_jumps_to_where_the_llm_found_the_moment(monkeypatch):
     class Llm:
         async def find_moment(self, title, wanted, text):
             seen.update(title=title, wanted=wanted, first=text.splitlines()[0])
-            return 30, "line 30", "words"
+            return "0:30", "0:30 line 30", "words"      # the time it was listed with, copied into the line too
 
     async def addons():
         return []
@@ -1785,8 +1785,8 @@ def test_the_scene_search_jumps_to_where_the_llm_found_the_moment(monkeypatch):
                                cfg=types.SimpleNamespace(subtitle_languages=["eng"]), _transport=transport,
                                checks=types.SimpleNamespace(get=lambda *a: None), episode_subs=no_subs, notify=notify)
     out = asyncio.run(Agent._find_scene(me, A.FindScene(what="Mr. Burns gets shot")))
-    assert out.ok and jumped == [A.Transport(op="seek_to", seconds=28)]      # a moment before it
-    assert shown == [("0:30: “line 30”", [])] and out.details == {"scene_ms": 28_000}    # the line before the jump
+    assert out.ok and jumped == [A.Transport(op="seek_to", seconds=27)]      # a moment before it
+    assert shown == [("0:30: “line 30”", [])] and out.details == {"scene_ms": 27_000}    # the line before the jump
     assert seen == {"title": "The Simpsons S6E25", "wanted": "Mr. Burns gets shot", "first": "0:01 line 1"}
 
     async def kept(video, lang="eng"):          # the episode's subtitles from checking the file, 3 s later than it
@@ -1795,7 +1795,7 @@ def test_the_scene_search_jumps_to_where_the_llm_found_the_moment(monkeypatch):
     me.checks = types.SimpleNamespace(get=lambda *a: Verdict("tt1:6:25", True, shift=3.0))
     jumped.clear()
     asyncio.run(Agent._find_scene(me, A.FindScene(what="Mr. Burns gets shot")))
-    assert jumped == [A.Transport(op="seek_to", seconds=25)]
+    assert jumped == [A.Transport(op="seek_to", seconds=24)]      # 3 s earlier in this file, 3 s before the line
     me.state.now_playing = None
     assert asyncio.run(Agent._find_scene(me, A.FindScene(what="x"))).say == "Nothing of yours is playing to search"
 

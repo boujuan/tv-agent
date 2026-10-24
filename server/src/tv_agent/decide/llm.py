@@ -141,11 +141,11 @@ several episodes, the first one. Answer only with the JSON object: its id, or nu
 SCENE_SYSTEM = """Someone watching a film or episode ("watching") asked to jump to a moment they described
 ("wanted", maybe misremembered). Below are its subtitles, one cue per line: "m:ss text" (or "h:mm:ss"). Find where
 that moment starts: what's said just before or as it happens; a moment without words (a gunshot, a kiss) is between
-the lines around it, and what you know about the story helps place it. Answer only with the JSON object: "seconds"
-from the start (a few seconds before the moment), "line", the subtitle you placed it by, copied exactly, and "how":
-"words" when that line is said in the moment itself or right as it happens, "around" when the moment has no words of
-its own and the lines around it place it, "guess" when these lines don't show it and only the story would; all null
-when it isn't there."""
+the lines around it, and what you know about the story helps place it. Answer only with the JSON object: "line", the
+subtitle you placed it by (said in the moment, or the last line before it), copied exactly without its time; "at",
+the time listed before that line, copied exactly ("51:25"); and "how": "words" when that line is said in the moment
+itself or right as it happens, "around" when the moment has no words of its own and the lines around it place it,
+"guess" when these lines don't show it and only the story would; all null when it isn't there."""
 
 
 class Llm:
@@ -259,11 +259,12 @@ class Llm:
         got = (json.loads(content) if isinstance(content, str) else content).get("id")
         return got if got in ids else None
 
-    async def find_moment(self, title: str, wanted: str, lines: str) -> tuple[int | None, str, str]:
-        """When a described moment happens, from the subtitles ("m:ss line" per cue): (seconds, the line, how it was
-        placed: "words", "around" or "guess"); seconds None when it isn't there."""
-        schema = {"type": "object", "additionalProperties": False, "required": ["seconds", "line", "how"],
-                  "properties": {"seconds": {"type": ["integer", "null"]}, "line": {"type": ["string", "null"]},
+    async def find_moment(self, title: str, wanted: str, lines: str) -> tuple[str, str, str]:
+        """Which subtitle line a described moment is placed by, from the subtitles ("m:ss line" per cue): (its time as
+        listed, the line, how it was placed: "words", "around" or "guess"); empty when it isn't there. Its time is
+        the listed one, copied: the agent finds the line itself (a model's own arithmetic was hours off)."""
+        schema = {"type": "object", "additionalProperties": False, "required": ["line", "at", "how"],
+                  "properties": {"line": {"type": ["string", "null"]}, "at": {"type": ["string", "null"]},
                                  "how": {"type": ["string", "null"], "enum": ["words", "around", "guess", None]}}}
         data = await self._post({
             "max_tokens": 120,
@@ -276,9 +277,7 @@ class Llm:
         self.last_usage = data.get("usage") or {}
         content = data["choices"][0]["message"]["content"]
         got = json.loads(content) if isinstance(content, str) else content
-        secs = got.get("seconds")
-        return (secs if isinstance(secs, int) and secs >= 0 else None), str(got.get("line") or "")[:160], \
-            str(got.get("how") or "")
+        return str(got.get("at") or "")[:12], str(got.get("line") or "")[:160], str(got.get("how") or "")
 
     async def answer(self, said: str, context: dict) -> tuple[bool, A.Action | None]:
         """(whether it answered, its action or None for "not a command")."""

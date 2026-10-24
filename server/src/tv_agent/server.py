@@ -281,12 +281,15 @@ class Service:
             await self.agent.notify(out.say)
 
     def start(self, d: Decision, heard: str, source: str, extra: dict | None = None):
+        replaced = False
         if d.action.type not in ("volume", "binge", "timer", "auto_skip", "info", "help"):
             # A new request replaces one still starting something (a stream search, a binge start); a volume or
             # mode change, a question or the help on the way doesn't.
             for task in (self._running, self.agent._end_task):
                 if task and not task.done():
                     task.cancel()
+                    replaced = True
+        chain.INTERRUPTED.set(replaced)            # "cancel" knows there was a start to stop (copied into the task)
         self._running = asyncio.create_task(self.run(d, heard, source, extra))
 
     async def decide(self, text: str) -> Decision:

@@ -96,14 +96,16 @@ PROBE_AT_MOST = 4           # copies whose tracks are read at once when none say
 
 def _note_title(**fields):
     """Into the record of the start being made (START): the title it found, and how."""
-    if (record := START.get()) is not None:
+    if (record := START.get()) is not None and "_t0" in record:
         record.setdefault("title", {}).update(fields)
 
 
 def _step(stage: str, step: str, ms: float | None = None, done: float | None = None, **fields):
     """One step of the start being made, into its trace (START), as the panel draws it: what ran, what it found, how
-    long it took (`ms`) and when it ended (`at`: ms since the command began; `done` is that moment, if not now)."""
-    if (record := START.get()) is not None:
+    long it took (`ms`) and when it ended (`at`: ms since the command began; `done` is that moment, if not now).
+    A start made later in the background (the next episode, another copy) runs in the context of the command that
+    made the first one, whose record is finished (no "_t0"): nothing is added to it."""
+    if (record := START.get()) is not None and "_t0" in record:
         entry = {"stage": stage, "step": step, **({"ms": round(ms)} if ms is not None else {}),
                  "at": round(((done or time.perf_counter()) - record["_t0"]) * 1000)}
         record.setdefault("trace", []).append(entry | {k: v for k, v in fields.items() if v is not None})
@@ -961,9 +963,16 @@ class Agent:
                     await self.kodi.stop(kodi)
                 if loading is not None:
                     loading.at("Starting…")
-                await self.tvplayer.open(link, resume_ms, item=video, title=label, headers=chosen.headers or None,
-                                         audio=plan.audio, subs=plan.subs_for(plan.audio),
-                                         info=_title_screen(name, meta, video) | _stream_screen(chosen))
+                try:
+                    await self.tvplayer.open(link, resume_ms, item=video, title=label,
+                                             headers=chosen.headers or None, audio=plan.audio,
+                                             subs=plan.subs_for(plan.audio),
+                                             info=_title_screen(name, meta, video) | _stream_screen(chosen))
+                except tvplayer.PlayerError:
+                    if self.tvplayer.up:
+                        raise
+                    log.info("the player was closed before %s started", video)    # Back on its loading screen
+                    return Outcome(False, f"Stopped: the player was closed before {label} started")
                 if kodi_open is not None and not kodi_open.done():
                     asyncio.create_task(self._stop_kodi_when(kodi_open))
                 t_open = time.perf_counter()
@@ -1508,6 +1517,7 @@ class Agent:
         at_end = bool(duration and last is not None and duration - last <= 8000)
         after, self._after_this = self._after_this, None
         HEARD.set("")                           # what starts now wasn't said (this runs in that start's context)
+        START.set(None)                         # nor is it that command's start
         try:
             if at_end and after == "off":
                 await self._turn_off()
@@ -2284,6 +2294,8 @@ class Agent:
             return Outcome(False, "Nothing of yours is playing to search")
         if self.llm is None:
             return Outcome(False, "Finding a moment needs the LLM (Settings › API keys: OpenRouter)")
+        if chain.cut_off(a.what) or chain.cut_off(HEARD.get()):          # "… where Paul rides the"
+            return Outcome(False, f"“{a.what}” sounds cut off: say it again")
         # The episode's subtitles kept from checking the file (episode_check.py), with how far their times are from
         # this file's; else what the addons have for it now.
         shift = (v.shift or 0.0) if (v := self.checks.get(np.filename, np.size, np.video_id)) and v.ok else 0.0
@@ -2315,24 +2327,27 @@ class Agent:
         title = np.name + (f" S{m.group(1)}E{m.group(2)}" if m else "")
         lines = "\n".join(f"{_clock(ms)} {words[:90]}" for ms, words in found[:3000])
         try:
-            secs, line, how = await self.llm.find_moment(title, a.what, lines)
+            at, line, how = await self.llm.find_moment(title, a.what, lines)
         except (httpx.HTTPError, KeyError, IndexError, ValueError, TypeError) as e:
             log.info("scene search unavailable (%s)", type(e).__name__)
             return Outcome(False, "Couldn't search for that moment right now")
-        if secs is None:
+        if not at and not line:
             return Outcome(False, f"Couldn't find “{a.what}”")
-        if why := chain.weak_scene(secs, line, how, found):
-            log.info("moment %r of %s refused: %s (%d s, %r, %s)", a.what, title, why, secs, line, how)
+        line = re.sub(r"^\d+:\d\d(?::\d\d)?\s+", "", line)       # the time it was listed with, copied too
+        ms, why = chain.place_scene(at, line, how, found)
+        if ms is None:
+            log.info("moment %r of %s refused: %s (%s, %r, %s)", a.what, title, why, at, line, how)
             return Outcome(False, f"Not sure where “{a.what}” is: {why}")
-        log.info("moment %r of %s at %d s (%r, %s)%s", a.what, title, secs, line, how,
+        log.info("moment %r of %s at %s (%r, %s)%s", a.what, title, _clock(ms), line, how,
                  f", {shift:+.1f} s in the subtitles" if shift else "")
-        secs = max(0, round(secs - shift))
+        secs = max(0, round(ms / 1000 - shift))
         await self.notify(f"{_clock(secs * 1000)}: “{line}”")     # the line it's placed by, shown before the jump
         await asyncio.sleep(chain.SCENE_SHOWN)
-        out = await self._transport(Transport(op="seek_to", seconds=max(0, secs - 2)))
+        target = max(0, secs - chain.SCENE_BEFORE)
+        out = await self._transport(Transport(op="seek_to", seconds=target))
         if not out.ok:
             return out
-        return Outcome(True, f"To {_clock(secs * 1000)}: “{line}”", {"scene_ms": max(0, secs - 2) * 1000})
+        return Outcome(True, f"To {_clock(secs * 1000)}: “{line}”", {"scene_ms": target * 1000})
 
     async def _recommend(self, a: Recommend) -> Outcome:
         """Suggestions for a request ("something like Dark", "a short comedy"): the LLM proposes titles, with your
@@ -2507,7 +2522,7 @@ class Agent:
 
     async def _sequence(self, a: Sequence) -> Outcome:
         """A chain: a play, then one or two steps on what it plays, each once the one before is done (chain.py)."""
-        ok, say, details = await chain.run(self, a)
+        ok, say, details = await chain.run(self, a, HEARD.get())
         return Outcome(ok, say, details)
 
     async def _cancel(self, a: Cancel) -> Outcome:

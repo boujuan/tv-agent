@@ -274,6 +274,30 @@ def test_play_brings_the_player_up_during_the_search_and_loads_in_place():
     assert np.player == "tvplayer" and np.video_id == "tt1:1:2"
 
 
+def test_back_on_the_loading_screen_stops_the_start_and_says_so():
+    """The player closed while the streams were looked up (Back): the start says it stopped, not a PlayerError."""
+    async def run():
+        player = FakeTvPlayer(pos=None)
+        a = bare_agent(player)
+
+        async def nothing(*args, **kw):
+            return None
+
+        async def found(kind, video, meta):
+            return [S.Stream("AIOStreams", "https://x/1", "4K", "", "X.S01E02.mkv", 0, library=True)]
+
+        async def closed_player(url, resume_ms=0, **kw):
+            raise T.PlayerError("the player isn't open")
+        a.account, a.notify, a.streams_for, a._kodi_player, a.adb = object(), nothing, found, nothing, object()
+        a.track_plan = lambda meta: languages.TrackPlan("eng", None)
+        a._replace_session = lambda video, resume_ms, exact=False: resume_ms
+        player.open = closed_player
+        return await Agent.play(a, "tt1", "series", "X", "tt1:1:2", "X S1E2", META), a.state.now_playing
+
+    out, np = asyncio.run(run())
+    assert not out.ok and out.say == "Stopped: the player was closed before X S1E2 started" and np is None
+
+
 def test_a_preloaded_next_episode_opens_with_the_link_it_was_preloaded_with():
     async def run():
         player = FakeTvPlayer(pos=None)
