@@ -105,7 +105,8 @@ Speech-to-text can also be hosted (`stt_where = "hosted"`, or `"hosted-first"` w
 or `"local-first"`, hosted only when this laptop's model fails, hears nothing or writes in another script): an
 OpenRouter transcription model (`stt_hosted_model`) gets the recording at the same checkpoints, with a language hint
 (`stt_language`, your native language by default) and, for AssemblyAI, a vocabulary of names to hear as written
-(`stt_vocabulary`, plus your library's titles and Twitch favourites with `stt_vocabulary_library`; the first 100 go,
+(`stt_vocabulary`, or the hint's own list in `stt_vocabularies`, plus your library's titles and Twitch favourites with
+`stt_vocabulary_library`; the first 100 go,
 most likely first: what's playing and Continue Watching, yours, what you watched, Twitch, the rest of the library;
 the titles as Stremio names them with a Spanish hint, Cinemeta's original names with an English one, both without a
 hint). Parakeet guesses
@@ -262,7 +263,7 @@ Localhost (127.0.0.1:8766), for the panel, the CLI and the MCP server, same toke
 | `GET /v1/state`, `GET /v1/stats` | what's playing; latency per stage |
 | `GET/POST /v1/rules`, `POST /v1/rules/reset`, `/reload` | the decision rules (checked, saved, live) |
 | `POST /v1/eval` `[{"rules"}]` | score the labelled sentences, optionally with unsaved rules |
-| `GET/POST /v1/pipeline` | decision steps, models, speech-to-text (where, models, loaded, keep recordings, language hint, vocabulary; `stt_vocabulary_sent`: every name sent, in the order sent), live |
+| `GET/POST /v1/pipeline` | decision steps, models, speech-to-text (where, models, loaded, keep recordings, language hint, vocabulary; `stt_vocabulary_sent`: every name sent, in the order sent; `stt_vocabularies`: each hint's own names, set one language at a time, `null` removes one; `stt_vocabulary_sent_by_language`: what each hint would send), live |
 | `POST /v1/transcribe` `{"recording", "where", "model"}` | transcribe a kept recording again |
 | `GET /v1/tv/status`; `POST /v1/tv/speedtest`, `/diagnose`, `/reconnect` | the TV, its network and the ADB link |
 | `POST /v1/tv/key` `{"key"}`; `GET /v1/tv/screenshot` | a key from a fixed list; the screen as PNG |

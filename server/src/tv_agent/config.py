@@ -62,6 +62,9 @@ class Config:
     # Names the hosted model should hear (AssemblyAI's keyterms: "Stremio", not "este remedio"), and whether your
     # library's titles and Twitch favourites are added to them
     stt_vocabulary: list[str] = field(default_factory=lambda: list(STT_VOCABULARY))
+    # A language hint's own names ("es", "en"), used instead of stt_vocabulary while that hint is on; a hint without
+    # a list of its own (and no hint) uses stt_vocabulary
+    stt_vocabularies: dict[str, list[str]] = field(default_factory=dict)
     stt_vocabulary_library: bool = True
     keep_recordings: bool = False           # each command's audio kept (the last 300), playable in the Activity tab
     kodi_port: int = 8080
@@ -145,6 +148,10 @@ def load() -> Config:
         raise SystemExit(f"{CONFIG_FILE}: stt_language must be \"native\", \"\" or a two-letter code such as \"es\"")
     if not isinstance(cfg.stt_vocabulary, list) or not all(isinstance(x, str) for x in cfg.stt_vocabulary):
         raise SystemExit(f"{CONFIG_FILE}: stt_vocabulary must be a list of words and names")
+    if not isinstance(cfg.stt_vocabularies, dict) or not all(
+            re.fullmatch(r"[a-z]{2}", k) and isinstance(v, list) and all(isinstance(x, str) for x in v)
+            for k, v in cfg.stt_vocabularies.items()):
+        raise SystemExit(f"{CONFIG_FILE}: stt_vocabularies must be a table of lists by language: {{es = [\"…\"]}}")
     if cfg.d1_where not in D1_WHERE:
         raise SystemExit(f"{CONFIG_FILE}: d1_where must be one of {', '.join(D1_WHERE)}")
     if SECRETS_FILE.exists():
@@ -207,7 +214,10 @@ def save_secret(name: str, value: str | None):
 def set_value(cfg: Config, key: str, value):
     """Change one setting in config.toml (its line, or a new one) and in cfg; the rest of the file is kept."""
     assert key in Config.__dataclass_fields__ and key != "secrets", key
-    line = f"{key} = {json.dumps(value)}\n"
+    if isinstance(value, dict):             # a TOML inline table: {es = ["…"], en = ["…"]}
+        line = f"{key} = {{{', '.join(f'{k} = {json.dumps(v)}' for k, v in value.items())}}}\n"
+    else:
+        line = f"{key} = {json.dumps(value)}\n"
     text = CONFIG_FILE.read_text() if CONFIG_FILE.exists() else ""
     lines = [line if l.split("=", 1)[0].strip() == key else l for l in text.splitlines(keepends=True)]
     if line not in lines:

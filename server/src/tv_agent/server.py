@@ -353,33 +353,38 @@ class Service:
         lang = self.cfg.stt_language
         return ANDROID_LOCALE.get(self.cfg.native_language, "").split("_")[0] if lang == "native" else lang
 
-    def stt_vocabulary(self) -> list[str]:
-        """The names the hosted model should hear, most likely first, since only VOCABULARY_MAX go: what's playing
-        and Continue Watching, then yours (Settings), what you watched before (newest first), your Twitch
-        favourites and the rest of the library. Command words aren't sent: the model hears those well, and they'd
-        take the names' places. The library part is refreshed in the background every 10 minutes.
+    def stt_vocabulary(self, lang: str | None = None) -> list[str]:
+        """The names the hosted model should hear with the language hint `lang` (the one set, by default), most
+        likely first, since only VOCABULARY_MAX go: what's playing and Continue Watching, then yours (the hint's own
+        list, else stt_vocabulary), what you watched before (newest first), your Twitch favourites and the rest of
+        the library. Command words aren't sent: the model hears those well, and they'd take the names' places. The
+        library part is refreshed in the background every 10 minutes.
 
-        The names follow the language hint, since the list's language leans how borderline words come out (English
+        The titles follow the hint too, since the list's language leans how borderline words come out (English
         names next to Spanish ones turned 4 of 91 kept commands worse, "Pause" into "Paws"; measured 2026-10-24):
         Stremio's names with a Spanish (or other) hint, as your library has them; Cinemeta's original names with
         an English one; both without a hint."""
+        lang = self.stt_language() if lang is None else lang
+        own = self.cfg.stt_vocabularies.get(lang, self.cfg.stt_vocabulary) if lang else self.cfg.stt_vocabulary
         if not self.cfg.stt_vocabulary_library:
-            return stt_mod.vocabulary(self.cfg.stt_vocabulary)
-        lang = self.stt_language()
+            return stt_mod.vocabulary(own)
         if time.monotonic() - self._library_names_at > 600:
             self._library_names_at = time.monotonic()
-            asyncio.create_task(self._refresh_library_names(other_names=lang in ("en", "")))
+            asyncio.create_task(self._refresh_library_names())
 
         def named(names: list[str]) -> list[str]:
             if lang == "en":
                 return [self._other_names.get(n) or n for n in names]
             return [m for n in names for m in (n, self._other_names.get(n, ""))] if lang == "" else names
         lib, np = self._library_names, self.agent.state.now_playing
-        return stt_mod.vocabulary(named([np.name] if np and np.name else []), named(lib.get("continue", [])),
-                                  self.cfg.stt_vocabulary, named(lib.get("recent", [])), self.cfg.twitch_favorites,
-                                  named(lib.get("rest", [])))
+        return stt_mod.vocabulary(named([np.name] if np and np.name else []), named(lib.get("continue", [])), own,
+                                  named(lib.get("recent", [])), self.cfg.twitch_favorites, named(lib.get("rest", [])))
 
-    async def _refresh_library_names(self, other_names: bool = False):
+    def vocabulary_languages(self) -> list[str]:
+        """The hints that can have a list of their own, the one set first: yours, Spanish, English, then none."""
+        return list(dict.fromkeys([self.stt_language(), "es", "en", *self.cfg.stt_vocabularies, ""]))
+
+    async def _refresh_library_names(self):
         try:
             items = await self.agent.library.items()
         except Exception as e:
@@ -393,8 +398,7 @@ class Service:
         recent = sorted((i for i in titles if watched(i) and not library_mod.in_continue_watching(i)), key=watched,
                         reverse=True)
         rest = sorted((i for i in titles if not watched(i)), key=lambda i: i.get("_ctime") or "", reverse=True)
-        if other_names:
-            await self._fetch_other_names((cont + recent + rest)[:stt_mod.VOCABULARY_MAX])
+        await self._fetch_other_names((cont + recent + rest)[:stt_mod.VOCABULARY_MAX])     # for the English list
         self._library_names = {"continue": [i["name"] for i in cont], "recent": [i["name"] for i in recent],
                                "rest": [i["name"] for i in rest]}
 
@@ -577,6 +581,18 @@ async def stream_session(svc: "Service", reader: asyncio.StreamReader, send, sou
             await asyncio.wait_for(reader.readexactly(n), 2)
     except (asyncio.TimeoutError, asyncio.IncompleteReadError, ConnectionError):
         pass
+
+
+def vocabulary_list(words, name: str) -> list[str]:
+    """Names as typed, each once (case aside), spaces tidied, at most 100 characters; 422 if it isn't a list."""
+    if not isinstance(words, list) or len(words) > 500 or not all(isinstance(w, str) for w in words):
+        raise HTTPException(422, f"{name}: a list of up to 500 words or names")
+    clean = []
+    for w in words:
+        w = " ".join(w.split())[:100]
+        if w and w.lower() not in {x.lower() for x in clean}:
+            clean.append(w)
+    return clean
 
 
 def unclear_say(text: str) -> str:
@@ -783,8 +799,12 @@ def local_app(svc: Service) -> FastAPI:
                 "stt_loaded": svc.stt is not None, "keep_recordings": c.keep_recordings, "d1_model": str(c.d1_model),
                 "stt_language": c.stt_language, "stt_language_now": svc.stt_language(),
                 "stt_vocabulary": list(c.stt_vocabulary), "stt_vocabulary_library": c.stt_vocabulary_library,
+                "stt_vocabularies": dict(c.stt_vocabularies), "stt_vocabulary_language": svc.stt_language(),
                 "stt_vocabulary_count": len(sent := svc.stt_vocabulary()),
                 "stt_vocabulary_sent": sent,        # all of it, as sent, most likely first (stt_vocabulary)
+                # what each hint would send: the panel shows the three lists side by side
+                "stt_vocabulary_sent_by_language": {lang: svc.stt_vocabulary(lang)
+                                                    for lang in svc.vocabulary_languages()},
                 "llama_server": c.llama_server}
 
     @app.get("/v1/pipeline")
@@ -853,15 +873,18 @@ def local_app(svc: Service) -> FastAPI:
                 raise HTTPException(422, "stt_language: native, \"\" (the model guesses) or a two-letter code")
             new["stt_language"] = lang
         if "stt_vocabulary" in body:
-            words = body["stt_vocabulary"]
-            if not isinstance(words, list) or len(words) > 500 or not all(isinstance(w, str) for w in words):
-                raise HTTPException(422, "stt_vocabulary: a list of up to 500 words or names")
-            clean = []
-            for w in words:
-                w = " ".join(w.split())[:100]
-                if w and w.lower() not in {x.lower() for x in clean}:
-                    clean.append(w)
-            new["stt_vocabulary"] = clean
+            new["stt_vocabulary"] = vocabulary_list(body["stt_vocabulary"], "stt_vocabulary")
+        if "stt_vocabularies" in body:           # {"es": [...]} sets Spanish's own list, {"es": null} removes it
+            lists = body["stt_vocabularies"]
+            if not isinstance(lists, dict) or not all(re.fullmatch(r"[a-z]{2}", str(k)) for k in lists):
+                raise HTTPException(422, "stt_vocabularies: lists by two-letter language code")
+            merged = dict(svc.cfg.stt_vocabularies)
+            for lang, words in lists.items():
+                if words is None:
+                    merged.pop(lang, None)
+                else:
+                    merged[lang] = vocabulary_list(words, f"stt_vocabularies.{lang}")
+            new["stt_vocabularies"] = merged
         for key in ("keep_recordings", "llm_private", "stt_vocabulary_library"):
             if key in body and not isinstance(body[key], bool):
                 raise HTTPException(422, f"{key}: true or false")
@@ -1034,7 +1057,7 @@ async def serve(cfg: Config):
         await svc.local_stt()               # hosted only: loaded if ever needed, ~1 GB of memory saved
     if cfg.stt_vocabulary_library:          # the first command's vocabulary has your titles too, not only the apps
         svc._library_names_at = time.monotonic()
-        asyncio.create_task(svc._refresh_library_names(other_names=svc.stt_language() in ("en", "")))
+        asyncio.create_task(svc._refresh_library_names())
     local = local_app(svc)
     listeners = svc.listeners = Listeners(svc, local)     # also read by /v1/clients (where phones can reach it)
     await listeners.load_certificate()

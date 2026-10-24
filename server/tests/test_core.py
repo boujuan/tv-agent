@@ -1300,7 +1300,7 @@ def _bare_service(monkeypatch, tmp_path):
     svc.cfg = types.SimpleNamespace(stt_where="hosted", stt_model="a", stt_hosted_model="x/y", keep_recordings=True,
                                     log_transcripts=True, secret=lambda k: "key", stt_language="native",
                                     native_language="spa", stt_vocabulary=["Stremio"], stt_vocabulary_library=False,
-                                    twitch_favorites=[])
+                                    twitch_favorites=[], stt_vocabularies={})
     svc._library_names, svc._library_names_at, svc._other_names = {}, 0.0, {}
     svc.agent = types.SimpleNamespace(http=None, state=types.SimpleNamespace(
         timings=types.SimpleNamespace(add=lambda *a: None), now_playing=None))
@@ -1512,17 +1512,21 @@ def test_the_vocabulary_sends_the_likeliest_names_first_in_the_hints_language(mo
                 next(i["name"] for i in items if i["_id"] == imdb_id)}
     monkeypatch.setattr(server.cinemeta, "meta", meta)
     asyncio.run(svc._refresh_library_names())
+    asyncio.run(svc._refresh_library_names())
     svc._library_names_at = 1e12
-    assert asked == []                                                      # a Spanish hint: Stremio's names only
+    assert sorted(asked) == ["tt1", "tt2", "tt3", "tt4", "tt5", "tt6"]       # each title's other name asked once
     assert svc.stt_vocabulary() == ["Severance", "Half Watched", "Stremio", "El señor de los anillos", "Old Film",
-                                    "Ibai", "Added Lately", "Never Watched"]
-    asyncio.run(svc._refresh_library_names(other_names=True))
-    asyncio.run(svc._refresh_library_names(other_names=True))
-    assert sorted(asked) == ["tt1", "tt2", "tt3", "tt4", "tt5", "tt6"]       # each title's name asked once
+                                    "Ibai", "Added Lately", "Never Watched"]     # a Spanish hint: Stremio's names
     svc.cfg.stt_language = "en"
     assert svc.stt_vocabulary()[3] == "The Lord of the Rings"
     svc.cfg.stt_language = ""
     assert svc.stt_vocabulary()[3:5] == ["El señor de los anillos", "The Lord of the Rings"]
+    # A hint's own list replaces yours while that hint is on; the others keep stt_vocabulary
+    svc.cfg.stt_vocabularies = {"es": ["Movistar Plus"]}
+    svc.cfg.stt_language = "native"
+    assert svc.stt_vocabulary()[2] == "Movistar Plus" and "Stremio" not in svc.stt_vocabulary()
+    assert svc.stt_vocabulary("en")[2] == "Stremio" and svc.stt_vocabulary("")[2] == "Stremio"
+    assert svc.vocabulary_languages() == ["es", "en", ""]
     svc._library_names = {"rest": [f"Film {i}" for i in range(150)]}
     assert len(svc.stt_vocabulary()) == stt.VOCABULARY_MAX == 100
 

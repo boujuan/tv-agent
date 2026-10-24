@@ -18,6 +18,26 @@ from .common import (AMBER, GREEN, RED, TV_AGENT, WHERE, ApiError, KeyLine, agen
 VOCABULARY_MAX = getattr(agent_stt, "VOCABULARY_MAX", 100)      # names the hosted model is sent with each command
 
 
+LANGUAGES = {"es": "Spanish", "en": "English", "": "No hint"}    # the vocabulary lists the panel names
+
+
+def language_label(code: str) -> str:
+    return LANGUAGES.get(code, code.upper())
+
+
+def hint_now(cfg) -> str:
+    """The language hint as the agent works it out ("native": your native language's code), for when it's stopped."""
+    if cfg.stt_language != "native":
+        return cfg.stt_language
+    from tv_agent.languages import ANDROID_LOCALE
+    return ANDROID_LOCALE.get(cfg.native_language, "").split("_")[0]
+
+
+def vocabulary_change(lang: str, names: list[str]) -> dict:
+    """Saving the names for one hint: its own list, or stt_vocabulary for no hint."""
+    return {"stt_vocabularies": {lang: names}} if lang else {"stt_vocabulary": names}
+
+
 def clean_names(words) -> list[str]:
     """Names as the agent keeps them: spaces collapsed, up to 100 characters, no repeats (in any case)."""
     out, seen = [], set()
@@ -37,6 +57,7 @@ class SpeechToText(QWidget):
         self._checked = ""
         self._dl_status = None
         self._vocab_shown = ""                  # the names as last shown in the field (to tell when they're edited)
+        self._vocab_lang = ""                   # whose names the field shows: the hint's in use ("": no hint)
         lay = QVBoxLayout(self)
         form = QFormLayout()
         self.where = QComboBox()
@@ -87,7 +108,8 @@ class SpeechToText(QWidget):
         self.vocabulary = QPlainTextEdit()
         self.vocabulary.setPlaceholderText("One name per line: Stremio, Better Call Saul…")
         self.vocabulary.setToolTip("Names the hosted model should hear as they're written (AssemblyAI only: other "
-                                   "models don't take a list). Few and distinctive works best.")
+                                   "models don't take a list), for the language hint in use: Spanish, English and no "
+                                   "hint each have their own (Show all). Few and distinctive works best.")
         self.vocabulary.setFixedHeight(96)
         save = QPushButton("Save vocabulary")
         save.clicked.connect(self.save_vocabulary)
@@ -150,12 +172,18 @@ class SpeechToText(QWidget):
         now = res.get("stt_language_now", "")
         self.language.setItemText(0, f"Your native language ({now})" if now else "Your native language")
         self.language.setCurrentIndex(max(0, self.language.findData(res.get("stt_language", "native"))))
+        lang = res.get("stt_vocabulary_language", "")
+        own = (res.get("stt_vocabularies") or {}).get(lang) if lang else None
         if not self.vocabulary.hasFocus():
-            self._vocab_shown = "\n".join(res.get("stt_vocabulary") or [])
+            self._vocab_lang = lang
+            self._vocab_shown = "\n".join(own if own is not None else res.get("stt_vocabulary") or [])
             self.vocabulary.setPlainText(self._vocab_shown)
         self.vocab_library.setChecked(bool(res.get("stt_vocabulary_library")))
         assembly = res.get("stt_hosted_model", "") in agent_stt.USES_VOCABULARY
-        self.vocab_state.setText(f"{res.get('stt_vocabulary_count', 0)} names sent with each command"
+        whose = (f"the {language_label(lang)} hint's names" if own is not None else
+                 f"the {language_label(lang)} hint uses the no-hint names until you change them" if lang else
+                 "no hint's names")
+        self.vocab_state.setText(f"{res.get('stt_vocabulary_count', 0)} names sent with each command · {whose}"
                                  if assembly else "Used by AssemblyAI only: the chosen hosted model doesn't take a list")
         self.show_all.setText(f"Show all ({res.get('stt_vocabulary_count', 0)})…")
         if self._checked != hosted:
@@ -237,14 +265,16 @@ class SpeechToText(QWidget):
         return clean_names(self.vocabulary.toPlainText().replace(",", "\n").splitlines())
 
     def save_vocabulary(self):
-        self.decisions.set_pipeline({"stt_vocabulary": self.field_names()})
+        self.decisions.set_pipeline(vocabulary_change(self._vocab_lang, self.field_names()))
 
-    def typed_names(self) -> list[str] | None:
-        """The names in the field if they were edited and not saved (the window carries on from them), else None."""
-        return self.field_names() if self.vocabulary.toPlainText() != self._vocab_shown else None
+    def typed_names(self) -> tuple[str, list[str]] | None:
+        """The hint and the names in the field if they were edited and not saved (the window carries on from them),
+        else None."""
+        return (self._vocab_lang, self.field_names()) if self.vocabulary.toPlainText() != self._vocab_shown else None
 
-    def show_saved(self, names: list[str], library: bool, count: int):
-        """Saved into config.toml while the voice agent is stopped: shown as written."""
+    def show_saved(self, lang: str, names: list[str], library: bool, count: int):
+        """Saved into config.toml while the voice agent is stopped: shown as written (the names of the hint in use)."""
+        self._vocab_lang = lang
         self._vocab_shown = "\n".join(names)
         self.vocabulary.setPlainText(self._vocab_shown)
         self.vocab_library.setChecked(library)
@@ -300,9 +330,10 @@ class SpeechToText(QWidget):
 
 
 class VocabularyDialog(QDialog):
-    """Everything the hosted speech model is sent with each command: your names (find, add, remove), then what the
-    library switch adds (Twitch favourites and your library's titles, read-only here). Save sends what changed; with
-    the voice agent stopped it goes into config.toml, used when the agent starts."""
+    """Everything the hosted speech model is sent with each command, for each language hint (Spanish, English, no
+    hint: the one in use first): your names (find, add, remove), then what the library switch adds (Twitch
+    favourites and your library's titles, read-only here, named as that hint sends them). Save sends what changed;
+    with the voice agent stopped it goes into config.toml, used when the agent starts."""
     GROUPS = {"own": "Your names", "twitch": "Twitch favourites", "titles": "Your library's titles"}
 
     def __init__(self, speech: SpeechToText):
@@ -311,18 +342,24 @@ class VocabularyDialog(QDialog):
         self.setWindowTitle("Speech-to-text vocabulary")
         self.resize(720, 780)
         self.saved: dict = {}                   # as the agent (or config.toml) has it
-        self.start: tuple = ()                  # as this window opened: to ask before throwing edits away
         self.own: list[str] = []
         self.twitch: list[str] = []
         self.titles: list[str] | None = None    # the library's titles as sent now (None: not known)
+        self.lang = self.in_use = ""            # the hint whose names are shown; the hint set now ("": none)
+        self.neutral: list[str] = []            # the no-hint names as saved (a hint without its own list uses them)
+        self.saved_lists: dict[str, list[str]] = {}     # the hints' own lists as saved
+        self.shared: set[str] = set()           # hints without a list of their own (yet)
+        self.own_by: dict[str, list[str]] = {}  # each hint's names as edited here ("": no hint)
+        self.titles_by: dict[str, list[str]] = {}
         self.running = True
         self.hosted = ""
         self.groups: dict[str, tuple] = {}      # key: (header item, note item, name items)
         self.saving = self.closed = False
         v = QVBoxLayout(self)
         v.addWidget(dim("Names the hosted speech-to-text should hear as they're written (AssemblyAI models use "
-                        "them, the first 100). What's playing and Continue Watching go first, then yours, what you "
-                        "watched, Twitch and the rest of the library; few and distinctive works best."))
+                        "them, the first 100). Each language hint has its own list: the names' language leans how "
+                        "borderline words come out. What's playing and Continue Watching go first, then yours, what "
+                        "you watched, Twitch and the rest of the library; few and distinctive works best."))
         self.message = QLabel("")
         self.message.setWordWrap(True)
         self.message.hide()
@@ -330,6 +367,13 @@ class VocabularyDialog(QDialog):
         self.library = QCheckBox("Also your library's titles and Twitch favourites")
         self.library.clicked.connect(lambda _on: self.switched())
         v.addWidget(self.library)
+        pick = QHBoxLayout()
+        pick.addWidget(QLabel("Names sent with the language hint"))
+        self.which = QComboBox()
+        self.which.activated.connect(lambda _i: self.pick(self.which.currentData()))
+        pick.addWidget(self.which)
+        pick.addStretch()
+        v.addLayout(pick)
         row = QHBoxLayout()
         self.field = QLineEdit()
         self.field.setPlaceholderText("Add a name, or type to find one")
@@ -385,17 +429,19 @@ class VocabularyDialog(QDialog):
         self.twitch = clean_names(cfg.twitch_favorites)
         if res:
             self.saved = {"stt_vocabulary": list(res.get("stt_vocabulary") or []),
+                          "stt_vocabularies": dict(res.get("stt_vocabularies") or {}),
                           "stt_vocabulary_library": bool(res.get("stt_vocabulary_library"))}
             self.hosted = res.get("stt_hosted_model", "")
-            sent = res.get("stt_vocabulary_sent")
-            if self.saved["stt_vocabulary_library"] and sent is not None:
-                skip = {n.lower() for n in self.saved["stt_vocabulary"] + self.twitch}
-                self.titles = [n for n in sent if n.lower() not in skip]
+            self.in_use = res.get("stt_vocabulary_language", "")
+            sent_by = res.get("stt_vocabulary_sent_by_language") or {self.in_use: res.get("stt_vocabulary_sent")}
+            langs = list(dict.fromkeys([*sent_by, ""]))
         else:
             self.running = False
-            self.saved = {"stt_vocabulary": list(cfg.stt_vocabulary),
+            self.saved = {"stt_vocabulary": list(cfg.stt_vocabulary), "stt_vocabularies": dict(cfg.stt_vocabularies),
                           "stt_vocabulary_library": bool(cfg.stt_vocabulary_library)}
             self.hosted = cfg.stt_hosted_model
+            self.in_use, sent_by = hint_now(cfg), {}
+            langs = list(dict.fromkeys([self.in_use, "es", "en", *cfg.stt_vocabularies, ""]))
             if isinstance(problem, OSError):
                 self.show_message(AMBER, "The voice agent isn't running. Your names are read from the settings file, "
                                          "and Save writes them there: the agent uses them when it starts. Your "
@@ -403,12 +449,33 @@ class VocabularyDialog(QDialog):
             else:
                 self.show_message(AMBER, f"The voice agent answered: {problem}. Your names are read from the settings "
                                          "file.")
+        self.neutral, self.saved_lists = self.saved["stt_vocabulary"], self.saved["stt_vocabularies"]
+        self.shared = {lang for lang in langs if lang and lang not in self.saved_lists}
+        saved_own = {lang: self.saved_lists.get(lang, self.neutral) if lang else self.neutral for lang in langs}
+        self.own_by = {lang: list(names) for lang, names in saved_own.items()}
+        for lang, sent in sent_by.items():
+            if self.saved["stt_vocabulary_library"] and sent is not None:
+                skip = {n.lower() for n in saved_own.get(lang, self.neutral) + self.twitch}
+                self.titles_by[lang] = [n for n in sent if n.lower() not in skip]
         typed = self.speech.typed_names()
-        self.own = typed if typed is not None else list(self.saved["stt_vocabulary"])
+        if typed and typed[0] in self.own_by:
+            self.own_by[typed[0]] = typed[1]
+        for lang in langs:
+            self.which.addItem(language_label(lang) + (" (in use)" if lang == self.in_use else ""), lang)
+        self.lang = self.in_use if self.in_use in self.own_by else langs[0]
+        self.which.setCurrentIndex(self.which.findData(self.lang))
+        self.own, self.titles = self.own_by[self.lang], self.titles_by.get(self.lang)
         self.library.setChecked(self.saved["stt_vocabulary_library"])
-        self.start = (list(self.own), self.library.isChecked())
         self.fill()
         self.save_btn.setEnabled(True)
+
+    def pick(self, lang: str):
+        """Another hint's names; the edits to this one are kept until Save or Cancel."""
+        if lang == self.lang or lang not in self.own_by:
+            return
+        self.own_by[self.lang] = self.own
+        self.lang, self.own, self.titles = lang, self.own_by[lang], self.titles_by.get(lang)
+        self.fill()
 
     def show_message(self, color: str, text: str):
         self.message.setText(f"<span style='color:{color}'>{html.escape(text, quote=False)}</span>")
@@ -473,7 +540,8 @@ class VocabularyDialog(QDialog):
                 shown += not item.isHidden()
             known = key != "titles" or self.titles is not None
             count = f" ({shown} of {len(rows)})" if text and rows else f" ({len(rows)})" if known else ""
-            group.setText(0, self.GROUPS[key] + count)
+            title = self.GROUPS[key] + (f" · {language_label(self.lang)}" if key == "own" else "")
+            group.setText(0, title + count)
             why = self.note(key, bool(text), shown, len(rows))
             note.setText(0, why)
             note.setHidden(not why)
@@ -484,7 +552,12 @@ class VocabularyDialog(QDialog):
         if key == "own":
             if not n:
                 return "None yet: type one above and press Enter"
-            return "None like that yet: Enter adds it" if filtering and not shown else ""
+            if filtering and not shown:
+                return "None like that yet: Enter adds it"
+            if self.lang in self.shared and self.own == self.neutral:
+                return (f"The same as with no hint until you change them: then {language_label(self.lang)} has its "
+                        "own")
+            return ""
         if not self.library.isChecked():
             return "Not sent while the switch above is off"
         if key == "twitch":
@@ -496,7 +569,9 @@ class VocabularyDialog(QDialog):
             if not self.saved.get("stt_vocabulary_library"):
                 return "Read from your library once this is saved with the switch on"
             return "This voice agent doesn't list them: update it"
-        return ("Films and series you watched most recently, read from your library every 10 minutes" if n
+        named = {"en": "by their original names", "": "by both names"}.get(self.lang, "as your library names them")
+        return (f"What's playing and Continue Watching, then what you watched and the rest, {named}; read from your "
+                "library every 10 minutes" if n
                 else "None yet: the agent reads your library in the background, look again in a moment")
 
     def sent(self) -> int:
@@ -513,6 +588,9 @@ class VocabularyDialog(QDialog):
         else:
             text = (f"<b>{n} names sent with each command</b>; the hosted model takes up to {VOCABULARY_MAX}"
                     + (", plus your library's titles" if on and self.titles is None else ""))
+        if self.lang != self.in_use:
+            text += (f"<br>Sent while the language hint is {language_label(self.lang)}; it's "
+                     f"{language_label(self.in_use)} now (Speech to text › Language hint)")
         if self.hosted not in agent_stt.USES_VOCABULARY:
             text += (f"<br><span style='color:{AMBER}'>Used by AssemblyAI only: the chosen hosted model doesn't take "
                      "a list</span>")
@@ -541,9 +619,18 @@ class VocabularyDialog(QDialog):
         self.filter()
 
     def changes(self) -> dict:
+        """What Save sends: the no-hint names, every hint's own list (one that was left as the no-hint names stays
+        without its own) and the library switch, where they differ from what's saved."""
+        self.own_by[self.lang] = self.own
         out = {}
-        if self.own != self.saved["stt_vocabulary"]:
-            out["stt_vocabulary"] = list(self.own)
+        if self.own_by.get("", self.neutral) != self.neutral:
+            out["stt_vocabulary"] = list(self.own_by[""])
+        lists = dict(self.saved_lists)
+        for lang, names in self.own_by.items():
+            if lang and not (lang in self.shared and names == self.neutral):
+                lists[lang] = list(names)
+        if lists != self.saved_lists:
+            out["stt_vocabularies"] = lists
         if self.library.isChecked() != self.saved["stt_vocabulary_library"]:
             out["stt_vocabulary_library"] = self.library.isChecked()
         return out
@@ -556,7 +643,7 @@ class VocabularyDialog(QDialog):
     def reject(self):
         if self.saving:
             return
-        if self.start and (list(self.own), self.library.isChecked()) != self.start and QMessageBox.question(
+        if self.own_by and self.changes() and QMessageBox.question(
                 self, "TV Agent", "Throw away the changes to the vocabulary?") != QMessageBox.StandardButton.Yes:
             return
         super().reject()
@@ -597,7 +684,8 @@ class VocabularyDialog(QDialog):
                 if change.get("stt_vocabulary_library"):        # the library is read in the background
                     QTimer.singleShot(3000, self.speech.decisions.load_pipeline)
             else:
-                self.speech.show_saved(self.own, self.library.isChecked(), count)
+                self.speech.show_saved(self.in_use, self.own_by.get(self.in_use, self.own), self.library.isChecked(),
+                                       count)
                 self.panel.say("Vocabulary saved in the settings file: the voice agent uses it when it starts")
             self.accept()
 

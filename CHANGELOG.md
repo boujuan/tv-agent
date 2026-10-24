@@ -4,6 +4,28 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
+## server 0.8.0 — 2026-10-24
+
+### Added
+- Each language hint can have its own names for the hosted speech model (`stt_vocabularies`, e.g. `{es = […],
+  en = […]}`): Spanish, English and no hint each send their own list, since the names' language leans how
+  borderline words come out. A hint without a list of its own, and no hint, use `stt_vocabulary` as before, so
+  nothing changes until you give a language its own. `POST /v1/pipeline` sets one language at a time (`null`
+  removes it); `GET` adds `stt_vocabularies`, `stt_vocabulary_language` (the hint in use) and
+  `stt_vocabulary_sent_by_language` (what each hint would send).
+
+### Changed
+- Cinemeta's names for your library's titles are always read (in the background, once per title), so the English
+  list is ready whichever hint is on.
+
+## panel 0.7.0 — 2026-10-24
+
+### Changed
+- Decisions › Speech to text: the vocabulary field shows and saves the names of the language hint in use, and says
+  whose they are. **Show all…** has a list per hint (Spanish, English, no hint; the one in use first), each with
+  the library's titles as that hint sends them; a hint without its own list shows the no-hint names until you
+  change them. Needs server 0.8.0.
+
 ## server 0.7.0 — 2026-10-24
 
 ### Added

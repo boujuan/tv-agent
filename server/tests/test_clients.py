@@ -462,10 +462,44 @@ def test_a_phone_sees_the_whole_vocabulary_sent_with_each_command(paths, monkeyp
     svc.cfg.twitch_favorites = ["Ibai"]
     svc.cfg.stt_vocabulary_library = True
     svc._library_names, svc._library_names_at = {"recent": ["The Bear", "kodi"]}, 1e12     # fresh: no refresh
+    svc._other_names = {"The Bear": "The Bear (FX)"}
     gate = C.gateway(svc, server.local_app(svc))
     p = call(gate, "GET", "/v1/pipeline", paired(svc)).json()
     assert p["stt_vocabulary"] == ["Stremio", "Kodi"]
     assert p["stt_vocabulary_sent"] == ["Stremio", "Kodi", "The Bear", "Ibai"] and p["stt_vocabulary_count"] == 4
+    assert p["stt_vocabulary_language"] == "es" and p["stt_vocabularies"] == {}
+    assert p["stt_vocabulary_sent_by_language"] == {"es": ["Stremio", "Kodi", "The Bear", "Ibai"],
+                                                    "en": ["Stremio", "Kodi", "The Bear (FX)", "Ibai"],
+                                                    "": ["Stremio", "Kodi", "The Bear", "The Bear (FX)", "Ibai"]}
+
+
+def test_each_language_hint_can_have_its_own_names(paths, monkeypatch):
+    """Saved one language at a time, merged with the others, written to config.toml as a table it reads back;
+    null removes a language's list (it uses the names for no hint again)."""
+    import tomllib
+    import types
+    from tv_agent.decide import learned
+    monkeypatch.setattr(learned, "load", lambda: [])
+    svc = service(paths)
+    svc.router = types.SimpleNamespace(steps=["phrases", "patterns", "llm", "d1"], off=set())
+    svc.agent.d1 = types.SimpleNamespace(where="hosted", hosted_model="d1", hosted=lambda: None)
+    svc.agent.rules = types.SimpleNamespace(fallback_intent=None, counts={})
+    svc.agent.llm = None
+    svc.stt = None
+    svc.cfg.stt_vocabulary, svc.cfg.stt_vocabulary_library = ["Stremio"], False
+    gate = C.gateway(svc, server.local_app(svc))
+    token = paired(svc)
+    call(gate, "POST", "/v1/pipeline", token, json={"stt_vocabularies": {"es": ["Movistar  Plus", "movistar plus"]}})
+    p = call(gate, "POST", "/v1/pipeline", token, json={"stt_vocabularies": {"en": ["Peacock"]}}).json()
+    assert p["stt_vocabularies"] == {"es": ["Movistar Plus"], "en": ["Peacock"]}
+    assert p["stt_vocabulary_sent"] == ["Movistar Plus"]                          # the hint is Spanish
+    assert p["stt_vocabulary_sent_by_language"] == {"es": ["Movistar Plus"], "en": ["Peacock"], "": ["Stremio"]}
+    written = tomllib.loads((paths / "config.toml").read_text())
+    assert written["stt_vocabularies"] == {"es": ["Movistar Plus"], "en": ["Peacock"]}
+    p = call(gate, "POST", "/v1/pipeline", token, json={"stt_vocabularies": {"es": None}}).json()
+    assert p["stt_vocabularies"] == {"en": ["Peacock"]} and p["stt_vocabulary_sent"] == ["Stremio"]
+    for bad in ({"spanish": []}, ["es"], {"es": "Stremio"}):
+        assert call(gate, "POST", "/v1/pipeline", token, json={"stt_vocabularies": bad}).status_code == 422
 
 
 def test_phones_are_offered_the_tailscale_address_and_told_the_current_ones(paths, monkeypatch):

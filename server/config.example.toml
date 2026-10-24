@@ -44,6 +44,9 @@ keep_recordings = false    # keep each spoken command's audio (the last 300) to 
 stt_language = "native"    # the hosted model's language hint: "native" (native_language), "" (it guesses) or "es", "en"…
 stt_vocabulary = ["Stremio", "TizenTube", "YouTube", "YouTube Music", "Kodi", "Twitch", "Movistar Plus", "Prime Video",
                   "RTVE Play", "TDTChannels"]   # names the hosted model should hear as written (AssemblyAI)
+# A language hint's own names, used instead of stt_vocabulary while that hint is on (the names' language leans how
+# borderline words come out); a hint without its own list, and no hint, use stt_vocabulary
+# stt_vocabularies = {es = ["Movistar Plus", "RTVE Play"], en = ["Peacock"]}
 stt_vocabulary_library = true   # plus your library's titles and Twitch favourites
 binge = true               # when an episode ends, the next one starts ("binge mode on / off")
 auto_skip = false          # skip intros and recaps by themselves when their timestamps are sure ("auto skip on")
