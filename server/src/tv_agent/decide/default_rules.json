@@ -899,6 +899,16 @@
       "note": "“go to the part where they kiss”, “play the moment where…”, “vete al minuto en el que…”: found in the subtitles"
     },
     {
+      "id": "find_scene_when",
+      "stage": "grammar",
+      "match": "^(?:go|jump|skip|take me|fast forward|salta|s[aá]ltate|ll[eé]vame|ve|vete)(?: back)?\\s+(?:to|a|hasta)\\s+(?:when|cuando)\\s+(?!(?:i|we|you|yo)\\b)(?P<what>.+)$",
+      "do": {
+        "type": "find_scene",
+        "what": "{what|text!}"
+      },
+      "note": "“jump to when Paul rides the worm”, “salta a cuando se besan” (not “go to when I stopped”)"
+    },
+    {
       "id": "previous_episode",
       "stage": "grammar",
       "match": "^(?:play |go to |go back to |skip to |jump to |watch |put on )?(?:the )?(?:previous|last|prior)(?: episode| one)?(?: again)?$|^(?:go |skip |jump )?back (?:an|one) episode$|^(?:play |go to )?the episode before(?: this(?: one)?)?$",

@@ -160,7 +160,8 @@ shape above (every field, null when unused). Most commands are one step. More th
 something (play_title, continue_watching or next_episode) and then acts on what that plays: seek_to, seek_percent,
 start_over, find_scene, skip_intro, skip_recap, subtitles_on, subtitles_off, subtitles, audio, volume_up,
 volume_down, volume_set, mute, unmute or pause. Keep each step's own fields in it (a time is its own seek_to step, not
-part of the play). Never add a step that wasn't asked for.
+part of the play). A moment described in words ("when…", "the part where…") is find_scene, never seek_to: seek_to
+only for a time that was said. Never add a step that wasn't asked for.
 
 "pon el capítulo 5 de la segunda temporada de the bear y vete al minuto 12" -> {"steps":[{"action":"play_title","title":"The Bear","season":2,"episode":5},{"action":"seek_to","seconds":720}]}
 "put inception on and take me to when he spins the top" -> {"steps":[{"action":"play_title","title":"Inception"},{"action":"find_scene","query":"Cobb spins the top"}]}

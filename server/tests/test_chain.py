@@ -119,7 +119,7 @@ def test_commands_that_cant_be_chained_run_the_first_alone_and_say_why(text, fir
 def test_the_llm_proposes_a_chain_only_when_the_rules_find_none_and_it_sounds_like_one():
     steps = [{"action": "play_title", "title": "Dune: Part Two"}, {"action": "find_scene", "query": "Paul rides"}]
     llm = FakeLlm([{**dict.fromkeys(reading.SLOTS), **s} for s in steps])
-    d = decide("play dune part two and jump to when paul rides the worm", llm)
+    d = decide("play dune part two and show me the bit with the worm ride", llm)
     assert d.via == "chain" and llm.asked == ["chain"]
     assert d.action == A.Sequence(steps=[A.PlayTitle(title="Dune: Part Two"), A.FindScene(what="Paul rides")])
     for text in ("subtítulos en español", "pon la casa de papel", "play the bear and go to minute 12"):
