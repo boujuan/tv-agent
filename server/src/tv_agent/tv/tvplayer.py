@@ -294,12 +294,15 @@ class TvPlayer:
 
     async def open(self, url: str, resume_ms: int = 0, *, item: str, title: str = "", headers: dict | None = None,
                    audio: str | None = None, subs: list[str] | None = None, bitrate: int = 0, play: bool = True,
-                   http: str | None = None, info: dict | None = None, markers: list[dict] | None = None):
+                   http: str | None = None, info: dict | None = None, markers: list[dict] | None = None,
+                   exact: bool = False):
         """Loads it in place (the screen stays: no relaunch). `audio` and `subs` are the track plan
         (languages.TrackPlan), applied in the player's own first choice. Each load gets its own id (`item`#run-n,
         the one its loading screen had), so an event about the one before, even one this agent opened before a
         restart, can't be taken for this one's. `info` is what the pause screen shows (PROTOCOL.md, `info`);
-        `markers` the intro, recap and credits known when it opens (set_markers sends what's found later)."""
+        `markers` the intro, recap and credits known when it opens (set_markers sends what's found later).
+        `exact`: it starts at resume_ms itself (a jump to a moment); otherwise a resume starts at the keyframe at
+        or before it (PROTOCOL.md, `exact`)."""
         coming, self._coming = self._coming, None
         self.item = coming[1] if coming and coming[0] == item else f"{item}#{self._run}-{next(self._loads)}"
         self.last, self._adopt = {}, None
@@ -316,6 +319,8 @@ class TvPlayer:
             fields["info"] = info
         if markers:
             fields["markers"] = markers
+        if exact:
+            fields["exact"] = True
         await self.call("load", timeout=6, **fields)
 
     @property

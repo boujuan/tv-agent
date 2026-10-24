@@ -101,7 +101,7 @@ def test_a_load_goes_over_the_connection_and_the_player_reports_back(tls):
                                                        headers={"Referer": "r"}, audio="eng", subs=["eng", "spa"]))
         assert cmd["t"] == "load" and cmd["url"] == "https://debrid/f.mkv" and cmd["start_ms"] == 60_000
         assert cmd["headers"] == {"Referer": "r"} and cmd["audio"] == "eng" and cmd["subs"] == ["eng", "spa"]
-        assert cmd["item"].startswith("tt1:1:2#")
+        assert cmd["item"].startswith("tt1:1:2#") and "exact" not in cmd
         await asyncio.sleep(0.05)
         pos, dur, speed = p.now()
         assert 60_000 <= pos < 61_000 and dur == 3_000_000 and speed == 1.0      # brought up to now
@@ -273,6 +273,7 @@ def test_play_brings_the_player_up_during_the_search_and_loads_in_place():
     load = next(d for d in did if d[0] == "open")
     info = load[3].pop("info")
     assert load[3].pop("markers") == []                      # none known for this file yet
+    assert load[3].pop("exact") is False                     # a resume: from the keyframe before it
     assert load == ("open", "https://x/1", 90_000, {"item": "tt1:1:2", "title": "X S1E2",
                                                   "headers": {"Authorization": "Bearer t"}, "audio": "eng",
                                                   "subs": None})

@@ -1009,10 +1009,12 @@ class Agent:
         return None
 
     async def play(self, imdb: str, kind: str, name: str, video: str, label: str, meta: dict,
-                   resume_ms: int = 0, prepared: streams.Stream | None = None, jump: bool = False) -> Outcome:
+                   resume_ms: int = 0, prepared: streams.Stream | None = None, jump: bool = False,
+                   exact: bool = False) -> Outcome:
         """Pick a cached debrid stream from your addons, start it in the player (TV Agent Player, Kodi or Just
         Player), then follow its progress. `jump`: the same file reopened at resume_ms exactly (a jump in it), without
-        a message."""
+        a message. `exact`: it starts at resume_ms itself (a scene), where TV Agent Player starts a resume at the
+        keyframe before it (up to 10 s earlier: the frames between aren't decoded unseen, ~2 s from a 4K file)."""
         if not self.account:
             return Outcome(False, "Stremio isn't signed in (tv-agent setup stremio)")
         t0 = time.perf_counter()
@@ -1110,7 +1112,7 @@ class Agent:
             async with self._starting:
                 if self.tvplayer.now() is not None:
                     await self._note_position(tvplayer.PID)    # a replay of this episode starts where it is
-                resume_ms = self._replace_session(video, resume_ms, exact=jump)
+                resume_ms = self._replace_session(video, resume_ms, exact=jump or exact)
                 addon_subs = None
                 if plan.subtitles is not None:   # asked now for the file chosen, added if the file lacks the language
                     addon_subs = asyncio.create_task(subtitles.fetch(self.http, await self.addons(), kind, video,
@@ -1122,7 +1124,7 @@ class Agent:
                 if loading is not None:
                     loading.at("Starting…")
                 try:
-                    await self.tvplayer.open(link, resume_ms, item=video, title=label,
+                    await self.tvplayer.open(link, resume_ms, item=video, title=label, exact=jump or exact,
                                              headers=chosen.headers or None, audio=plan.audio,
                                              subs=plan.subs_for(plan.audio),
                                              info=_title_screen(name, meta, video) | _stream_screen(chosen),
@@ -1214,7 +1216,7 @@ class Agent:
             async with self._starting:
                 if (pid := await self._kodi_player()) is not None:
                     await self._note_position(pid)      # a replay of this episode starts where it is
-                resume_ms = self._replace_session(video, resume_ms, exact=jump)
+                resume_ms = self._replace_session(video, resume_ms, exact=jump or exact)
                 addon_subs = None
                 if plan.subtitles is not None:   # asked now for the file chosen, attached once Kodi has opened it
                     addon_subs = asyncio.create_task(subtitles.fetch(self.http, await self.addons(), kind, video,
@@ -2971,7 +2973,7 @@ class Agent:
             resume = max(0, it.at_ms - chain.SCENE_BEFORE * 1000)
         label = _episode_label(it.name, {"season": int(m.group(1)), "episode": int(m.group(2)), "name": ""}) \
             if it.at_ms and (m := re.match(r"^tt\d+:(\d+):(\d+)$", video)) else it.label
-        return await self.play(it.imdb, it.kind, it.name, video, label, meta, resume)
+        return await self.play(it.imdb, it.kind, it.name, video, label, meta, resume, exact=bool(it.at_ms))
 
     # ---- skipping intros, recaps and credits (intros.py, skips.py) ----
 

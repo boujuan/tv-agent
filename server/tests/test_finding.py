@@ -325,6 +325,31 @@ def test_a_moment_of_what_plays_picked_from_a_list_is_a_jump():
     assert jumped == [A.Transport(op="seek_to", seconds=300 - chain.SCENE_BEFORE)]
 
 
+def test_a_moment_of_another_episode_picked_from_a_list_opens_it_exactly_there(monkeypatch):
+    """TV Agent Player starts a resume at the keyframe before it (up to 10 s earlier); a scene asks for the moment."""
+    played = []
+
+    async def play(*args, **kw):
+        played.append((args, kw))
+        return Outcome(True, "Playing")
+
+    async def get(imdb):
+        return {"state": {"video_id": "tt1:2:6", "timeOffset": 600_000}}
+
+    async def meta(http, kind, imdb):
+        return {}
+    monkeypatch.setattr("tv_agent.agent.cinemeta.meta", meta)
+    me = types.SimpleNamespace(state=types.SimpleNamespace(now_playing=None), play=play, prefetch=lambda *a: None,
+                               http=None, library=types.SimpleNamespace(get=get))
+    item = ListItem("tt1", "series", "Community", "S2E6", "“Zombies…”", video="tt1:2:6", at_ms=300_000)
+    assert asyncio.run(Agent.play_item(me, item)).ok
+    (args, kw), = played
+    assert args[6] == 300_000 - chain.SCENE_BEFORE * 1000 and kw == {"exact": True}
+    me.state.now_playing, played[:] = None, []
+    asyncio.run(Agent.play_item(me, ListItem("tt1", "series", "Community", "S2E6", "", video="tt1:2:6")))
+    assert played[0][0][6] == 600_000 and played[0][1] == {"exact": False}      # where you were: a resume
+
+
 def test_subtitles_are_matched_to_the_ones_the_episode_check_measured():
     from tv_agent.episode_check import Verdict
     kept = [(i * 1000 + 2000, f"a line long enough to match number {i}") for i in range(50)]   # 2 s later
