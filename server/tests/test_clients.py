@@ -493,6 +493,12 @@ def test_a_phone_shows_the_list_on_the_tv_and_picks_from_it(paths, monkeypatch):
 
     svc.agent._shown = Shown("Which moment?", items[:1], time.monotonic() + 1)        # another list since
     assert call(gate, "POST", "/v1/shown/pick", token, json={"number": 1, "id": shown["id"]}).status_code == 409
+    from tv_agent.state import NowPlaying
+    svc.agent.state.now_playing = NowPlaying("tt0", "movie", "tt0", "Before", started=time.time() - 60)
+    assert call(gate, "GET", "/v1/shown", token).json()["shown"]["title"] == "Which moment?"   # shown while it plays
+    svc.agent.state.now_playing = NowPlaying("tt2", "movie", "tt2", "Scream", started=time.time() + 2)
+    assert call(gate, "GET", "/v1/shown", token).json() == {"shown": None}           # started since: the player covers it
+    svc.agent.state.now_playing = None
     svc.agent._shown = Shown("Old", items, time.monotonic() - agent_mod.LIST_TTL - 1)   # too old for "number 1"
     assert call(gate, "GET", "/v1/shown", token).json() == {"shown": None}
 

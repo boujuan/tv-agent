@@ -267,9 +267,15 @@ def routes(svc) -> APIRouter:
     # ---- the numbered list on the TV ----
 
     def current_list():
-        """The list on the TV that "number 2" would pick from now (agent.LIST_TTL), or None."""
+        """The list on the TV that "number 2" would pick from now (agent.LIST_TTL), or None; None too once a title
+        started after it (picked, or anything else played: the player covers it on the TV)."""
         shown = svc.agent._shown
-        return shown if shown and time.monotonic() - shown.at <= LIST_TTL else None
+        if not shown or time.monotonic() - shown.at > LIST_TTL:
+            return None
+        np = svc.agent.state.now_playing
+        if np and np.started > time.time() - (time.monotonic() - shown.at):
+            return None
+        return shown
 
     def list_id(shown) -> int:
         return int(shown.at * 1000)
