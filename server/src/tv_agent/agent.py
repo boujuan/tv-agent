@@ -1,6 +1,7 @@
 """Executes actions on the TV. One Agent per process: it owns the ADB connection, the HTTP client and the state."""
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -17,7 +18,7 @@ import httpx
 from rapidfuzz import fuzz
 
 from . import __version__, activity, languages, skips, twitch, youtube
-from . import chain, episode_check, finding, tracing
+from . import chain, episode_check, finding, subsync, tracing
 from .actions import (Action, AutoSkip, Binge, Cancel, ContinueWatching, FindScene, Help, Home, Info, LibraryEdit,
                       NextEpisode, OpenApp,
                       OpenInStremio, Pick, PlayTitle, Recommend, Replay, Sequence, ShowList, Skip, Timer, Tracks,
@@ -76,6 +77,7 @@ EXPECT_AT_MOST = 2          # stream lookups started on a guess while a title is
 # A leader this far ahead once popularity has been weighed, said exactly, is what d1 picked every time it was asked
 # (2026-10-24: Oppenheimer 19.6 ahead of the 1980 series, d1 0.97; Shogun 18.2, d1 0.22, the same pick)
 CERTAIN_GAP = 15
+SUB_SYNC_MIN_MS = 100      # an addon's subtitles nearer the file's time than this are left as they are
 CHECK_AFTER = 5.0           # the episode check waits this long after the file opens: the start has the network first
 ERROR_SHOWN = 3.0           # a start that fails says why on the loading screen this long before going Home
 HEARD: ContextVar[str] = ContextVar("heard", default="")    # what the command being run was, as transcribed
@@ -318,6 +320,9 @@ class Agent:
         self._picture_task: asyncio.Task | None = None
         self.checks = episode_check.Checks()     # which files are which episode (episode_check.py)
         self._episode_cues: dict[tuple[str, str], list[tuple[int, str]]] = {}   # (video, lang): subtitles by id
+        # (file name, size, the subtitle's link hashed): ms the addon's subtitles run later than that file, None when
+        # it couldn't be told (subsync.py); kept so the next play of the file sends it with the subtitles at once
+        self._sub_shifts: dict[tuple[str, int, str], int | None] = {}
         self._verify_task: asyncio.Task | None = None
         self._duck: asyncio.Task | None = None
         self._ducked: tuple[str, int] | None = None   # ("kodi", "tvplayer" or "tv", the volume before listening)
@@ -1046,7 +1051,8 @@ class Agent:
                 if kind == "series" and self.cfg.check_episodes:
                     self._verify_task = asyncio.create_task(self._switch_if_wrong(
                         self.state.now_playing, chosen, None, (imdb, kind, name, video, label, meta), link))
-                self._tracks_task = asyncio.create_task(self._player_subs(plan, addon_subs, label))
+                self._tracks_task = asyncio.create_task(self._player_subs(plan, addon_subs, label,
+                                                                          self.state.now_playing, link))
                 if kind == "series" and self.cfg.auto_skip:
                     self._start_skip_watch(self.state.now_playing)
                 self._started(imdb, name, kind, video, meta)
@@ -1505,11 +1511,12 @@ class Agent:
         except Exception as e:
             log.info("preloading the next episode: %s", type(e).__name__)
 
-    async def _player_subs(self, plan: languages.TrackPlan, addon_subs: asyncio.Task | None, label: str):
+    async def _player_subs(self, plan: languages.TrackPlan, addon_subs: asyncio.Task | None, label: str,
+                           np: NowPlaying | None = None, link: str | None = None):
         """TV Agent Player chose the file's own audio and subtitles by the plan before its first frame. What's left:
         subtitles by the audio it chose, when that isn't the audio planned (they show only for audio that isn't
         yours: the file lacked the planned language), and subtitles from your addons when the first of your
-        languages that the file or an addon has isn't in the file."""
+        languages that the file or an addon has isn't in the file, timed to the file (_sync_subtitle)."""
         if plan.subtitles is None:
             return
         try:
@@ -1539,13 +1546,50 @@ class Agent:
                     await self.notify("No subtitles found")
                 return
             lang, sub = offered[0]
-            await self.tvplayer.add_subtitle(tvplayer.PID, sub.url, lang=lang,
-                                             label=f"{languages.name(lang)} ({sub.addon})")
-            log.info("added %s subtitles from %s for %s", lang, sub.addon, label)
+            key = (np.filename, np.size, hashlib.sha1(sub.url.encode()).hexdigest()[:16]) if np else None
+            known = self._sub_shifts.get(key) if key else None
+            index = await self.tvplayer.add_subtitle(
+                tvplayer.PID, sub.url, lang=lang, label=f"{languages.name(lang)} ({sub.addon})",
+                delay_ms=-known if known and abs(known) >= SUB_SYNC_MIN_MS else None)
+            log.info("added %s subtitles from %s for %s%s", lang, sub.addon, label,
+                     f", synced {-known / 1000:+.1f} s" if known and abs(known) >= SUB_SYNC_MIN_MS else "")
+            if key and link and key not in self._sub_shifts:
+                await self._sync_subtitle(np, index, sub, lang, link, key)
         except asyncio.CancelledError:
             raise
         except Exception as e:      # slow or failing addons, a file that won't parse: the file's own subtitles only
             log.info("addon subtitles for %s: %s", label, type(e).__name__)
+
+    async def _sync_subtitle(self, np: NowPlaying, index: int, sub: subtitles.Subtitle, lang: str, link: str,
+                             key: tuple[str, int, str]):
+        """The addon's subtitles timed to this file (subsync.py): its own lines, read once the start has had the
+        network (or kept from the episode check), lined up with the addon's by when lines start, and the player
+        told that track's delay. In the file's own language the words are compared too, and the two must agree.
+        Nothing is sent for a file without text subtitles of its own, or when the lines don't clearly meet."""
+        await asyncio.sleep(CHECK_AFTER)
+        got = await asyncio.wait_for(episode_check.file_cues(link), 45)
+        ms = None
+        if got and len(got[1]) >= subsync.MIN_LINES:
+            file_lang, found = got
+            theirs = subtitles.cues(await subtitles.download(self.http, sub.url))
+            ms = subsync.shift(found, theirs)
+            if file_lang[:2].lower() == lang[:2].lower():
+                share, by_words = episode_check.compare(found, theirs)
+                if share >= episode_check.MATCH and by_words is not None:
+                    words_ms = round(by_words * 1000)
+                    ms = words_ms if ms is None or abs(ms - words_ms) <= 500 else None
+        self._sub_shifts[key] = ms
+        if len(self._sub_shifts) > 500:
+            self._sub_shifts.pop(next(iter(self._sub_shifts)))
+        if ms is None:
+            log.info("subtitles from %s left as they are: %s", sub.addon,
+                     "the file has too few lines of its own to compare" if not got or len(got[1]) < subsync.MIN_LINES
+                     else "their lines don't clearly meet the file's")
+        elif abs(ms) < SUB_SYNC_MIN_MS:
+            log.info("subtitles from %s already in time with this file (%+d ms)", sub.addon, ms)
+        elif self.state.now_playing is np:
+            await self.tvplayer.subtitle_delay(index, -ms)
+            log.info("subtitles from %s synced to this file: %+.1f s", sub.addon, -ms / 1000)
 
     async def _stop_kodi_when(self, kodi_open: asyncio.Task):
         """Kodi stopped once the check started with the search says it plays (TV Agent Player has the screen)."""

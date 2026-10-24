@@ -400,9 +400,17 @@ class TvPlayer:
         """Show text track `index`, or turn subtitles off with None (a forced track in the audio's language stays)."""
         await self.call("select", text=index)
 
-    async def add_subtitle(self, pid: str, url: str, *, lang: str = "und", label: str = "", show: bool = True) -> int:
-        """A subtitle file by link (the player fetches and draws it, no rebuffering); it becomes the shown one."""
-        return int((await self.call("add_sub", timeout=20, url=url, lang=lang, label=label or lang, show=show))["text"])
+    async def add_subtitle(self, pid: str, url: str, *, lang: str = "und", label: str = "", show: bool = True,
+                           delay_ms: int | None = None) -> int:
+        """A subtitle file by link (the player fetches and draws it, no rebuffering); it becomes the shown one.
+        `delay_ms`: how much later to show it, measured for this file (subsync.py)."""
+        extra = {"delay_ms": int(delay_ms)} if delay_ms else {}
+        return int((await self.call("add_sub", timeout=20, url=url, lang=lang, label=label or lang, show=show,
+                                    **extra))["text"])
+
+    async def subtitle_delay(self, index: int, ms: int):
+        """An added subtitle track's delay, measured after it was added (players before 0.7.0 refuse it)."""
+        await self.call("sub_delay", text=index, ms=int(ms))
 
     async def info(self, *labels: str) -> dict:
         return {}                               # no info labels (Kodi's chapter names): callers fall back

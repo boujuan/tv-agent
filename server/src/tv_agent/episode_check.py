@@ -73,10 +73,25 @@ def _read(url: str, stream: str, start: int, length: int) -> asyncio.Task:
                                      "-t", str(length), "-f", "srt", "-"], 40))
 
 
+# The last few files' reads, kept in memory (the links carry the debrid key): the episode check and the subtitles'
+# sync (subsync.py) read a file once between them
+_READS: dict[str, tuple[str, list] | None] = {}
+
+
 async def file_cues(url: str, start: int = WINDOW[0], length: int = WINDOW[1]) -> tuple[str, list] | None:
     """(language, cues in the file's own time) of its English text subtitles (else its first text ones) from
     `start` for `length` seconds; None when the file has no text subtitles (picture-based or none). The first
     subtitle track, the one wanted in most files, is read while the tracks are listed."""
+    key = f"{start}|{length}|{url}"
+    if key not in _READS:
+        got = await _file_cues(url, start, length)
+        while len(_READS) >= 8:
+            _READS.pop(next(iter(_READS)))
+        _READS[key] = got
+    return _READS[key]
+
+
+async def _file_cues(url: str, start: int, length: int) -> tuple[str, list] | None:
     first = _read(url, "0:s:0", start, length)
     try:
         info = json.loads(await _run(["ffprobe", "-v", "error", *FAST, "-show_entries",

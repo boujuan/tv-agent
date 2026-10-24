@@ -4,6 +4,18 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
+## server — unreleased
+
+### Added
+- Subtitles from your addons in time with the file (`subsync.py`): a few seconds after a start, the file's own
+  subtitles (half a minute of them, any language; read once with the episode check) are lined up with the addon's
+  lines by when they start, and TV Agent Player is told that track's delay (`sub_delay`, player 0.7.0). In the file's
+  own language the words are compared too, and both must agree. Only a clear answer is sent: at least 5 lines meeting,
+  well above what lines that dense would meet by chance, no other offset close, and never more than 10 s; a file
+  without text subtitles of its own (only picture ones) is left as it was. What's measured is kept per file and
+  subtitle, so the next play sends it with the subtitles at once (`delay_ms`). The file's own subtitles are never
+  moved.
+
 ## server 0.12.0 — 2026-10-24
 
 ### Added
