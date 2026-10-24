@@ -187,6 +187,15 @@ def load_failed_text(msg: dict) -> str:
     return "The TV is having trouble loading this file"
 
 
+def _reads(reads) -> str:
+    """TV Agent Player's first network reads of a start, one per request: where in the file (GB), asked and answered
+    (ms from the load; "…" not yet), how much came (MB). "0.00 GB 3→369 ms 2.1 MB, 4.12 GB 380→612 ms 0.4 MB"."""
+    def at(v) -> str:
+        return f"{v}" if isinstance(v, (int, float)) and v >= 0 else "…"
+    return ", ".join(f"{(r.get('at') or 0) / 1e9:.2f} GB {at(r.get('asked'))}→{at(r.get('answered'))} ms "
+                     f"{(r.get('bytes') or 0) / 1e6:.1f} MB" for r in reads or [] if isinstance(r, dict))
+
+
 def _settled(meta: dict | None, video_id: str) -> bool:
     """Whether the film or episode came out more than SETTLED_DAYS ago, by Cinemeta's dates (False when it can't say)."""
     v = next((x for x in (meta or {}).get("videos") or [] if x.get("id") == video_id), None) if ":" in video_id \
@@ -1264,19 +1273,22 @@ class Agent:
 
     async def _player_timing(self, item: str):
         """The player's own account of a start (its `timing` event, once it plays: the first byte, the file prepared,
-        the first frame, playing), into the log and /v1/stats: where its part of a start goes."""
+        the video decoder's start, the first frame, playing, and its first network reads), into the log and
+        /v1/stats: where its part of a start goes."""
         msg = self.tvplayer.last.get("timing") if self.tvplayer.item == item else None
         msg = msg or await self.tvplayer.wait_for(lambda m: m.get("t") == "timing" and m.get("item") == item, 10)
         ms = (msg or {}).get("ms")
         if not isinstance(ms, dict):
             return
-        for key in ("first_byte", "prepared", "ready"):
-            if isinstance(ms.get(key), (int, float)) and ms[key] >= 0:
-                self.state.timings.add(f"player:{key}", ms[key])
-        log.info("player timing %s: first byte %s ms, prepared %s ms, first frame %s ms, playing %s ms; %s requests, "
-                 "%.1f MB%s", item.split("#")[0], ms.get("first_byte"), ms.get("prepared"), ms.get("first_frame"),
-                 ms.get("ready"), msg.get("requests"), (msg.get("bytes") or 0) / 1e6,
-                 " (preloaded)" if msg.get("preloaded") else "")
+        for key, value in (*((k, ms.get(k)) for k in ("first_byte", "prepared", "ready")),
+                           ("decoder", msg.get("decoder_ms"))):
+            if isinstance(value, (int, float)) and value >= 0:
+                self.state.timings.add(f"player:{key}", value)
+        log.info("player timing %s: first byte %s ms, prepared %s ms, first frame %s ms, playing %s ms; video decoder "
+                 "%s ms; %s requests, %.1f MB%s; reads %s", item.split("#")[0], ms.get("first_byte"), ms.get("prepared"),
+                 ms.get("first_frame"), ms.get("ready"), msg.get("decoder_ms"), msg.get("requests"),
+                 (msg.get("bytes") or 0) / 1e6, " (preloaded)" if msg.get("preloaded") else "",
+                 _reads(msg.get("reads")) or "-")
 
     def _replace_session(self, video: str, resume_ms: int, exact: bool = False) -> int:
         """Right before a new file opens, what belonged to the previous start stops: its follower (it would read

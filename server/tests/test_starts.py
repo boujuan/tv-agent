@@ -617,3 +617,20 @@ def test_an_episode_said_by_number_has_its_streams_looked_up_before_the_details_
     assert asked(episode=6) == ["tt2:3:6", "meta"]                  # "episode 6": of the season you're on
     assert asked(season=2) == ["tt2:2:1", "meta"]                   # "season 2": its first episode
     assert asked(season=2, latest=True) == ["meta"]
+
+
+def test_the_players_own_timing_of_a_start_is_logged_with_its_reads(caplog):
+    a = Agent.__new__(Agent)
+    a.state = agent_mod.State()
+    timing = {"t": "timing", "item": "tt1:2:4#ab-1", "ms": {"first_byte": 311, "prepared": 1049, "first_frame": 3216,
+                                                            "ready": 3733}, "requests": 3, "bytes": 25_300_000,
+              "decoder_ms": 212, "reads": [{"at": 0, "asked": 3, "answered": 311, "done": 340, "bytes": 2_100_000},
+                                           {"at": 4_120_000_000, "asked": 360, "answered": -1, "done": -1, "bytes": 0}]}
+    a.tvplayer = types.SimpleNamespace(item="tt1:2:4#ab-1", last={"timing": timing})
+    with caplog.at_level("INFO", logger="tv_agent.agent"):
+        asyncio.run(a._player_timing("tt1:2:4#ab-1"))
+    line = next(r.getMessage() for r in caplog.records if r.getMessage().startswith("player timing"))
+    assert "video decoder 212 ms" in line and "first frame 3216 ms" in line
+    assert line.endswith("reads 0.00 GB 3→311 ms 2.1 MB, 4.12 GB 360→… ms 0.0 MB")
+    stats = a.state.timings.summary()
+    assert stats["player:decoder"]["p50"] == 212 and stats["player:first_byte"]["p50"] == 311
