@@ -8,7 +8,9 @@ label. Nothing is sent to the TV; the LLM and the hosted models are called (and 
 --seed        first label the kept recordings that have no label yet, from the history: the action decided, when
               it worked and wasn't marked wrong, or what the panel taught for it (voicetests.expected)
 --stt         local (stt_model), parakeet-v2 / parakeet-v3 (that model on this laptop), an OpenRouter transcription
-              model id, heard (what the agent heard back then: the decision steps only) or text (the label's words)
+              model id (sent the language hint and names the agent sends: stt_language, its vocabulary and your
+              library's titles), heard (what the agent heard back then: the decision steps only) or text (the
+              label's words)
 --off         decision steps switched off on top of the agent's own decide_off (phrases, patterns, llm, d1)
 --no-learned  without the sentences taught in the panel (a taught recording otherwise matches its own sentence)
 --save, --compare  keep a run's results, or show the regressions and fixes since one (exits 1 on a regression).
@@ -31,7 +33,7 @@ import httpx
 
 from bench_fallbacks import judge         # this script's folder is on the path when it runs
 
-from tv_agent import __version__, activity, config
+from tv_agent import __version__, activity, config, server
 from tv_agent import stt as stt_mod
 from tv_agent import voicetests as V
 from tv_agent.agent import Agent
@@ -121,6 +123,20 @@ def nothing_to_run(cfg: config.Config):
         print("No recordings kept yet: give the TV a few commands by voice, then run this with --seed.")
 
 
+class Hints:
+    """The language hint and names the running agent sends a hosted speech model: server.Service's own code, on the
+    library as it is now."""
+    stt_language = server.Service.stt_language
+    stt_vocabulary = server.Service.stt_vocabulary
+    _refresh_library_names = server.Service._refresh_library_names
+    _fetch_other_names = server.Service._fetch_other_names
+
+    def __init__(self, cfg: config.Config, agent: Agent):
+        self.cfg, self.agent = cfg, agent
+        self._library_names, self._other_names = {}, {}
+        self._library_names_at = time.monotonic()        # read once below, not refreshed during the run
+
+
 async def run(args, cfg: config.Config, labels: list[dict], specs: list[str]) -> tuple[dict, dict]:
     agent = Agent(cfg, dry_run=True)                     # nothing reaches the TV: only deciding happens
     rules = agent.rules
@@ -137,6 +153,13 @@ async def run(args, cfg: config.Config, labels: list[dict], specs: list[str]) ->
              "llm_reasoning": cfg.llm_reasoning, "d1_where": cfg.d1_where, "hosted_d1_model": cfg.hosted_d1_model,
              "rules": rules.source, "learned": len(taught)}
     key = cfg.secret("openrouter_api_key")
+    language, vocabulary = "", []
+    if any("/" in s for s in specs):
+        hints = Hints(cfg, agent)
+        if cfg.stt_vocabulary_library:
+            await hints._refresh_library_names()
+        language, vocabulary = hints.stt_language(), hints.stt_vocabulary()
+        setup |= {"stt_language": language, "stt_vocabulary": len(vocabulary)}
     local: dict[str, stt_mod.Stt] = {}
     decided: dict[str, object] = {}                      # the same words are decided once per run
 
@@ -153,10 +176,13 @@ async def run(args, cfg: config.Config, labels: list[dict], specs: list[str]) ->
         for _ in range(3):                               # a rate limit or a hiccup: twice more, a second apart
             t = time.perf_counter()
             try:
-                text, cost = await stt_mod.hosted_transcribe(agent.http, key, spec, pcm)
+                text, cost = await stt_mod.hosted_transcribe(agent.http, key, spec, pcm, language=language,
+                                                             vocabulary=vocabulary)
                 return {"transcript": text, "stt_ms": round((time.perf_counter() - t) * 1000), "stt_cost": cost}
             except (httpx.HTTPError, ValueError, KeyError) as e:
                 error = f"{type(e).__name__}"
+                if isinstance(e, httpx.HTTPStatusError):        # the status says which: a refused request or theirs
+                    error += f" {e.response.status_code}"
                 await asyncio.sleep(1)
         return {"transcript": "", "error": error}
 
