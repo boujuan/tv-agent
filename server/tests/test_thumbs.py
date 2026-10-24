@@ -136,3 +136,26 @@ def test_a_request_overtaken_while_it_waited_is_dropped(mkv, monkeypatch):
         assert (await th.picture("a#1", 2_500, 160))[1] == a[1]        # the same keyframe: kept
         assert len(th.made) == 2
     asyncio.run(run())
+
+
+def test_the_index_is_read_soon_after_the_file_opens(mkv, monkeypatch):
+    async def run():
+        monkeypatch.setattr(TH, "INDEX_AFTER_S", 0.01)
+        th = TH.Thumbs()
+        reads = []
+
+        async def fetch(start: int, length: int) -> bytes:
+            reads.append(start)
+            return mkv[start:start + length]
+        monkeypatch.setattr(th, "_fetch", fetch)
+        th.follow("a#1", "https://debrid/f.mkv", None)
+        await asyncio.sleep(0.1)
+        assert len(reads) == 2                              # the head and the Cues, before any request
+        reads.clear()
+        at, _ = await th.picture("a#1", 9_000, 160)
+        assert at == 8_000 and len(reads) == 1              # then only the keyframe
+        th.follow("b#2", "https://debrid/g.mkv", None)      # another file: its own, later
+        th.follow("c#3", "https://debrid/h.mkv", None)
+        await asyncio.sleep(0.1)
+        assert th._mkv is not None and len(reads) == 3      # b#2's was cancelled before it read anything
+    asyncio.run(run())

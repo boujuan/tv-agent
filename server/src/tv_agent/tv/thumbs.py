@@ -29,6 +29,9 @@ CUES = 256 << 10            # the index's first read (a 3-hour film's is ~100 KB
 BLOCK = 512 << 10           # a keyframe's first read; the rest follows if it's bigger (a REMUX's can be 3 MB)
 KEEP = 400                  # pictures kept for the item playing (~5 KB each)
 FFMPEG_S = 6.0
+# The index is read this long after a file opens, so a hold's first picture doesn't wait for it (measured on the TV:
+# 2.6 s for the first, ~0.45 s after); not at once, while the TV reads the same file to start it
+INDEX_AFTER_S = 10.0
 # libplacebo's compiled shaders, kept between ffmpeg runs: a picture then takes ~0.3 s instead of ~0.7 s
 SHADERS = DATA_DIR / "shaders"
 
@@ -328,6 +331,7 @@ class Thumbs:
         self._item: str | None = None
         self._link: tuple[str, dict] | None = None
         self._mkv: asyncio.Task | None = None
+        self._soon: asyncio.Task | None = None
         self._pics: OrderedDict[tuple[int, int], bytes] = OrderedDict()
         self._lock = asyncio.Lock()
         self._latest = 0
@@ -337,10 +341,19 @@ class Thumbs:
     def follow(self, item: str, url: str, headers: dict | None):
         """What the player plays now: its pictures and index from here on."""
         if item != self._item:
-            if self._mkv:
-                self._mkv.cancel()
+            for task in (self._mkv, self._soon):
+                if task:
+                    task.cancel()
             self._item, self._link, self._mkv, self._pics, self.made = item, (url, dict(headers or {})), None, \
                 OrderedDict(), []
+            self._soon = asyncio.create_task(self._index_soon(item))
+
+    async def _index_soon(self, item: str):
+        await asyncio.sleep(INDEX_AFTER_S)
+        try:
+            await self._index(item)
+        except ThumbError as e:
+            log.info("previews for %s: %s", item, e)
 
     async def close(self):
         if self._http:

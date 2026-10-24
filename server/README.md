@@ -68,6 +68,7 @@ plays.
 | A new title or episode | Loads in place in the open player: no relaunch, no home screen in between | Opened over the playing one, after its decoder is let go (2 s) |
 | While it starts, and paused | A loading screen with the title, its artwork, what you said and the step it's at; on pause, the plot, the stream's source, debrid service, size, release and badges (with a player that has these screens) | Kodi's own screens |
 | Jumps, skips, intros | Exact, in place, also in Dolby Vision; ±N s at the nearest keyframe, fast commands added up | Exact, but a Dolby Vision file is reopened at the time (its decoder's flush fails on this TV) |
+| Holding ← or → | The target glides along the bar with a picture of it above, made on this computer from the file (`tv/thumbs.py`: one range read and ffmpeg per picture, ~0.45 s on the TV; Matroska files; player 0.5.0) | Kodi's own seek bar |
 | Audio and subtitles | Your rule applied in the player's own first choice, before the first frame: commentary never, Simplified or Traditional Chinese by name, Castilian first, the file's main track; with subtitles off, a forced track in the audio's language still shows. Add-on subtitles drawn by the player, no rebuffering | Your rule set after the start, rechecked 8 s later; add-on subtitles loaded by Kodi |
 | What it tells the agent | State, position every second, tracks, decoder and HDR, sound output, errors, the exact position it closed at: nothing is polled | Polled over its API |
 | While you speak | Its own volume lowered: no volume bar, no key presses | Kodi's volume |
@@ -222,6 +223,8 @@ Player are paired again over ADB (the TV shows it; a TV in standby is paired onc
 `tv_hosts` and `phone_hosts` edited in `config.toml` are used the same way, without a restart. A phone paired with
 the old address needs the new one in the phone app (Agents › Addresses…), or a `phone_hosts` address that doesn't
 change, such as Tailscale's.
+TV Agent Player's pictures for a held ←/→ need `ffmpeg` on this computer, built with libplacebo (Vulkan) to
+tone-map HDR and Dolby Vision the best way; without it they use zscale, and without ffmpeg there are none.
 Every setting: [config.example.toml](config.example.toml). Secrets: `~/.config/tv-agent/secrets.toml` (mode 600;
 the daemon refuses to start otherwise). For services across logouts: `loginctl enable-linger`.
 
@@ -318,6 +321,8 @@ Tailscale address), for the [TV Agent phone app](https://github.com/boujuan/tv-a
 - **TV Agent Player** gets the debrid link and its headers only inside its TLS connection to the agent (never on an
   ADB command line, an intent or in logcat); it only talks to the certificate it was paired with, and the agent only
   accepts it from the TV's address with its own token (`player_token` in `secrets.toml`, sent at pairing over ADB).
+  For the pictures of a held ←/→ the agent reads the file itself (range requests from this computer) and gives
+  ffmpeg the keyframe on a pipe: the link isn't on its command line.
 - **Just Player** gets the debrid link on its `am start` command line (over ADB), and `ffprobe` gets it as an
   argument on this computer.
 - **ADB** must stay on for this (USB debugging, port 5555).
