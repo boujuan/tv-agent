@@ -4,7 +4,7 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
-## server — unreleased
+## server 0.7.0 — 2026-10-24
 
 ### Added
 - The activity history's `trace` has the whole command: after the decision's steps, what the action did, in order,
@@ -20,7 +20,7 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 ### Changed
 - `details.title` is the summary (said, picked, imdb, by, ms); the candidates and choices are in the trace.
 
-## panel — unreleased
+## panel 0.6.0 — 2026-10-24
 
 ### Added
 - Decisions: a row under the decision steps shows what happens after the decision: how a title is found (your
