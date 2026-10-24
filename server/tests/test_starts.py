@@ -294,3 +294,21 @@ def test_the_activity_entry_has_the_whole_trace_and_explain_finds_the_title(monk
     plain, found = asyncio.run(explain(False)), asyncio.run(explain(True))
     assert plain["trace"] == decided and "title" not in plain
     assert found["trace"] == decided + after and found["title"]["name"] == "Rebel Moon - Part One"
+
+
+def test_a_sound_alike_request_not_waited_for_is_in_the_trace(monkeypatch):
+    rebel_music = C.Meta("tt3281470", "series", "Rebel Music", "2013", 0)
+    a, _ = title_agent(monkeypatch, {"rebel music": [rebel_music]}, ["Rebel Moon"])
+
+    async def slow(heard, sentence, names):
+        await asyncio.sleep(5)
+        return ["Rebel Moon"]
+    a.llm.titles = slow
+
+    async def run():
+        agent_mod.START.set({"_t0": time.perf_counter()})
+        found = await a.resolve("rebel music", None, None)
+        return found, agent_mod.START.get()["trace"]
+    found, trace = asyncio.run(run())
+    asked = next(t for t in trace if t["step"] == "sound-alikes")
+    assert found[2] == "Rebel Music" and asked["answered"] is False and asked["model"].startswith("deepseek")

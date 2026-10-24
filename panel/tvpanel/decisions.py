@@ -82,8 +82,14 @@ def after_steps(trace: list[dict], recorded: bool) -> tuple[dict[str, tuple[str,
             n = sum(1 for x in steps if x["step"] == "search")
             after[key] = ("visited", f"{n} searches" if n > 1 else _secs(t.get("ms", 0)))
         elif step == "sound-alikes":
+            model = str(t.get("model", "")).split("/")[-1]
+            if t.get("answered") is False:
+                lines.append(f"{at}<span style='color:gray'>The LLM ({model}) was asked what “{q}” sounds like; not "
+                             f"waited for{took}</span>")
+                after.setdefault(key, ("", "not needed"))
+                continue
             names = ", ".join(f"“{html.escape(n)}”" for n in t.get("names", [])) or "nothing it knows"
-            lines.append(f"{at}The LLM ({str(t.get('model', '')).split('/')[-1]}): “{q}” sounds like {names}{took}")
+            lines.append(f"{at}The LLM ({model}): “{q}” sounds like {names}{took}")
             after[key] = ("visited", ", ".join(t.get("names", [])) or "nothing")
         elif step == "choice":
             by, what = t.get("by", ""), html.escape(t.get("picked", ""))

@@ -769,9 +769,11 @@ class Agent:
                 m = await choosing
             return picked((m.id, m.type, m.name), "the search") if m else None
         finally:
-            for t in (fix, heard, choosing, *looks.values()):
-                if t is not None and not t.done():
-                    t.cancel()
+            if not fix.done():                  # asked, but the title was known before it answered
+                _step("title", "sound-alikes", _ms(t), query=title, model=self.llm.model, answered=False)
+            for task in (fix, heard, choosing, *looks.values()):
+                if task is not None and not task.done():
+                    task.cancel()
             decided = True
 
     async def _has_season(self, imdb: str, kind: str, season: int | None) -> bool:
