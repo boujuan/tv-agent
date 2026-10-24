@@ -4,7 +4,7 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
-## server — unreleased
+## server 0.11.0 — 2026-10-24
 
 ### Added
 - Episodes described ("the one where Mr. Burns gets shot", "el capítulo de la mosca") are found by their plots:
