@@ -159,3 +159,37 @@ def test_the_index_is_read_soon_after_the_file_opens(mkv, monkeypatch):
         await asyncio.sleep(0.1)
         assert th._mkv is not None and len(reads) == 3      # b#2's was cancelled before it read anything
     asyncio.run(run())
+
+
+def test_the_ranges_a_start_reads_are_the_index_and_the_cluster_of_its_keyframe(mkv):
+    """TV Agent Player's `prefetch`: asked for at once instead of the header, then the Cues, then the start."""
+    m = asyncio.run(TH.Mkv.read(reader(mkv)))
+    at, n = m.cues_at
+    assert mkv[at:at + 4] == b"\x1c\x53\xbb\x6b" and TH.element(mkv, at)[2] == at + n       # the whole Cues
+    cues, start = m.ranges(9_000)
+    assert cues == {"at": at, "bytes": n} and start["bytes"] == TH.START_AHEAD
+    assert mkv[start["at"]:start["at"] + 4] == b"\x1f\x43\xb6\x75"                        # a cluster
+    assert start["at"] == m.segment + m.places[m.cue(9_000)][0] and m.times[m.cue(9_000)] == 8_000
+    assert m.ranges(0)[1]["at"] < start["at"]
+
+
+def test_a_files_index_is_kept_for_its_next_start_and_its_previews(mkv, monkeypatch):
+    async def run():
+        monkeypatch.setattr(TH, "INDEX_AFTER_S", 0.01)
+        monkeypatch.setattr(TH, "_layouts", TH.OrderedDict())
+        th, reads = TH.Thumbs(), []
+
+        async def fetch(start: int, length: int) -> bytes:
+            reads.append(start)
+            return mkv[start:start + length]
+        monkeypatch.setattr(th, "_fetch", fetch)
+        th.follow("a#1", "https://debrid/f.mkv", None, ("f.mkv", len(mkv)))
+        await asyncio.sleep(0.1)
+        assert len(reads) == 2 and TH.layout(("f.mkv", len(mkv))) is not None
+        th.follow("a#2", "https://debrid/other-link-same-file", None, ("f.mkv", len(mkv)))   # played again
+        await asyncio.sleep(0.1)
+        assert len(reads) == 2                              # nothing read again
+        th.follow("b#3", "https://debrid/g.mkv", None)      # a file without a name: read, not kept
+        await asyncio.sleep(0.1)
+        assert len(reads) == 4 and len(TH._layouts) == 1
+    asyncio.run(run())

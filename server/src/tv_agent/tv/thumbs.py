@@ -35,6 +35,11 @@ FFMPEG_S = 6.0
 INDEX_AFTER_S = 10.0
 # libplacebo's compiled shaders, kept between ffmpeg runs: a picture then takes ~0.3 s instead of ~0.7 s
 SHADERS = DATA_DIR / "shaders"
+# What TV Agent Player is told it will read before its first frame (`prefetch`): the start's cluster this much from its
+# start, and the index unless it's bigger than INDEX_AT_MOST (the player takes 16 MB in all)
+START_AHEAD = 4 << 20
+INDEX_AT_MOST = 8 << 20
+LAYOUTS_KEPT = 60           # files whose index is kept, by (name, size): read once, ahead of their start when it can be
 
 EBML, SEGMENT, SEEKHEAD, SEEK, SEEK_ID, SEEK_POS = 0x1A45DFA3, 0x18538067, 0x114D9B74, 0x4DBB, 0x53AB, 0x53AC
 INFO, TIMESCALE, TRACKS, ENTRY, NUMBER, TYPE = 0x1549A966, 0x2AD7B1, 0x1654AE6B, 0xAE, 0xD7, 0x83
@@ -122,6 +127,7 @@ class Mkv:
         self.ebml = b""                        # the EBML header
         self.elements: dict[int, bytes] = {}   # Info, Tracks and Chapters as read (intros.py reads the last two)
         self.seeks: dict[int, int] = {}        # the seek table: where each top-level element is
+        self.cues_at = (0, 0)                  # the index in the file: where it starts, how long it is
 
     @classmethod
     async def read(cls, fetch) -> "Mkv":
@@ -157,6 +163,7 @@ class Mkv:
                 found[eid] = await m._whole(fetch, m.segment + seeks[eid], CUES if eid == CUES_ID else 64 << 10)
         if TRACKS not in found or CUES_ID not in found:
             raise ThumbError("no seek index in the file")
+        m.cues_at = (m.segment + seeks[CUES_ID], len(found[CUES_ID]))
         try:
             m._info(found.get(INFO, b""))
             m._tracks(found[TRACKS])
@@ -252,6 +259,15 @@ class Mkv:
     def cue(self, ms: int) -> int:
         """The index of the cue point at or before ms (the first one before the first)."""
         return max(0, bisect.bisect_right(self.times, ms) - 1)
+
+    def ranges(self, ms: int) -> list[dict]:
+        """What a player starting at ms reads before its first frame, besides the header: the index (Media3 needs it
+        before it prepares) and the cluster with the keyframe at or before ms. TV Agent Player's `prefetch`
+        (PROTOCOL.md): it asks for them at once instead of one after another (~0.7 s on every start)."""
+        out = [{"at": self.cues_at[0], "bytes": self.cues_at[1]}] if 0 < self.cues_at[1] <= INDEX_AT_MOST else []
+        if self.places:
+            out.append({"at": self.segment + self.places[self.cue(ms)][0], "bytes": START_AHEAD})
+        return out
 
     async def keyframe(self, fetch, i: int) -> bytes:
         """Cue point i's keyframe as a Matroska file of its own: the header, then a cluster with only that block."""
@@ -381,6 +397,22 @@ async def jpeg(mkv: bytes, filters: str, quality: int = 5) -> bytes:
     return out
 
 
+_layouts: OrderedDict[tuple[str, int], Mkv] = OrderedDict()
+
+
+def remember(file: tuple[str, int] | None, m: Mkv):
+    """A file's index, kept by (filename, size) for its next start (ranges) and previews."""
+    if file and file[0] and file[1]:
+        _layouts[file] = m
+        _layouts.move_to_end(file)
+        while len(_layouts) > LAYOUTS_KEPT:
+            _layouts.popitem(last=False)
+
+
+def layout(file: tuple[str, int] | None) -> Mkv | None:
+    return _layouts.get(file) if file else None
+
+
 class Thumbs:
     """The pictures for one player: the item playing, its file's index once read, the pictures made (by keyframe).
     One picture is made at a time; a request that waited while a newer one came is dropped."""
@@ -389,6 +421,7 @@ class Thumbs:
         self._http: httpx.AsyncClient | None = None
         self._item: str | None = None
         self._link: tuple[str, dict] | None = None
+        self._file: tuple[str, int] | None = None   # (filename, size): its index is kept under it (remember)
         self._mkv: asyncio.Task | None = None
         self._soon: asyncio.Task | None = None
         self._pics: OrderedDict[tuple[int, int], bytes] = OrderedDict()
@@ -397,14 +430,16 @@ class Thumbs:
         self._placebo = True                     # off once libplacebo has failed (no Vulkan device, say)
         self.made: list[tuple[float, float]] = []    # (ms, ffmpeg CPU ms) of each picture made for this item
 
-    def follow(self, item: str, url: str, headers: dict | None):
-        """What the player plays now: its pictures and index from here on."""
+    def follow(self, item: str, url: str, headers: dict | None, file: tuple[str, int] | None = None):
+        """What the player plays now: its pictures and index from here on. `file`: (filename, size), when known: an
+        index read before for it is used, and one read now is kept."""
         if item != self._item:
             for task in (self._mkv, self._soon):
                 if task:
                     task.cancel()
             self._item, self._link, self._mkv, self._pics, self.made = item, (url, dict(headers or {})), None, \
                 OrderedDict(), []
+            self._file = file
             self._soon = asyncio.create_task(self._index_soon(item))
 
     async def _index_soon(self, item: str):
@@ -438,7 +473,10 @@ class Thumbs:
 
             async def read():
                 t0 = time.perf_counter()
+                if kept := layout(self._file):
+                    return kept
                 m = await Mkv.read(self._fetch)
+                remember(self._file, m)
                 log.info("previews for %s: %s%s, %d keyframes indexed, read in %.0f ms", item, m.codec,
                          " DV" if m.dv else {16: " PQ", 18: " HLG"}.get(m.transfer, ""), len(m.times),
                          (time.perf_counter() - t0) * 1000)

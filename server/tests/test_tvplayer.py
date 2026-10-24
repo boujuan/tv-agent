@@ -17,6 +17,7 @@ from tv_agent.agent import Agent
 from tv_agent.state import NowPlaying
 from tv_agent.stremio import streams as S
 from tv_agent.stremio.subtitles import Subtitle
+from tv_agent.tv import thumbs as TH
 from tv_agent.tv import tvplayer as T
 
 TOKEN = "player-token-" + "x" * 32
@@ -274,6 +275,8 @@ def test_play_brings_the_player_up_during_the_search_and_loads_in_place():
     info = load[3].pop("info")
     assert load[3].pop("markers") == []                      # none known for this file yet
     assert load[3].pop("exact") is False                     # a resume: from the keyframe before it
+    assert load[3].pop("prefetch") is None                   # its index isn't known yet
+    assert load[3].pop("file") == ("X.S01E02.2160p.REMUX-TRiNiTY.mkv", 62_000_000_000)
     assert load == ("open", "https://x/1", 90_000, {"item": "tt1:1:2", "title": "X S1E2",
                                                   "headers": {"Authorization": "Bearer t"}, "audio": "eng",
                                                   "subs": None})
@@ -515,3 +518,36 @@ def test_what_the_pause_screen_says_about_a_stream():
                                   "title": "Film.2019.IMAX.1080p.DTS-X.mkv\n👤 12 💾 9 GB"}, 0)
     assert S.badges(plain) == ["dtsx", "imax"] and S.debrid(plain) == "Premiumize" and plain.source == ""
     assert S.release(S.Stream("A", "u", "n", "", "Show.S01E01.1080p.WEB-DL-NTb.mkv", 0)) == "NTb"
+
+
+def test_a_start_whose_files_index_is_known_tells_the_player_what_it_will_read(monkeypatch):
+    m = TH.Mkv()
+    m.segment, m.cues_at, m.times, m.places = 52, (7_160_000_000, 490_000), [0, 4_000, 8_000], \
+        [(1_000, None, 0), (9_000_000, None, 4_000), (18_000_000, None, 8_000)]
+    monkeypatch.setattr(TH, "_layouts", TH.OrderedDict())
+    TH.remember(("X.S01E02.mkv", 5_000_000_000), m)
+
+    async def run():
+        player = FakeTvPlayer(pos=None)
+        a = bare_agent(player)
+
+        async def nothing(*args, **kw):
+            return None
+
+        async def found(kind, video, meta):
+            return [S.Stream("AIOStreams", "https://x/1", "4K", "", "X.S01E02.mkv", 0, size=5_000_000_000)]
+        a.account, a.notify, a.streams_for, a._kodi_player = object(), nothing, found, nothing
+        a.adb = object()
+        a.track_plan = lambda meta: languages.TrackPlan("eng", None)
+        a._replace_session = lambda video, resume_ms, exact=False: resume_ms
+        a._player_subs, a._started, a._preloaded = nothing, lambda *args: None, None
+        a.state.timings = types.SimpleNamespace(add=lambda *args: None)
+
+        async def first_frame(pred, timeout):
+            return {"t": "first_frame", "item": player.item, "ms": 900, "after": "load"}
+        player.wait_for = first_frame
+        await Agent.play(a, "tt1", "series", "X", "tt1:1:2", "X S1E2", META, resume_ms=5_000)
+        return next(d for d in player.did if d[0] == "open")
+    load = asyncio.run(run())
+    assert load[3]["prefetch"] == [{"at": 7_160_000_000, "bytes": 490_000},
+                                   {"at": 52 + 9_000_000, "bytes": TH.START_AHEAD}]       # the keyframe at 0:04

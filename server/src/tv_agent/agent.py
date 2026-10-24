@@ -35,7 +35,7 @@ from .stremio import search as title_search
 from .stremio.account import Account, Addon, now_iso
 from .stremio import library as library_mod
 from .stremio.library import Library
-from .tv import apps, justplayer, media, tvplayer
+from .tv import apps, justplayer, media, thumbs, tvplayer
 from .tv.adb import Adb
 from .tv.kodi import Kodi, KodiError
 from .tv.tvplayer import TvPlayer
@@ -620,11 +620,34 @@ class Agent:
                     await lookup
                 ranked = [s for s in await self.streams_for(kind, video_id, meta) if not s.why_dropped
                           and not (self.cfg.player == "just" and s.headers)]
-                if ranked and self.cfg.probe_streams:
-                    await self.link(ranked[0])
+                if ranked and self.cfg.probe_streams and (link := await self.link(ranked[0])):
+                    await self._layout(ranked[0], link)
             except Exception as e:
                 log.info("stream prefetch for %s: %s", video_id, type(e).__name__)
         asyncio.create_task(run())
+
+    async def _layout(self, s: streams.Stream, link: str):
+        """The file's index and where it lies (thumbs.Mkv: ~0.5 MB in two reads), read ahead of its start and kept
+        by file, so the start tells TV Agent Player the ranges it's about to read (thumbs.Mkv.ranges, `prefetch`)."""
+        file = (s.filename, s.size)
+        if not (s.filename and s.size) or thumbs.layout(file) or self.cfg.player != "tvplayer":
+            return
+
+        async def fetch(start: int, length: int) -> bytes:
+            r = await self.http.get(link, headers={**s.headers, "Range": f"bytes={start}-{start + length - 1}"},
+                                    timeout=8)
+            if r.status_code != 206:
+                raise thumbs.ReadError(f"HTTP {r.status_code}")
+            return r.content
+        t = time.perf_counter()
+        try:
+            m = await thumbs.Mkv.read(fetch)
+        except (thumbs.ThumbError, httpx.HTTPError) as e:
+            log.info("index of %s: %s", s.filename, e if isinstance(e, thumbs.ThumbError) else type(e).__name__)
+            return
+        thumbs.remember(file, m)
+        log.info("index of %s read ahead in %.0f ms (%d keyframes, %.2f MB)", s.filename,
+                 (time.perf_counter() - t) * 1000, len(m.times), m.cues_at[1] / 1e6)
 
     def track_plan(self, meta: dict) -> languages.TrackPlan:
         """Your language settings for this title, with the audio and subtitles asked for it by voice lately."""
@@ -1124,12 +1147,15 @@ class Agent:
                 if loading is not None:
                     loading.at("Starting…")
                 try:
+                    layout = thumbs.layout((chosen.filename, chosen.size))
+                    ranges = layout.ranges(resume_ms) if layout else None
                     await self.tvplayer.open(link, resume_ms, item=video, title=label, exact=jump or exact,
                                              headers=chosen.headers or None, audio=plan.audio,
                                              subs=plan.subs_for(plan.audio),
                                              info=_title_screen(name, meta, video) | _stream_screen(chosen),
                                              markers=self._marker_list(
-                                                 self.intros.known(imdb, chosen.filename, chosen.size) or []))
+                                                 self.intros.known(imdb, chosen.filename, chosen.size) or []),
+                                             prefetch=ranges, file=(chosen.filename, chosen.size))
                 except tvplayer.PlayerError:
                     if self.tvplayer.up:
                         raise
@@ -1139,7 +1165,9 @@ class Agent:
                     asyncio.create_task(self._stop_kodi_when(kodi_open))
                 t_open = time.perf_counter()
                 _step("start", "load", (t_open - t_ready) * 1000, preloaded=True if preloaded else None,
-                      resume=_clock(resume_ms) if resume_ms else None)
+                      resume=_clock(resume_ms) if resume_ms else None,
+                      prefetch=f"the index and the start's cluster, {sum(r['bytes'] for r in ranges) / 1e6:.1f} MB"
+                      if ranges else None)
                 self.state.now_playing = NowPlaying(imdb, kind, video, name, "tvplayer", chosen.url, runtime,
                                                     filename=chosen.filename, size=chosen.size,
                                                     video_hash=chosen.video_hash, dolby_vision=chosen.dolby_vision)
@@ -1657,6 +1685,8 @@ class Agent:
             self._next_up = (nxt["id"], _episode_label(name, nxt), chosen, time.monotonic()) if chosen else None
             if chosen:
                 log.info("next up: %s (%s)", self._next_up[1], chosen.filename or chosen.name)
+                if link := await self.link(chosen):
+                    await self._layout(chosen, link)        # its preload, or its start, says what it'll read
                 np = self.state.now_playing
                 if np and np.video_id == video:
                     await self._send_markers(np)          # the Next episode card can name it now
@@ -1689,7 +1719,8 @@ class Agent:
                                         subs=plan.subs_for(plan.audio),
                                         info=_title_screen(np.name, meta, video) | _stream_screen(s),
                                         markers=self._marker_list(self.intros.known(np.imdb_id, s.filename, s.size)
-                                                                  or []))
+                                                                  or []),
+                                        prefetch=(m := thumbs.layout((s.filename, s.size))) and m.ranges(0) or None)
             self._preloaded = (video, s.url, link)
             log.info("next episode %s preloaded in the player", video)
         except asyncio.CancelledError:
