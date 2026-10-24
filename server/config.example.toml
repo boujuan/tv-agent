@@ -24,10 +24,13 @@ max_height = 2160          # largest resolution to pick
 max_mbps = 60.0            # skip files whose bitrate the TV's 100 Mbit/s port can't carry; 0: no limit
 probe_streams = true       # check a debrid link answers before handing it to Kodi; false while the TV uses a VPN
 
-# Tracks after Kodi starts: Spanish-made titles in Spanish without subtitles; everything else English audio
-# (if the file has it) with English subtitles, else Spanish ones.
+# Tracks: titles made in your native language play in it; everything else in audio_language ("original": the
+# language it was made in) when the file has it, and streams with it come first. Subtitles in this order, shown
+# per `subtitles`: "foreign" only while the audio isn't native_language, "always" or "off". Also by voice ("from now
+# on, audio in Spanish", "a partir de ahora sin subtítulos"), in the panel and from the phone.
 audio_language = "eng"
 subtitle_languages = ["eng", "spa"]
+subtitles = "foreign"
 native_language = "spa"
 
 twitch_favorites = []      # e.g. ["ibai", "auronplay"]: matched first, since speech-to-text spells names freely

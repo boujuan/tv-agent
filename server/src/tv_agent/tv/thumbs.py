@@ -41,6 +41,7 @@ VIDEO, COLOUR, TRANSFER, MAPPING, ADD_TYPE, ADD_DATA = 0xE0, 0x55B0, 0x55BA, 0x4
 CUES_ID, CUE_POINT, CUE_TIME, CUE_POS, CUE_TRACK, CUE_CLUSTER, CUE_REL = 0x1C53BB6B, 0xBB, 0xB3, 0xB7, 0xF7, 0xF1, 0xF0
 CLUSTER, TIMESTAMP, SIMPLE, GROUP, BLOCK_ID = 0x1F43B675, 0xE7, 0xA3, 0xA0, 0xA1
 DOVI = (0x64766343, 0x64767643)         # BlockAddIDType 'dvcC' / 'dvvC': a Dolby Vision configuration record
+LANGUAGE, LANGUAGE_BCP47, AUDIO_TRACK, TEXT_TRACK = 0x22B59C, 0x22B59D, 2, 17
 UNKNOWN = b"\x01\xff\xff\xff\xff\xff\xff\xff"
 
 
@@ -286,6 +287,53 @@ class Mkv:
         when = int.from_bytes(b[a + n:a + n + 2], "big", signed=True)
         key = eid == GROUP or bool(b[a + n + 2] & 0x80)
         return track == self.track and key and (at is None or when == at)
+
+
+async def track_languages(fetch) -> list[tuple[int, str]]:
+    """(type, language) of each audio (AUDIO_TRACK) and subtitle (TEXT_TRACK) track of a Matroska file, from its
+    header, as the file names it ("spa", "es-ES"; Matroska's "eng" when it names none). `fetch(start, length)` reads
+    the file's bytes; one read of its start nearly always holds them."""
+    head = await fetch(0, HEAD)
+    tracks, seeks = None, {}
+    try:
+        eid, _, ebml_end = element(head, 0)
+        eid2, segment, _ = element(head, ebml_end)
+        if eid != EBML or eid2 != SEGMENT:
+            raise ThumbError("not a Matroska file")
+    except (Short, ValueError):
+        raise ThumbError("not a Matroska file") from None
+    i = segment
+    try:
+        while i < len(head):
+            eid, a, z = element(head, i)
+            if eid == CLUSTER or z < 0 or z > len(head):
+                break
+            if eid == TRACKS:
+                tracks = head[i:z]
+                break
+            if eid == SEEKHEAD:
+                seeks |= Mkv._seeks(head, a, z)
+            i = z
+    except (Short, ValueError):
+        pass
+    if tracks is None:
+        if TRACKS not in seeks:
+            raise ThumbError("no tracks in the header")
+        tracks = await Mkv._whole(fetch, segment + seeks[TRACKS], 64 << 10)
+    out = []
+    try:
+        _, a, z = element(tracks, 0)
+        for eid, x, y, _ in children(tracks, a, z):
+            if eid != ENTRY:
+                continue
+            fields = {k: tracks[p:q] for k, p, q, _ in children(tracks, x, y)}
+            kind = uint(fields.get(TYPE, b""))
+            if kind in (AUDIO_TRACK, TEXT_TRACK):
+                lang = fields.get(LANGUAGE_BCP47) or fields.get(LANGUAGE) or b"eng"
+                out.append((kind, lang.decode(errors="replace").strip("\x00 ")))
+    except (Short, ValueError):
+        raise ThumbError("a Matroska header I can't read") from None
+    return out
 
 
 def chain(m: Mkv, w: int, placebo: bool = True) -> str:

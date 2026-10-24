@@ -20,6 +20,8 @@ from .updates import UpdatesCard
 
 AUDIO = [("English", "eng"), ("Spanish", "spa"), ("French", "fre"), ("Italian", "ita"), ("German", "ger"),
          ("Portuguese", "por"), ("Japanese", "jpn"), ("Korean", "kor"), ("Chinese", "chi")]
+SUBTITLES_WHEN = [("Only when the audio isn't in my native language", "foreign"), ("Always", "always"),
+                  ("Off", "off")]
 SUBTITLES = [("English", "eng"), ("Spanish", "spa"), ("Chinese (Simplified · 简体)", "chs"),
              ("Chinese (Traditional · 繁體)", "cht"), ("Chinese (either)", "chi"), ("French", "fre"),
              ("Italian", "ita"), ("German", "ger"), ("Portuguese", "por"), ("Japanese", "jpn"), ("Korean", "kor")]
@@ -153,15 +155,21 @@ class Settings(QScrollArea):
         f2 = QFormLayout(lang)
         f2.setContentsMargins(16, 14, 16, 14)
         f2.addRow(QLabel("<b>Languages</b>"))
-        f2.addRow(dim("Titles made where the native language is spoken play in it without subtitles; everything "
-                      "else uses this audio and the first available subtitles in the order below."))
+        f2.addRow(dim("Titles made in your native language play in it; everything else in this audio when the file "
+                      "has it (streams with it come first), with the first available subtitles in the order below. "
+                      "Also by voice: “from now on, audio in Spanish”, “a partir de ahora sin subtítulos”."))
         self.audio = QComboBox()
+        self.audio.addItem("Original language (the one it was made in)", "original")
         self.native = QComboBox()
         for label, code in AUDIO:
             self.audio.addItem(label, code)
             self.native.addItem(label, code)
+        self.subs_when = QComboBox()
+        for label, code in SUBTITLES_WHEN:
+            self.subs_when.addItem(label, code)
         self.subs = OrderedChecklist(SUBTITLES)
         f2.addRow("Audio", self.audio)
+        f2.addRow("Subtitles show", self.subs_when)
         f2.addRow("Subtitles, in order", self.subs)
         f2.addRow("Native language", self.native)
         f2.addRow(dim("Kodi tells Simplified and Traditional Chinese apart by the track's name; Just Player only "
@@ -268,7 +276,7 @@ class Settings(QScrollArea):
             f4.addWidget(box)
         outer.addWidget(me)
         outer.addStretch()
-        for w in (self.player, self.height_, self.audio, self.native, self.updates.mode):
+        for w in (self.player, self.height_, self.audio, self.subs_when, self.native, self.updates.mode):
             w.currentIndexChanged.connect(self.mark_dirty)
         for w in (self.no_limit, self.probe, self.binge, self.auto_skip, self.log, self.check_episodes):
             w.toggled.connect(self.mark_dirty)
@@ -386,6 +394,7 @@ class Settings(QScrollArea):
         self.probe.setChecked(cfg.probe_streams)
         self._select(self.audio, cfg.audio_language)
         self._select(self.native, cfg.native_language)
+        self._select(self.subs_when, cfg.subtitles)
         self.subs.set_codes(cfg.subtitle_languages)
         self.twitch.setText(", ".join(cfg.twitch_favorites))
         self.log.setChecked(cfg.log_transcripts)
@@ -415,6 +424,7 @@ class Settings(QScrollArea):
             "probe_streams": self.probe.isChecked(),
             "audio_language": self.audio.currentData(),
             "subtitle_languages": self.subs.codes() or ["eng"],
+            "subtitles": self.subs_when.currentData(),
             "native_language": self.native.currentData(),
             "twitch_favorites": split(self.twitch.text()),
             "log_transcripts": self.log.isChecked(),

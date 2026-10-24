@@ -7,6 +7,24 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 ## server — unreleased
 
 ### Added
+- A language the file playing lacks ("ponlo en español", "switch to English audio", "Chinese subtitles" when
+  neither the file nor your subtitle addons have them): the best other copy that has it takes over at the same
+  moment, in TV Agent Player and Kodi; the TV says it's looking, and when no copy has it what's playing goes on.
+  What AIOStreams read from each file's tracks (or its name says) is used first; the best few copies that say
+  nothing have their tracks read from the file's Matroska header (one range read each, all at once).
+- Audio and subtitles asked for by voice hold for the title (its next episodes, a copy switched to) for 12 hours,
+  and with subtitles shown only for audio that isn't yours, switching the audio turns them on or off to match.
+- Language settings by voice: "from now on, audio in Spanish", "a partir de ahora sin subtítulos", "always English
+  subtitles", "subtítulos solo cuando no sea en español"; what's playing follows. Also understood by the LLM step.
+- `audio_language = "original"`: each title in the language it was made in (its files' original track when
+  AIOStreams says, else its first country), and streams with it first. `subtitles` (`"foreign"`, the default: only
+  while the audio isn't `native_language`; `"always"`; `"off"`), also from the phone (`/v1/settings`, with
+  `choices.audio_language` and `choices.subtitles_when`).
+
+### Changed
+- Subtitles follow the audio that actually plays: a Spanish-made title whose file has only English audio gets
+  subtitles, and a Spanish dub gets none. Streams ranked for the audio wanted also read Torrentio-style flags and
+  filename language words.
 - Voice tests: `scripts/bench_voice.py` replays the commands you said to the TV (kept with `keep_recordings`)
   through speech to text and the decision steps, set up as the running agent has them, and judges each against
   what it should have done: action right, transcript right and word error rate, timings and cost per speech model
@@ -21,6 +39,8 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 ## panel — unreleased
 
 ### Added
+- Settings › Languages: the audio can be the original language (the one each title was made in), and **Subtitles
+  show**: only when the audio isn't your native language (as before), always, or off.
 - Activity tab: right-click a spoken command, **Add to voice tests…**: what it should do (what it did, or was
   taught) and the words said, checked by you. Erasing the history says that voice tests keep their own audio.
 

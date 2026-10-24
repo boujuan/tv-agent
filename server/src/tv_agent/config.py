@@ -33,6 +33,7 @@ D1_WHERE = ("local-first", "hosted-first", "local", "hosted")
 STT_VOCABULARY = ("Stremio", "TizenTube", "YouTube", "YouTube Music", "Kodi", "Twitch", "Movistar Plus", "Prime Video",
                   "RTVE Play", "TDTChannels")
 UPDATES = ("auto", "notify", "off")                               # updates.py
+SUBTITLES_WHEN = ("foreign", "always", "off")                     # the `subtitles` setting (languages.py)
 LEGACY = ("hosted_d1", "llm_fallback", "llm_first")              # before decide_steps, decide_off and d1_where
 
 
@@ -75,11 +76,14 @@ class Config:
     # "tvplayer" (TV Agent Player: Media3, driven over its own connection), "kodi" (full remote control) or "just"
     # (Just Player)
     player: str = "kodi"
-    # Tracks Kodi switches to after a start (ISO 639-2 codes, as Kodi reports them). Titles made in a country
-    # that speaks native_language play in it with subtitles off; everything else gets audio_language (when the
-    # file has it, else the original) with the first available subtitle_languages track on.
+    # The tracks a start plays (ISO 639-2 codes, as Kodi reports them; languages.py). Titles made in
+    # native_language play in it; everything else in audio_language ("original": the language it was made in) when
+    # the file has it, else its own default, and streams with it come first. Subtitles in your order, shown per
+    # `subtitles`: "foreign" only while the audio isn't native_language, "always", or "off". Also by voice
+    # ("from now on, audio in Spanish"), the panel and the phones.
     audio_language: str = "eng"
     subtitle_languages: list[str] = field(default_factory=lambda: ["eng", "spa"])
+    subtitles: str = "foreign"
     native_language: str = "spa"
     twitch_favorites: list[str] = field(default_factory=list)
     binge: bool = True                      # at the end of an episode the next one starts (also by voice)
@@ -142,6 +146,10 @@ def load() -> Config:
     cfg.decide_steps = [s for s in cfg.decide_steps if s in STEPS] + [s for s in STEPS if s not in cfg.decide_steps]
     if cfg.stt_where not in ("local", "hosted", "local-first", "hosted-first"):
         raise SystemExit(f"{CONFIG_FILE}: stt_where must be local, hosted, local-first or hosted-first")
+    if cfg.audio_language != "original" and not re.fullmatch(r"[a-z]{3}", str(cfg.audio_language)):
+        raise SystemExit(f"{CONFIG_FILE}: audio_language must be \"original\" or a language code such as \"eng\"")
+    if cfg.subtitles not in SUBTITLES_WHEN:
+        raise SystemExit(f"{CONFIG_FILE}: subtitles must be {', '.join(SUBTITLES_WHEN)}")
     if cfg.updates not in UPDATES:
         raise SystemExit(f"{CONFIG_FILE}: updates must be {', '.join(UPDATES)}")
     if cfg.stt_language not in ("native", "") and not re.fullmatch(r"[a-z]{2}", cfg.stt_language):

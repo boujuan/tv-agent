@@ -4,7 +4,8 @@ The ranking is plain code, not the model. Hard limits drop a stream: not a direc
 itself), not cached on the debrid service, a cam rip, above max_height, or a bitrate the TV's 100 Mbit/s port can't
 carry. The rest are ordered by, in turn:
 
-1. language: the audio the title should play in (English, or Spanish for Spanish-made titles) is in the file
+1. language: the audio the title should play in (languages.plan) is in the file, as AIOStreams read it from the
+   file's own tracks or name, or as a name, description or filename says (flags, "Castellano", "Multi")
 2. resolution, up to max_height
 3. AIOStreams' score for the release (the ★ in its names: release group tier, source, HDR, audio…)
 4. already in your debrid library, then the higher bitrate
@@ -15,13 +16,15 @@ AIOStreams describes each stream in machine-readable `streamData` when asked by 
 import asyncio
 import logging
 import re
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import httpx
 
 from .. import __version__
-from ..languages import ALIASES
+from ..languages import code as language_code
+from ..tv import thumbs
 from .account import Addon
 
 log = logging.getLogger(__name__)
@@ -56,6 +59,16 @@ DEBRID = {"realdebrid": "Real-Debrid", "alldebrid": "AllDebrid", "premiumize": "
           "putio": "put.io", "RD": "Real-Debrid", "AD": "AllDebrid", "PM": "Premiumize", "TB": "TorBox",
           "DL": "Debrid-Link", "ED": "EasyDebrid", "OC": "Offcloud", "PKP": "PikPak"}
 DEBRID_TAG = re.compile(r"\[(RD|AD|PM|TB|DL|ED|OC|PKP)[+\] ]")
+# Languages a stream's text names, for addons without streamData: flags (Torrentio shows the non-English ones) and
+# words in the filename ("Castellano", "SPA-ENG", "iTA")
+FLAGS = {"🇬🇧": "English", "🇺🇸": "English", "🇪🇸": "Spanish", "🇲🇽": "Latino", "🇫🇷": "French", "🇮🇹": "Italian",
+         "🇩🇪": "German", "🇵🇹": "Portuguese", "🇧🇷": "Portuguese", "🇯🇵": "Japanese", "🇰🇷": "Korean",
+         "🇨🇳": "Chinese", "🇹🇼": "Chinese", "🇷🇺": "Russian"}
+LANGUAGE_WORDS = [(re.compile(rx, re.I), name) for rx, name in (
+    (r"\b(?:english|eng)\b", "English"), (r"\b(?:castellano|spanish|espa[nñ]ol|spa|esp)\b", "Spanish"),
+    (r"\blatino\b", "Latino"), (r"\b(?:truefrench|french|vff|vfq|vf2|fre|fra)\b", "French"),
+    (r"\b(?:italian|ita)\b", "Italian"), (r"\b(?:german|ger|deu)\b", "German"), (r"\b(?:japanese|jpn)\b", "Japanese"),
+    (r"\b(?:korean|kor)\b", "Korean"), (r"\b(?:multi|dual)\b", "Multi"))]
 
 
 @dataclass
@@ -76,6 +89,9 @@ class Stream:
     visual: tuple[str, ...] = ()     # "DV", "HDR10"…
     audio: tuple[str, ...] = ()      # "DD+", "Atmos"…
     languages: tuple[str, ...] = ()  # audio languages by name: "English", "Spanish", "Latino", "Multi"…
+    subtitles: tuple[str, ...] = ()  # subtitle languages by name, when the addon says
+    tracks_read: bool = False        # languages and subtitles are the file's own tracks (AIOStreams read them)
+    original: str = ""               # the audio track the file marks as the original language, by name
     group: str = ""                  # release group
     source: str = ""                 # the addon AIOStreams found it with ("Torrentio"); else the addon itself
     service: str = ""                # the debrid service's id in AIOStreams ("realdebrid")
@@ -128,6 +144,13 @@ def parse(addon: str, raw: dict, order: int) -> Stream | None:
         s.visual = tuple(pf.get("visualTags") or ())
         s.audio = tuple(pf.get("audioTags") or ())
         s.languages = tuple(pf.get("languages") or ())
+        s.subtitles = tuple(pf.get("subtitles") or ())
+        tracks = [t for t in pf.get("audioTracks") or [] if isinstance(t, dict)]
+        if tracks and all(t.get("lang") for t in tracks):
+            s.languages = tuple(dict.fromkeys(str(t["lang"]) for t in tracks))
+            s.tracks_read = pf.get("mediaInfoQuality") == "probe" or bool(pf.get("subtitleTracks"))
+        originals = {str(t.get("lang")) for t in tracks if t.get("original")}
+        s.original = originals.pop() if len(originals) == 1 else ""
         s.group = str(pf.get("releaseGroup") or "")
         if isinstance(data.get("streamExpressionScore"), (int, float)):
             s.aio_score = int(data["streamExpressionScore"])
@@ -141,6 +164,8 @@ def parse(addon: str, raw: dict, order: int) -> Stream | None:
     elif m := SIZE.search(text):
         s.size = int(float(m.group(1).replace(",", ".")) * UNIT[m.group(2).lower()])
     s.cached = False if UNCACHED.search(text) else (True if CACHED.search(text) else None)
+    s.languages = tuple(dict.fromkeys([*(name for flag, name in FLAGS.items() if flag in text),
+                                       *(name for rx, name in LANGUAGE_WORDS if rx.search(s.filename))]))
     return s
 
 
@@ -171,29 +196,71 @@ def release(s: Stream) -> str:
     return s.group or (m.group(1) if m else "")
 
 
+def has_audio(s: Stream, lang: str) -> bool | None:
+    """Whether the file has audio in this language: True, False, or None when nothing says. Latin American Spanish
+    counts as Spanish. A filename's dub marker without "multi" or "dual" is the only language."""
+    names = {x.lower() for x in s.languages}
+    if any(language_code(x) == lang for x in names):
+        return True
+    if names & {"multi", "dual audio"}:
+        return None
+    if s.languages and (s.service or s.tracks_read):      # AIOStreams named them all
+        return False
+    if DUB_ONLY.search(s.filename) and not MULTI.search(s.filename):
+        return False
+    return None
+
+
+def has_subtitles(s: Stream, lang: str) -> bool | None:
+    """Whether the file has subtitles in this language, when the addon says which it has."""
+    if not s.subtitles:
+        return None
+    return any(language_code(x) == language_code(lang) for x in s.subtitles)
+
+
 def _language_fit(s: Stream, want: str | None) -> float:
-    """2: the wanted audio language is in the file; 1: unknown or a multi-language release; 0: dubbed without it.
-    Latin American Spanish counts, a little below Castilian."""
+    """2: the wanted audio language is in the file; 1.5: only Latin American Spanish for Spanish; 1: unknown or a
+    multi-language release; 0: dubbed without it."""
     if not want:
         return 1
-    if s.languages:
-        names = {x.lower() for x in s.languages}
-        if names & ALIASES.get(want, {want}):
-            return 2
-        if want == "spa" and "latino" in names:
-            return 1.5
-        return 1 if names & {"multi", "dual audio"} else 0
-    if DUB_ONLY.search(s.filename) and not MULTI.search(s.filename):   # streams without streamData: the filename
-        return 0
-    return 1
+    has = has_audio(s, want)
+    if has and want == "spa" and {x.lower() for x in s.languages} & {"latino", "latin american"} and not any(
+            x.lower() in ("spanish", "castellano", "español", "spa") for x in s.languages):
+        return 1.5
+    return 2 if has else 1 if has is None else 0
+
+
+def original_language(found: list[Stream]) -> str | None:
+    """The language the files mark as the original audio, when most of those that mark one agree."""
+    votes = Counter(c for s in found if s.original and (c := language_code(s.original)))
+    if not votes:
+        return None
+    lang, n = votes.most_common(1)[0]
+    return lang if n * 2 > sum(votes.values()) else None
+
+
+async def probe(http: httpx.AsyncClient, link: str, headers: dict | None = None) -> tuple[set[str], set[str]] | None:
+    """(audio languages, subtitle languages) of the file at link (where its addon link leads), as codes, from its
+    Matroska header: one range read; None when it can't be read (another container, an error)."""
+    async def fetch(start: int, length: int) -> bytes:
+        r = await http.get(link, headers={**(headers or {}), "Range": f"bytes={start}-{start + length - 1}"}, timeout=8)
+        if r.status_code != 206:
+            raise thumbs.ReadError(f"HTTP {r.status_code}")
+        return r.content
+    try:
+        found = await thumbs.track_languages(fetch)
+    except (thumbs.ThumbError, httpx.HTTPError) as e:
+        log.info("tracks of a file: %s", e if isinstance(e, thumbs.ThumbError) else type(e).__name__)
+        return None
+    langs = lambda kind: {c for k, x in found if k == kind and (c := language_code(x.split("-")[0]))}   # noqa: E731
+    return langs(thumbs.AUDIO_TRACK), langs(thumbs.TEXT_TRACK)
 
 
 def rank(streams: list[Stream], max_height: int, max_mbps: float, runtime_min: int | None,
-         native_original: bool = False, audio: str | None = None) -> list[Stream]:
+         audio: str | None = "eng") -> list[Stream]:
     """Best first (see the module docstring). Streams that break a hard limit get why_dropped set and sink to the
-    end. audio is the language the title should play in; without it (older callers), a dub-only release of a title
-    not made in your language is marked down, as before."""
-    want = audio if audio else (None if native_original else "eng")
+    end. audio is the language the title should play in (None: no preference)."""
+    want = audio
     for s in streams:
         text = f"{s.name}\n{s.description}\n{s.filename}"
         rate = s.mbps(runtime_min)

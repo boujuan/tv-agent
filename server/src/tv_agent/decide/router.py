@@ -49,6 +49,9 @@ SPLIT = re.compile(r",?\s+(?:and then|and|then|y luego|y despu[eé]s|y)\s+")
 _NUMBER_WORDS = "|".join(sorted((w for w in [*UNITS, *TENS, "hundred"] if w not in ("a", "an", "un", "una", "oh")),
                                 key=len, reverse=True))
 SAME_COMMAND = re.compile(rf"(?:\d|(?:{_NUMBER_WORDS}|a half|half|a quarter|medio|media|un cuarto)\b)")
+# A subtitles or audio command that's a setting: "from now on, audio in Spanish"
+FROM_NOW_ON = re.compile(r"\b(?:from now on|by default|always|a partir de ahora|de ahora en adelante|desde ahora|"
+                         r"por defecto|siempre)\b")
 
 
 def normalize(text: str, rules: Rules) -> str:
@@ -146,13 +149,15 @@ def from_intent(intent: str, t: str, rules: Rules) -> A.Action | None:
     if intent in ("subtitles", "audio_language"):
         lang = next((code for name, code in sorted(LANGUAGE_NAMES.items(), key=lambda kv: -len(kv[0]))
                      if re.search(rf"\b{name}\b", t)), None)
+        keep = bool(FROM_NOW_ON.search(t))
         if intent == "subtitles":
             if lang:
-                return A.Tracks(subtitles=lang)
-            return A.Tracks(subtitles="off" if re.search(r"\b(?:off|no|hide|disable|remove)\b", t) else "on")
+                return A.Tracks(subtitles=lang, keep=keep)
+            return A.Tracks(subtitles="off" if re.search(r"\b(?:off|no|hide|disable|remove|sin|quita)\b", t) else "on",
+                            keep=keep)
         if re.search(r"\boriginal\b", t):
-            return A.Tracks(audio="original")
-        return A.Tracks(audio=lang) if lang else None
+            return A.Tracks(audio="original", keep=keep)
+        return A.Tracks(audio=lang, keep=keep) if lang else None
     if intent == "replay":
         return A.Replay(seconds=seconds_in(t) or 10)
     if intent in ("show_recent", "show_new"):

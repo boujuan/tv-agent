@@ -78,6 +78,8 @@ HEARD: ContextVar[str] = ContextVar("heard", default="")    # what the command b
 # stream played. Never a link.
 START: ContextVar[dict | None] = ContextVar("start", default=None)
 FIRST_FRAME_WAIT = 10.0     # how long a start waits for TV Agent Player's first frame, to report it
+ASKED_FOR = 12 * 3600       # audio or subtitles asked for a title by voice hold for it (its next episodes) this long
+PROBE_AT_MOST = 4           # copies whose tracks are read at once when none says it has the language asked for
 
 
 def _note_title(**fields):
@@ -295,6 +297,9 @@ class Agent:
         self._preloaded: tuple[str, str, str] | None = None   # (video id, stream url, link) open in TV Agent Player
         self._fallback: tuple[NowPlaying, list[streams.Stream], tuple, float] | None = None   # another file, if it fails
         self._closing: asyncio.Task | None = None     # a failed start's loading screen, going Home in a moment
+        self._asked: dict[str, tuple[float, dict]] = {}   # per title: (when, the audio / subtitles asked by voice)
+        self._originals: dict[str, str] = {}     # per title: the language its files mark as the original audio
+        self._probed: dict[tuple[str, int], tuple[set[str], set[str]] | None] = {}   # files' track languages
 
     async def close(self):
         if self._progress and not self._progress.done():
@@ -425,10 +430,9 @@ class Agent:
         def fits(found: list[streams.Stream]) -> bool:
             plan = self.track_plan(meta) if meta else None
             ranked = streams.rank([replace(s) for s in found], self.cfg.max_height, self.cfg.max_mbps,
-                                  _runtime_min(meta or {}), bool(plan and plan.subtitles is None),
-                                  plan.audio if plan else None)
+                                  _runtime_min(meta or {}), plan.audio if plan else "eng")
             return bool(ranked) and not ranked[0].why_dropped and ranked[0].height >= min(self.cfg.max_height, 2160) \
-                and (plan is None or ranked[0].rank_key[1] == 2)
+                and (plan is None or plan.audio is None or ranked[0].rank_key[1] == 2)
         return fits
 
     async def fetch_streams(self, kind: str, video_id: str, meta: dict | None = None) -> list[streams.Stream]:
@@ -444,6 +448,8 @@ class Agent:
                 streams.fetch(self.http, await self.addons(), kind, video_id, enough=self._fits(meta)))
         found = await asyncio.shield(job)                  # a replaced command doesn't waste the lookup
         self._stream_jobs.pop(key, None)
+        if original := streams.original_language(found):
+            self._originals[video_id.split(":")[0]] = original
         if found:
             if len(self._streams) > 40:
                 self._streams.pop(min(self._streams, key=lambda k: self._streams[k][0]))
@@ -463,8 +469,24 @@ class Agent:
         asyncio.create_task(run())
 
     def track_plan(self, meta: dict) -> languages.TrackPlan:
-        c = self.cfg
-        return languages.plan(meta, c.audio_language, c.subtitle_languages, c.native_language)
+        """Your language settings for this title, with the audio and subtitles asked for it by voice lately."""
+        c, imdb = self.cfg, str(meta.get("id") or meta.get("imdb_id") or "")
+        asked = self._asked_for(imdb)
+        plan = languages.plan(meta, c.audio_language, c.subtitle_languages, c.native_language, c.subtitles,
+                              self._originals.get(imdb), asked.get("audio"))
+        if "subtitles" in asked:                # asked for: shown whatever the audio
+            plan = replace(plan, subtitles=asked["subtitles"], unless=None)
+        return plan
+
+    def _asked_for(self, imdb: str) -> dict:
+        hit = self._asked.get(imdb)
+        return hit[1] if hit and time.time() - hit[0] < ASKED_FOR else {}
+
+    def _ask(self, imdb: str, **fields):
+        """Audio or subtitles asked for a title (its file now, its next episodes, a copy that replaces it)."""
+        self._asked[imdb] = (time.time(), self._asked_for(imdb) | fields)
+        if len(self._asked) > 50:
+            self._asked.pop(min(self._asked, key=lambda k: self._asked[k][0]))
 
     async def streams_for(self, kind: str, video_id: str, meta: dict | None = None) -> list[streams.Stream]:
         meta = meta or {}
@@ -480,9 +502,8 @@ class Agent:
                 log.info("streams of %s (named %s): %s", video_id, n, type(more).__name__)
             else:
                 found += [s for s in more if s.filename == filename]
-        plan = self.track_plan(meta)
         ranked = streams.rank(found, self.cfg.max_height, self.cfg.max_mbps, _runtime_min(meta),
-                              plan.subtitles is None, plan.audio)
+                              self.track_plan(meta).audio)
         for s in ranked:
             if not s.why_dropped and (v := self.checks.get(s.filename, s.size, video_id)) and v.ok is False:
                 s.why_dropped = f"it's {v.actual or 'another episode'} under this number"
@@ -490,7 +511,8 @@ class Agent:
 
     async def apply_tracks(self, plan: languages.TrackPlan, wait_s: float = 20.0,
                            addon_subs: asyncio.Task | None = None, settle_s: float = 2.5) -> str:
-        """Once Kodi plays the file, switch audio and subtitles per the plan. Subtitle languages the file lacks come
+        """Once Kodi plays the file, switch audio and subtitles per the plan (subtitles by the audio it plays: shown
+        only for audio that isn't yours, per your `subtitles`). Subtitle languages the file lacks come
         from your subtitle addons (addon_subs: the task fetching them). Kodi starts on the right languages itself
         (prefer() before opening); this refines that (Chinese script, no hearing-impaired or commentary tracks,
         addon subtitles) once playback has settled: for a few seconds after the picture starts moving Kodi applies
@@ -525,13 +547,15 @@ class Agent:
             await self.kodi.set_audio(pid, audio["index"])
         if audio is None and plan.audio:
             notes.append(f"no {plan.audio} audio")
-        if plan.subtitles is None:
+        playing = (audio or info.get("currentaudiostream") or {}).get("language")
+        langs = plan.subs_for(playing or plan.audio)
+        if langs is None:
             if info.get("subtitleenabled"):
                 await self.kodi.set_subtitle(pid, None)
             await self._recheck_tracks(pid, audio, None, False)
             return ", ".join(notes)
         inside = [t for t in info.get("subtitles") or [] if not t.get("isforced")]
-        missing = [lang for lang in plan.subtitles if not any(languages.matches(t, lang) for t in inside)]
+        missing = [lang for lang in langs if not any(languages.matches(t, lang) for t in inside)]
         offered = []
         if missing and addon_subs is not None:
             try:
@@ -539,7 +563,7 @@ class Agent:
             except Exception as e:      # slow or failing addons: the file's own subtitles only
                 log.info("addon subtitles: %s", type(e).__name__)
         # The language to show: the first of yours that the file or an addon has.
-        first = next((lang for lang in plan.subtitles
+        first = next((lang for lang in langs
                       if lang not in missing or any(lang == want for want, _ in offered)), None)
         # Kodi shows the last subtitle it was given, so the one to show (if from an addon) goes last.
         offered.sort(key=lambda pair: pair[0] == first)
@@ -915,7 +939,7 @@ class Agent:
                 if loading is not None:
                     loading.at("Starting…")
                 await self.tvplayer.open(link, resume_ms, item=video, title=label, headers=chosen.headers or None,
-                                         audio=plan.audio, subs=plan.subtitles,
+                                         audio=plan.audio, subs=plan.subs_for(plan.audio),
                                          info=_title_screen(name, meta, video) | _stream_screen(chosen))
                 if kodi_open is not None and not kodi_open.done():
                     asyncio.create_task(self._stop_kodi_when(kodi_open))
@@ -955,8 +979,8 @@ class Agent:
             stages = (("streams", t0, t_streams),)
             async with self._starting:
                 resume_ms = self._replace_session(video, resume_ms)
-                subs = languages.android_locale(plan.subtitles[0]) if plan.subtitles else None
-                await self.tv(justplayer.captions, plan.subtitles is not None, subs)
+                subs = plan.subs_for(plan.audio)
+                await self.tv(justplayer.captions, subs is not None, languages.android_locale(subs[0]) if subs else None)
                 if (pid := await self._kodi_player()) is not None:
                     await self.kodi.stop(pid)                               # one player at a time
                 t_load = time.perf_counter()
@@ -976,9 +1000,10 @@ class Agent:
             if not (kodi_ready is not None and await kodi_ready):
                 await self.kodi.start()          # also brings a Kodi left in the background to the front
             try:
-                await self.kodi.prefer(languages.KODI_NAMES.get(plan.audio or "", "mediadefault"),
-                                       "none" if plan.subtitles is None
-                                       else languages.KODI_NAMES.get(plan.subtitles[0], "original"))
+                subs = plan.subs_for(plan.audio)
+                await self.kodi.prefer("original" if plan.audio is None
+                                       else languages.KODI_NAMES.get(plan.audio, "mediadefault"),
+                                       "none" if subs is None else languages.KODI_NAMES.get(subs[0], "original"))
                 await self.kodi.allow_hdr(dolby_vision_only=chosen.dolby_vision and chosen.hdr10_plus)
             except KodiError as e:
                 log.warning("Kodi language settings: %s", e)
@@ -1376,7 +1401,7 @@ class Agent:
             link = await streams.resolve(self.http, s) or s.url
             plan = self.track_plan(meta)
             await self.tvplayer.preload(link, item=video, headers=s.headers or None, audio=plan.audio,
-                                        subs=plan.subtitles,
+                                        subs=plan.subs_for(plan.audio),
                                         info=_title_screen(np.name, meta, video) | _stream_screen(s))
             self._preloaded = (video, s.url, link)
             log.info("next episode %s preloaded in the player", video)
@@ -1387,8 +1412,10 @@ class Agent:
 
     async def _player_subs(self, plan: languages.TrackPlan, addon_subs: asyncio.Task | None, label: str):
         """TV Agent Player chose the file's own audio and subtitles by the plan before its first frame. What's left:
-        subtitles from your addons when the first of your languages that the file or an addon has isn't in the file."""
-        if plan.subtitles is None or addon_subs is None:
+        subtitles by the audio it chose, when that isn't the audio planned (they show only for audio that isn't
+        yours: the file lacked the planned language), and subtitles from your addons when the first of your
+        languages that the file or an addon has isn't in the file."""
+        if plan.subtitles is None:
             return
         try:
             item = self.tvplayer.item
@@ -1396,15 +1423,24 @@ class Agent:
                     lambda m: m.get("t") == "tracks" and m.get("item") == item, 30) is None:
                 return
             info = await self.tvplayer.tracks()
+            playing = (info.get("currentaudiostream") or {}).get("language")
+            langs = plan.subs_for(playing or plan.audio)
             inside = [t for t in info["subtitles"] if not t.get("isforced") and "(external)" not in t.get("name", "")]
-            have = next((i for i, lang in enumerate(plan.subtitles) if any(languages.matches(t, lang) for t in inside)),
-                        len(plan.subtitles))
-            wanted = plan.subtitles[:have]           # only languages you put before the file's own first one
-            if not wanted:
+            if langs is None:                        # the player was asked for subtitles: this audio is yours
+                if info.get("subtitleenabled"):
+                    await self.tvplayer.set_subtitle(tvplayer.PID, None)
+                return
+            if plan.subs_for(plan.audio) is None and not info.get("subtitleenabled") and (
+                    sub := languages.pick_subtitle(inside, langs)) is not None:
+                await self.tvplayer.set_subtitle(tvplayer.PID, sub["index"])    # asked for none: yours was expected
+            have = next((i for i, lang in enumerate(langs) if any(languages.matches(t, lang) for t in inside)),
+                        len(langs))
+            wanted = langs[:have]                    # only languages you put before the file's own first one
+            if not wanted or addon_subs is None:
                 return
             offered = subtitles.choose(await asyncio.wait_for(asyncio.shield(addon_subs), 15), wanted)
             if not offered:
-                if have == len(plan.subtitles):
+                if have == len(langs):
                     await self.notify("No subtitles found")
                 return
             lang, sub = offered[0]
@@ -1582,11 +1618,7 @@ class Agent:
                 await self.notify(f"This file is {verdict.actual or 'another episode'} under this number, and "
                                   "there's no other copy")
                 return
-            at = 0
-            if np.player in ("kodi", "tvplayer") and (pid := await self._player_id()) is not None:
-                at = (await self._ctl(pid).position(pid))[0]
-            elif (st := await self._just_status()) is not None:
-                at = st[1]
+            at = await self._where(np)
             log.info("%s is %s, not %s: switching to %s at %s", chosen.filename, verdict.actual, video,
                      alt.filename or alt.name, _clock(at))
             await self.notify(f"That file was another episode under this number: switching to {label}")
@@ -1694,7 +1726,14 @@ class Agent:
 
     # ---- subtitles and audio on demand ----
 
-    async def _tracks(self, a: Tracks) -> Outcome:
+    async def _tracks(self, a: Tracks, remember: bool = True) -> Outcome:
+        """Audio and subtitles of what's playing. Audio (or subtitles) in a language the file lacks: another copy of
+        what the agent started that has it takes over where it is (_other_copy). What's asked holds for the title
+        (its next episodes, a copy switched to: _ask) unless `remember` is off; "from now on" (`keep`) changes your
+        settings instead (_language_settings). With your subtitles shown only for audio that isn't yours, a switch
+        of audio turns them on or off to match."""
+        if a.keep or a.subtitles == "foreign":
+            return await self._language_settings(a)
         pid = await self._player_id()
         ctl = self._ctl(pid)
         if a.subtitles == "toggle":           # "subtitles": off if they're on, else on
@@ -1711,42 +1750,211 @@ class Agent:
                 return Outcome(True, "Subtitles on (from the next start)" if on else "Subtitles off")
             return Outcome(False, "Subtitles and audio language can be changed in TV Agent Player and Kodi")
         info = await ctl.tracks(pid)
+        np = self._session(pid)
+        meta = await self._meta_of(np) if np and a.audio else {}
+        if np and remember:
+            asked = {}
+            if a.audio:
+                asked["audio"] = a.audio
+            if a.subtitles:
+                langs = self.cfg.subtitle_languages
+                asked["subtitles"] = (None if a.subtitles == "off" else list(langs) if a.subtitles == "on"
+                                      else [a.subtitles, *(x for x in langs if x != a.subtitles)])
+            self._ask(np.imdb_id, **asked)
         said = []
         if a.audio:
             tracks = info.get("audiostreams") or []
-            if a.audio == "original":
-                track = next((t for t in tracks if t.get("isoriginal")), None) or (tracks[0] if tracks else None)
-            else:
-                track = languages.pick_audio(tracks, a.audio)
+            want = (languages.made_in(meta, self._originals.get(np.imdb_id)) if np else None) \
+                if a.audio == "original" else a.audio
+            track = languages.pick_audio(tracks, want) if want else None
+            if a.audio == "original" and track is None and not (want and np):
+                track = (next((t for t in tracks if t.get("isoriginal")), None)
+                         or next((t for t in tracks if t.get("isdefault")), None) or (tracks[0] if tracks else None))
             if track is None:
-                return Outcome(False, f"No {languages.KODI_NAMES.get(a.audio, a.audio)} audio in this file")
-            await ctl.set_audio(pid, track["index"])
+                if np and want and self.account:
+                    return await self._other_copy(np, meta, audio=want)
+                return Outcome(False, f"No {languages.name(want or a.audio)} audio in this file")
+            if track["index"] != (info.get("currentaudiostream") or {}).get("index"):
+                await ctl.set_audio(pid, track["index"])
             said.append(f"{languages.name(track.get('language')) or 'original'} audio")
+            plan = self.track_plan(meta) if np else None
+            if not a.subtitles and plan and plan.unless:    # your subtitles follow the audio
+                if plan.subs_for(track.get("language")) is None:
+                    if info.get("subtitleenabled"):
+                        await ctl.set_subtitle(pid, None)
+                        said.append("subtitles off")
+                elif not info.get("subtitleenabled") and (got := await self._show_subtitles(
+                        pid, ctl, info, plan.subtitles, np)):
+                    said.append(got)
         if a.subtitles == "off":
             await ctl.set_subtitle(pid, None)
             said.append("subtitles off")
         elif a.subtitles:
             langs = self.cfg.subtitle_languages if a.subtitles == "on" else [a.subtitles]
-            inside = [t for t in info.get("subtitles") or [] if not t.get("isforced")]
-            sub = languages.pick_subtitle(inside, langs)
-            if sub:
-                await ctl.set_subtitle(pid, sub["index"])
-                said.append(f"{languages.name(sub.get('language'))} subtitles")
-            else:
-                np = self.state.now_playing
-                offered = []
-                if np:
-                    stream = streams.Stream("", np.url, "", "", np.filename, 0, size=np.size, video_hash=np.video_hash)
-                    offered = subtitles.choose(
-                        await subtitles.fetch(self.http, await self.addons(), np.kind, np.video_id, stream), langs)
-                if not offered:
-                    return Outcome(False, "No subtitles in that language")
-                lang, best = offered[0]
-                await ctl.add_subtitle(pid, best.url, **({"lang": lang, "label": f"{languages.name(lang)} ({best.addon})"}
-                                                         if pid == tvplayer.PID else {}))
-                said.append(f"{languages.name(lang)} subtitles from {best.addon}")
+            got = await self._show_subtitles(pid, ctl, info, langs, np)
+            if got is None:
+                if np and a.subtitles != "on" and self.account and not said:
+                    return await self._other_copy(np, meta or await self._meta_of(np), subtitle=a.subtitles)
+                return Outcome(False, "No subtitles in that language")
+            said.append(got)
         text = ", ".join(said)
         return Outcome(True, text[:1].upper() + text[1:] if text else "OK")
+
+    async def _show_subtitles(self, pid: int | str, ctl, info: dict, langs: list[str],
+                              np: NowPlaying | None) -> str | None:
+        """The first of these languages the file has shown, else one from your subtitle addons (for what the agent
+        started); what's shown, or None when neither has any."""
+        inside = [t for t in info.get("subtitles") or [] if not t.get("isforced")]
+        if sub := languages.pick_subtitle(inside, langs):
+            await ctl.set_subtitle(pid, sub["index"])
+            return f"{languages.name(sub.get('language'))} subtitles"
+        offered = []
+        if np:
+            stream = streams.Stream("", np.url, "", "", np.filename, 0, size=np.size, video_hash=np.video_hash)
+            offered = subtitles.choose(
+                await subtitles.fetch(self.http, await self.addons(), np.kind, np.video_id, stream), langs)
+        if not offered:
+            return None
+        lang, best = offered[0]
+        await ctl.add_subtitle(pid, best.url, **({"lang": lang, "label": f"{languages.name(lang)} ({best.addon})"}
+                                                 if pid == tvplayer.PID else {}))
+        return f"{languages.name(lang)} subtitles from {best.addon}"
+
+    async def _meta_of(self, np: NowPlaying) -> dict:
+        try:
+            return await cinemeta.meta(self.http, np.kind, np.imdb_id)
+        except (httpx.HTTPError, ValueError) as e:
+            log.info("details of %s: %s", np.imdb_id, type(e).__name__)
+            return {}
+
+    def _session(self, pid: int | str | None) -> NowPlaying | None:
+        """What the agent started, while that player plays it."""
+        np = self.state.now_playing
+        if np is None or pid is None:
+            return None
+        if np.player == "tvplayer":
+            return np if pid == tvplayer.PID else None
+        return np if np.player == "kodi" and pid != tvplayer.PID and self._progress and not self._progress.done() \
+            else None
+
+    async def _where(self, np: NowPlaying) -> int:
+        """Where the player is in what the agent started (ms)."""
+        if np.player in ("kodi", "tvplayer") and (pid := await self._player_id()) is not None:
+            return (await self._ctl(pid).position(pid))[0]
+        if (st := await self._just_status()) is not None:
+            return st[1]
+        return 0
+
+    async def _other_copy(self, np: NowPlaying, meta: dict, audio: str | None = None,
+                          subtitle: str | None = None) -> Outcome:
+        """What's playing from another copy that has audio (or subtitles) in this language, from where it is: the
+        best such copy by your stream rules (a wrong episode's switch, _switch_if_wrong). The TV says it's looking;
+        when no copy has it, what's playing goes on as it was."""
+        lang = audio or subtitle
+        what = f"{languages.name(lang)} {'audio' if audio else 'subtitles'}"
+        await self.notify(f"No {what} in this file: looking for a copy with it…")
+        try:
+            alt = await self._copy_with(np, meta, audio, subtitle)
+        except (httpx.HTTPError, OSError) as e:
+            log.info("copies with %s: %s", what, type(e).__name__)
+            alt = None
+        if self.state.now_playing is not np:
+            return Outcome(False, "Something else started meanwhile")
+        if alt is None:
+            return Outcome(False, f"No copy of {np.name} has {what}: it goes on as it was")
+        at = await self._where(np)
+        v = next((x for x in cinemeta.episodes(meta) if x["id"] == np.video_id), None)
+        label = _episode_label(np.name, v) if v else np.name
+        log.info("%s for %s: switching to %s at %s", what, np.video_id, alt.filename or alt.name, _clock(at))
+        await self.notify(f"Switching to a copy with {what}…")
+        out = await self.play(np.imdb_id, np.kind, np.name, np.video_id, label, meta, at, prepared=alt, jump=True)
+        if not out.ok:
+            return Outcome(False, f"The copy with {what} didn't start ({out.say})")
+        quality = f" · {'4K' if alt.height >= 2160 else f'{alt.height}p'}" if alt.height else ""
+        return Outcome(True, f"{what[:1].upper() + what[1:]}: another copy{quality}, from {_clock(at)}", out.details)
+
+    async def _copy_with(self, np: NowPlaying, meta: dict, audio: str | None = None,
+                         subtitle: str | None = None) -> streams.Stream | None:
+        """The best copy but the one playing (your stream rules, with the language asked for the title) that has
+        audio or subtitles in this language and whose link answers. Copies your addons say have it come first; the
+        best few that say nothing, then those whose name (not their tracks) says it lacks it, are read too (their
+        tracks, from the file's header), all at once. Without link checks (probe_streams off) only what the addons
+        say counts."""
+        def other(s: streams.Stream) -> bool:
+            return not s.why_dropped and s.url != np.url.split("|")[0] and not (
+                s.filename and s.filename == np.filename and s.size == np.size) and not (
+                self.cfg.player == "just" and s.headers)
+        found = [s for s in await self.streams_for(np.kind, np.video_id, meta) if other(s)]
+        has = (lambda s: streams.has_audio(s, audio)) if audio else (lambda s: streams.has_subtitles(s, subtitle))
+        said = [s for s in found if has(s)][:3]
+        if not self.cfg.probe_streams:
+            return said[0] if said else None
+        unsure = [s for s in found if has(s) is None] + [s for s in found if has(s) is False and not s.tracks_read]
+        maybe = said + unsure[:PROBE_AT_MOST]
+        reads = [asyncio.create_task(self._probe(s)) for s in maybe]
+        try:
+            for s, read in zip(maybe, reads):
+                got = await read
+                if got is False:                # the link doesn't answer
+                    continue
+                if got is None and s in said:   # unreadable: what the addon says goes
+                    return s
+                if got and (audio in got[0] if audio else languages.code(subtitle) in got[1]):
+                    return s
+            return None
+        finally:
+            for read in reads:
+                read.cancel()
+
+    async def _probe(self, s: streams.Stream) -> tuple[set[str], set[str]] | None | bool:
+        """(audio, subtitle) languages of a copy from its file's header, kept; None when it can't be read, False when
+        its link doesn't answer."""
+        key = (s.filename or s.url, s.size)
+        if key not in self._probed:
+            link = await streams.resolve(self.http, s)
+            if link is None:
+                return False
+            if len(self._probed) > 200:
+                self._probed.pop(next(iter(self._probed)))
+            self._probed[key] = await streams.probe(self.http, link, s.headers)
+        return self._probed[key]
+
+    async def _language_settings(self, a: Tracks) -> Outcome:
+        """"From now on, audio in Spanish", "a partir de ahora sin subtítulos": your settings (as the panel and the
+        phone change them), and what's playing follows. What was asked for single titles is forgotten. Subtitles in
+        a language turn on (for audio that isn't yours) if they were off; just "on" is always."""
+        c, said = self.cfg, []
+        if a.audio:
+            set_value(c, "audio_language", a.audio)
+            said.append("original audio" if a.audio == "original" else f"{languages.name(a.audio)} audio")
+        if a.subtitles == "off":
+            set_value(c, "subtitles", "off")
+            said.append("no subtitles")
+        elif a.subtitles in ("on", "toggle"):
+            set_value(c, "subtitles", "always")
+            said.append("subtitles always")
+        elif a.subtitles == "foreign":
+            set_value(c, "subtitles", "foreign")
+            said.append(f"subtitles only when the audio isn't {languages.name(c.native_language)}")
+        elif a.subtitles:
+            set_value(c, "subtitle_languages", [a.subtitles, *(x for x in c.subtitle_languages if x != a.subtitles)])
+            if c.subtitles == "off":
+                set_value(c, "subtitles", "foreign")
+            said.append(f"{languages.name(a.subtitles)} subtitles")
+        self._asked.clear()
+        text = "From now on: " + ", ".join(said)
+        pid = await self._player_id()
+        if not said or (np := self._session(pid)) is None:
+            return Outcome(True, text)
+        if a.subtitles == "foreign":        # what's playing: subtitles as its audio wants them
+            info = await self._ctl(pid).tracks(pid)
+            playing = (info.get("currentaudiostream") or {}).get("language")
+            on = self.track_plan(await self._meta_of(np)).subs_for(playing) is not None
+            now = await self._tracks(Tracks(subtitles="on" if on else "off"), remember=False)
+        else:
+            now = await self._tracks(Tracks(audio=a.audio, subtitles={"toggle": "on"}.get(a.subtitles, a.subtitles)),
+                                     remember=False)
+        return Outcome(True, f"{text} · {now.say}" if now.ok else f"{text} ({now.say})", now.details)
 
     async def _replay(self, a: Replay) -> Outcome:
         pid = await self._player_id()
@@ -1755,7 +1963,7 @@ class Agent:
         ctl = self._ctl(pid)
         was_on = bool((await ctl.tracks(pid)).get("subtitleenabled"))
         await ctl.seek_by(pid, -a.seconds)
-        if not was_on and (await self._tracks(Tracks(subtitles="on"))).ok:
+        if not was_on and (await self._tracks(Tracks(subtitles="on"), remember=False)).ok:
             asyncio.create_task(self._subtitles_off_later(pid, a.seconds + 8))
         return Outcome(True, f"Back {a.seconds} s" + ("" if was_on else " with subtitles for a moment"))
 

@@ -67,8 +67,8 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
   start or stop the local server to match, a local GGUF file and a hosted model, question, threshold, what happens
   when no model answers, title choice, intents) and apps & hooks; each tab shows whether the key it needs is set,
   with a link to it in Settings. Rule edits are saved with Save (live at once).
-- **Settings:** player (and whether it's installed on the TV), resolution, bitrate (or no limit), link check, languages (subtitles as an ordered list,
-  including Chinese Simplified 简体 / Traditional 繁體), binge mode, auto skip, the Liquid and OpenRouter keys,
+- **Settings:** player (and whether it's installed on the TV), resolution, bitrate (or no limit), link check, languages (audio, or the original
+  language; when subtitles show; subtitles as an ordered list, including Chinese Simplified 简体 / Traditional 繁體), binge mode, auto skip, the Liquid and OpenRouter keys,
   Twitch favourites, history on/off, TV addresses, and advanced addresses, ports, the Kodi login and pairing the TV
   app again (Save restarts the agent; what's playing carries on); and the panel's own behaviour: close to tray, open hidden in the
   tray, details on hover, notifications, start at login. Panel settings live in `~/.config/tv-agent/panel.conf`.

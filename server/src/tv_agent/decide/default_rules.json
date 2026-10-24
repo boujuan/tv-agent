@@ -1108,6 +1108,38 @@
       "match": "^(?:stop|stop playing|end it)\\s+(?:in|after)\\s+(?P<m>.+)$"
     },
     {
+      "id": "tracks_from_now_on",
+      "stage": "grammar",
+      "do": {
+        "type": "tracks",
+        "keep": true,
+        "*": "{what|setting!}"
+      },
+      "match": "^(?:from now on|from now|starting now|by default|always|a partir de ahora|de ahora en adelante|desde ahora(?: en adelante)?|por defecto|siempre)[ ,]+(?P<what>.+?)$",
+      "note": "“from now on, audio in Spanish”, “a partir de ahora sin subtítulos”: your settings (what's playing follows)"
+    },
+    {
+      "id": "tracks_from_now_on_after",
+      "stage": "grammar",
+      "do": {
+        "type": "tracks",
+        "keep": true,
+        "*": "{what|setting!}"
+      },
+      "match": "^(?P<what>.+?)[ ,]+(?:from now on|from now|starting now|by default|always|a partir de ahora|de ahora en adelante|desde ahora(?: en adelante)?|por defecto|siempre)$",
+      "note": "“Spanish audio from now on”, “subtítulos en inglés a partir de ahora”"
+    },
+    {
+      "id": "subtitles_foreign",
+      "stage": "grammar",
+      "do": {
+        "type": "tracks",
+        "subtitles": "foreign"
+      },
+      "match": "^(?:(?:subtitles|subtitle|subs|captions)\\s+(?:only\\s+)?(?:when|if|for)\\s+(?:it'?s\\s+|the audio is\\s+|they'?re\\s+)?(?:not|isn'?t|aren'?t|another|other|foreign)\\b.*|subt[ií]tulos\\s+(?:s[oó]lo\\s+|solamente\\s+)?(?:cuando|si|para lo que)\\s+no\\b.*|subt[ií]tulos\\s+(?:s[oó]lo\\s+|solamente\\s+)?(?:en|para)\\s+(?:otros idiomas|idiomas extranjeros|lo extranjero))$",
+      "note": "“subtitles only when it's not in Spanish”, “subtítulos solo cuando no sea en español”: a setting"
+    },
+    {
       "id": "subtitles_off",
       "stage": "grammar",
       "do": {

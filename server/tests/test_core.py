@@ -96,8 +96,9 @@ def test_title_slots():
 def test_language_plan():
     spain = languages.plan({"country": "Spain"}, "eng", ["eng", "spa"], "spa")
     usa = languages.plan({"country": "United States"}, "eng", ["eng", "spa"], "spa")
-    assert spain == languages.TrackPlan("spa", None)
-    assert usa == languages.TrackPlan("eng", ["eng", "spa"])
+    assert spain.audio == "spa" and spain.subs_for("spa") is None          # made in Spanish: no subtitles
+    assert spain.subs_for("en") == ["eng", "spa"]                           # unless the file has only English
+    assert usa == languages.TrackPlan("eng", ["eng", "spa"], "spa") and usa.subs_for("eng") == ["eng", "spa"]
     audio = [{"index": 0, "language": "fre"}, {"index": 1, "language": "eng"}]
     subs = [{"index": 0, "language": "fre"}, {"index": 1, "language": "eng", "name": "SDH"},
             {"index": 2, "language": "eng", "name": "English"}]
@@ -150,7 +151,7 @@ def test_streams_ranked_by_language_resolution_score_and_bitrate():
     assert {s.why_dropped.split()[-1] for s in ranked[4:]} == {"cached", "Mbit/s", "cam/ts"}
     parsed += [streams.parse("AIOStreams", _aio("https://debrid/castellano", "1080p", 100, ["Spanish"]), 9),
                streams.parse("AIOStreams", _aio("https://debrid/latino", "2160p", 100, ["Latino"]), 10)]
-    spanish = streams.rank(parsed, 2160, 60, 27, native_original=True, audio="spa")
+    spanish = streams.rank(parsed, 2160, 60, 27, audio="spa")
     assert [s.url for s in spanish[:2]] == ["https://debrid/castellano", "https://debrid/latino"]   # Spanish-made
 
 
@@ -1213,7 +1214,7 @@ def test_subtitles_switch_over_from_what_kodi_shows():
         set_to.append(index)
 
     kodi = types.SimpleNamespace(tracks=tracks, set_subtitle=set_subtitle)
-    a = types.SimpleNamespace(_player_id=player, _ctl=lambda pid: kodi)
+    a = types.SimpleNamespace(_player_id=player, _ctl=lambda pid: kodi, _session=lambda pid: None)
     out = asyncio.run(Agent._tracks(a, A.Tracks(subtitles="toggle")))
     assert set_to == [None] and out.say == "Subtitles off"
 

@@ -18,7 +18,8 @@ playback and progress sync. Also the `tv-agent` command line and the MCP server.
 | Volume | "volume twenty", "volume to the max", "louder", "turn it down a bit", "mute", "unmute" | TV volume 0-100 |
 | Binge mode | "binge mode on", "turn off binge mode" | On (default): when an episode ends the next one starts, already found and checked 20 s into the episode. After a film or a season's last episode: Home |
 | Sleep timer | "stop after this episode", "turn the TV off after this one", "stop in 30 minutes", "turn off in an hour", "cancel the sleep timer" | Stops (then Home) or puts the TV to sleep; "after this one" wins over binge mode |
-| Subtitles, audio | "subtitles on", "subtitles off", "subtitles" (switches them over), "Spanish subtitles", "original audio", "audio in English" | Kodi: the file's own track, else your subtitle addons for that release |
+| Subtitles, audio | "subtitles on", "subtitles off", "subtitles" (switches them over), "Spanish subtitles", "original audio", "audio in English", "ponlo en español" | The file's own track, else your subtitle addons for that release; a language the file lacks: the best other copy that has it, from the same moment (the TV says it's looking). Kept for the title's next episodes |
+| Language settings | "from now on, audio in Spanish", "a partir de ahora sin subtítulos", "always English subtitles", "subtítulos solo cuando no sea en español" | Your `audio_language`, `subtitles` and `subtitle_languages`, as the panel and the phone change them; what's playing follows |
 | Missed a line | "what did they say?", "say that again" | Back 10 s, subtitles on for a moment |
 | Intro, recap, credits | "skip the intro", "skip the recap", "skip the credits"; "auto skip on" / "off" | Jumps to the end of the part you're in, from TheIntroDB / IntroDB timestamps (or a chapter named "Opening"); credits: the next episode in binge mode. Auto skip (off by default, `auto_skip`) skips intros and recaps by themselves when their timestamps are sure |
 | Lists | "what was I watching?", "what's new?", "new films", then "number 2" / "the second one" | A numbered list on the TV (posters); the remote's OK or number keys pick too |
@@ -30,10 +31,20 @@ playback and progress sync. Also the `tv-agent` command line and the MCP server.
 | Newest episode | "play the latest episode of The Bear" | The newest episode out |
 | Your library | "add this to my library", "remove Friends from my library", "mark this as watched", "mark The Bear season 3 as watched", "mark it as unwatched" | Written to your Stremio library, with Stremio's own per-episode watched marks |
 
-Audio and subtitles: a title made in a country that speaks `native_language` plays in it without subtitles;
-anything else plays in `audio_language` (when the file has it) with the first available of `subtitle_languages`
-(English, Spanish, Chinese Simplified/Traditional and others). Dubbed-only releases (French-only, Latino-only) of
-titles from elsewhere are marked down. Kodi applies this per file; Just Player only partly (see below).
+Audio and subtitles: a title made in `native_language` plays in it; anything else plays in `audio_language` (a
+language, or `"original"`: the one it was made in) when the file has it, and streams that have it come first. The
+language a title was made in is the files' own original track when AIOStreams reads it, else its first country.
+Subtitles: the first available of `subtitle_languages` (English, Spanish, Chinese Simplified/Traditional and
+others), shown per `subtitles`: `"foreign"` (default) only while the audio playing isn't `native_language` (a
+Spanish dub, a Spanish-made film: none; a file without your audio: on), `"always"` or `"off"`. Audio or subtitles
+asked for by voice hold for that title (its next episodes too) for 12 hours. Kodi and TV Agent Player apply this per
+file; Just Player only partly (see below).
+
+A language the file lacks ("ponlo en español" over an English-only file): the best other copy by the stream rules
+below that has it takes over at the same moment. What AIOStreams read from each file's own tracks (or its name says)
+comes first; the best few copies that say nothing get their tracks read from the file's Matroska header (one range
+read each, at once). With `probe_streams` off only what the addons say counts. No copy with it: what's playing goes
+on, and the TV says so.
 
 Skipping asks TheIntroDB and IntroDB with the episode's IMDb id and the file's length, and only jumps when the part
 you asked about contains where you are: timestamps made on another cut of the episode can't send you somewhere
@@ -158,7 +169,8 @@ your own changes.
 Every decision records the path it took, which the panel draws.
 
 Stream choice (`stremio/streams.py`): only direct debrid links, cached, ≤ `max_height`, ≤ `max_mbps`, no cam rips.
-Of those: the file has the audio the title should play in (English, or Spanish for Spanish-made titles), then the
+Of those: the file has the audio the title should play in (`languages.plan`: AIOStreams' reading of the file's
+tracks or name, other addons' flags and filename words; Latin American Spanish just below Castilian), then the
 highest resolution, then AIOStreams' own score for the release (its ★: release-group tier, source, HDR, audio, your
 ranked expressions), then already in your debrid library, then the higher bitrate. AIOStreams sends those facts as
 structured `streamData` to an AIOStreams-compatible client, which the agent identifies as; other addons are read
@@ -307,12 +319,12 @@ Localhost (127.0.0.1:8766), for the panel, the CLI and the MCP server, same toke
 | `GET /v1/tv/packages` | the TV app, TV Agent Player, Kodi and Just Player on the TV: installed, version, enabled; the app's APK SHA-256 |
 | `GET /v1/about` | this agent's version, Python, start time and the models it uses |
 | `GET /v1/now-playing` | the title, episode (name, poster), position, Kodi's audio and subtitle tracks, intro/recap/credits |
-| `POST /v1/now-playing/track` `{"audio": i}` / `{"subtitle": i \| null}` | one of Kodi's tracks by its index |
+| `POST /v1/now-playing/track` `{"audio": i}` / `{"subtitle": i \| null}` | one of the player's tracks by its index (a language instead, as by voice: `POST /v1/action` `{"type": "tracks", "audio": "spa"}`) |
 | `POST /v1/remote/key` `{"key", "long"}`; `POST /v1/remote/text` `{"text"}` | a key (d-pad, OK, numbers…, `remote.KEYS`); typing into the TV's focused field (ASCII) |
 | `GET /v1/tv/volume`; `GET /v1/apps` | the TV's volume; the apps the agent may open |
 | `GET /v1/lists?list=recent\|new\|movies`; `POST /v1/lists/pick` `{"list", "imdb", "video"}` | the numbered lists voice shows on the TV, returned instead; play one (it's also what "number 2" picks from) |
 | `GET /v1/activity?limit=&before=`; `POST /v1/activity/mark` `{"t", "wrong", "heard"}`; `GET /v1/recording?name=` | the history, newest first, a page at a time; mark one wrong; a kept recording (WAV) |
-| `GET/POST /v1/settings` | the Settings tab's playback and language settings (`remote.SETTINGS`), checked, saved and live |
+| `GET/POST /v1/settings` | the Settings tab's playback and language settings (`remote.SETTINGS`), checked, saved and live; `choices` lists what each takes (`audio_language` with "original", `subtitles_when`) |
 | `GET /v1/updates`; `POST /v1/updates/check`; `POST /v1/updates/tv`, `/tvplayer` | the latest GitHub release of the agent, panel, TV app, TV Agent Player and phone app against what runs (`updates.py`; checked every 6 h unless `updates = "off"`); install the TV app's or the player's release over ADB (localhost only; only with GitHub's SHA-256 for it; the player not while it plays) |
 | `GET /v1/clients`; `POST /v1/clients/pairing`, `GET` it, `/pairing/cancel`; `POST /v1/clients/revoke\|rename` `{"id"}` | paired phones (localhost only): list, pair (a one-time code and the QR code's link), revoke |
 

@@ -13,6 +13,7 @@ shortcuts, the lists to pick from, the activity history and its recordings, and 
     GET  /v1/activity?limit=&before=    the history, newest first     POST /v1/activity/mark {"t", "wrong", "heard"}
     GET  /v1/recording?name=            a kept recording (WAV)
     GET  /v1/settings, POST /v1/settings {…}   the panel Settings tab's playback, language and update settings, live
+                                        (audio_language: a language or "original"; subtitles: when they show)
 
 Answers never carry the stream link (it has the debrid key) or a secret; track names are scrubbed of links.
 """
@@ -52,8 +53,9 @@ EPISODE = re.compile(r"^tt\d+:(\d+):(\d+)$")
 LANG = re.compile(r"^[a-z]{3}$")
 # The Settings tab's playback and language settings: each applies to the next command (agent.py reads cfg as it goes).
 SETTINGS = ("player", "max_height", "max_mbps", "probe_streams", "binge", "auto_skip", "audio_language",
-            "subtitle_languages", "native_language", "twitch_favorites", "log_transcripts", "updates",
+            "subtitle_languages", "subtitles", "native_language", "twitch_favorites", "log_transcripts", "updates",
             "check_episodes")
+LANGUAGE_SETTINGS = {"audio_language", "subtitle_languages", "subtitles", "native_language"}
 AUDIO = ("eng", "spa", "fre", "ita", "ger", "por", "jpn", "kor", "chi")
 SUBTITLES = ("eng", "spa", "chs", "cht", "chi", "fre", "ita", "ger", "por", "jpn", "kor")
 
@@ -73,6 +75,10 @@ def setting(key: str, value):
         case "updates" if value in config_mod.UPDATES:
             return value
         case "audio_language" | "native_language" if isinstance(value, str) and LANG.match(value):
+            return value
+        case "audio_language" if value == "original":
+            return value
+        case "subtitles" if value in config_mod.SUBTITLES_WHEN:
             return value
         case "subtitle_languages" if (isinstance(value, list) and 1 <= len(value) <= 10 and len(set(value)) == len(value)
                                       and all(isinstance(x, str) and LANG.match(x) for x in value)):
@@ -299,11 +305,19 @@ def routes(svc) -> APIRouter:
     # ---- settings ----
 
     def settings() -> dict:
+        """The values, and the choices each takes: `audio` is the languages (native_language's too),
+        `audio_language` adds "original", `subtitles_when` is when subtitles show."""
+        native = language_name(svc.cfg.native_language)
+        audio = [{"code": c, "label": language_name(c)} for c in AUDIO]
         return {"settings": {k: getattr(svc.cfg, k) for k in SETTINGS},
                 "choices": {"player": list(config_mod.PLAYERS), "max_height": [2160, 1440, 1080, 720],
-                            "audio": [{"code": c, "label": language_name(c)} for c in AUDIO],
+                            "audio": audio,
+                            "audio_language": [{"code": "original", "label": "Original language"}, *audio],
                             "subtitles": [{"code": c, "label": language_name(c) + {"chs": " (Simplified)",
-                                           "cht": " (Traditional)"}.get(c, "")} for c in SUBTITLES]}}
+                                           "cht": " (Traditional)"}.get(c, "")} for c in SUBTITLES],
+                            "subtitles_when": [{"code": "foreign", "label": f"Only when the audio isn't {native}"},
+                                               {"code": "always", "label": "Always"},
+                                               {"code": "off", "label": "Off"}]}}
 
     @r.get("/v1/settings")
     async def get_settings(request: Request):
@@ -321,6 +335,8 @@ def routes(svc) -> APIRouter:
         new = {k: setting(k, v) for k, v in body.items()}
         for k, v in new.items():
             config_mod.set_value(svc.cfg, k, v)
+        if LANGUAGE_SETTINGS & set(new):
+            svc.agent._asked.clear()            # what was asked by voice for single titles gives way
         return settings()
 
     return r

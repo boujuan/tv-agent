@@ -32,7 +32,8 @@ PRIVATE = {"zdr": True, "data_collection": "deny", "sort": "latency"}
 ACTIONS = ["play_title", "continue_watching", "show_in_stremio", "info", "next_episode", "previous_episode", "pause",
            "resume", "stop", "home", "start_over", "replay", "forward", "back", "seek_to", "seek_percent", "volume_up",
            "volume_down", "volume_set", "mute", "unmute", "open_app", "youtube", "twitch", "subtitles_on",
-           "subtitles_off", "subtitles_toggle", "subtitles", "audio", "skip_intro", "skip_recap", "skip_credits",
+           "subtitles_off", "subtitles_toggle", "subtitles", "audio", "default_subtitles", "default_audio",
+           "skip_intro", "skip_recap", "skip_credits",
            "auto_skip_on", "auto_skip_off", "stop_after_this", "turn_off_after_this", "stop_in", "turn_off_in",
            "cancel_timer", "binge_on", "binge_off", "library_add", "library_remove", "mark_watched", "mark_unwatched",
            "show_recent", "show_new", "show_movies", "recommend", "find_scene", "pick", "help", "wrong", "none"]
@@ -60,6 +61,8 @@ volume_up, volume_down, mute, unmute · volume_set: number 0-100
 open_app: app (one of "apps") · youtube: query · twitch: query (the streamer)
 subtitles_on, subtitles_off · subtitles_toggle (on or off unclear) · subtitles: language · audio: language or
 "original"
+default_audio: language or "original" · default_subtitles: language, "on", "off" or "foreign" (only when the audio
+isn't theirs): from now on, as their settings ("a partir de ahora, audio en español", "always English subtitles")
 skip_intro (the opening, its credits or theme), skip_recap, skip_credits (the end credits) · auto_skip_on,
 auto_skip_off (intros skipped by themselves)
 stop_after_this, turn_off_after_this (when what's playing ends) · stop_in, turn_off_in: number (minutes)
@@ -86,6 +89,7 @@ Examples:
 "take me to the halfway point" -> {"action":"seek_percent","number":50}
 "beach mode oh" -> {"action":"binge_on"}
 "sops off" -> {"action":"subtitles_off"}
+"de ahora en adelante quiero todo sin subtítulos" -> {"action":"default_subtitles","language":"off"}
 "is ibai live?" -> {"action":"twitch","query":"ibai"}
 "what episode of severance am I on" -> {"action":"info","title":"Severance"}
 "este ya lo he visto" -> {"action":"mark_watched"}
@@ -356,6 +360,10 @@ def to_action(a: dict, said: str, candidates: list[str], rules: Rules) -> A.Acti
                 return A.Tracks(subtitles=lang if lang in ("on", "off") else code)
             case "audio" if lang == "original" or code:
                 return A.Tracks(audio="original" if lang == "original" else code)
+            case "default_subtitles" if lang in ("on", "off", "foreign") or code:
+                return A.Tracks(subtitles=lang if lang in ("on", "off", "foreign") else code, keep=True)
+            case "default_audio" if lang == "original" or code:
+                return A.Tracks(audio="original" if lang == "original" else code, keep=True)
             case "skip_intro" | "skip_recap" | "skip_credits":
                 return A.Skip(what=kind.removeprefix("skip_"))
             case "show_recent" | "show_new":

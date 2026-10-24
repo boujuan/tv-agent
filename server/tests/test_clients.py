@@ -368,6 +368,21 @@ def test_settings_are_saved_and_live(paths):
     assert svc.cfg.tv_hosts == [TV]
 
 
+def test_language_settings_from_the_phone_replace_what_was_asked_by_voice(paths):
+    svc = service(paths)
+    svc.agent._asked = {"tt1160419": (0.0, {"audio": "eng"})}
+    token = paired(svc)
+    gate = C.gateway(svc, server.local_app(svc))
+    r = call(gate, "POST", "/v1/settings", token, json={"audio_language": "original", "subtitles": "off"})
+    assert r.status_code == 200 and svc.cfg.audio_language == "original" and svc.cfg.subtitles == "off"
+    assert svc.agent._asked == {} and 'subtitles = "off"' in config.CONFIG_FILE.read_text()
+    choices = r.json()["choices"]
+    assert choices["audio_language"][0] == {"code": "original", "label": "Original language"}
+    assert "original" not in [c["code"] for c in choices["audio"]]          # the native language's list
+    assert [c["code"] for c in choices["subtitles_when"]] == ["foreign", "always", "off"]
+    assert choices["subtitles_when"][0]["label"] == "Only when the audio isn't Spanish"
+
+
 def test_tracks_lose_links_in_their_names():
     t = remote.tracks_json({
         "audiostreams": [{"index": 0, "language": "eng", "name": "Surround 5.1", "codec": "eac3", "channels": 6}],

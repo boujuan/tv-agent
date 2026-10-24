@@ -92,8 +92,10 @@ class Timer(_Action):
 
 class Tracks(_Action):
     type: Literal["tracks"] = "tracks"
-    subtitles: Literal["on", "off", "toggle"] | Lang | None = None     # toggle: off if they're on, else on
+    # toggle: off if they're on, else on; foreign: only while the audio isn't yours (a setting)
+    subtitles: Literal["on", "off", "toggle", "foreign"] | Lang | None = None
     audio: Literal["original"] | Lang | None = None
+    keep: bool = False                   # "from now on": your settings change (and what's playing follows)
 
 
 class Replay(_Action):

@@ -226,6 +226,23 @@ def _language(v, _):
     return LANGUAGE_NAMES.get(re.sub(r"^the ", "", t))
 
 
+def _setting(v, rules):
+    """What follows "from now on": a subtitles or audio command, read by the clean-up fixes and the tracks patterns,
+    as their fields (audio, subtitles)."""
+    t = v.strip(" ,.")
+    for rx, to in rules.fixes:
+        t = rx.sub(to, t)
+    for p in rules.patterns:
+        if p.do.get("type") != "tracks" or p.do.get("keep") or not (m := p.regex.match(t)):
+            continue
+        try:
+            fields = rules.fill(p.do, {k: x for k, x in m.groupdict().items() if x is not None})
+        except NoMatch:
+            continue
+        return {k: fields[k] for k in ("audio", "subtitles") if k in fields} or None
+    return None
+
+
 def _level(v, _):
     """A volume level: a number, or the lowest / highest ("to the max")."""
     t = re.sub(r"^(?:to |at )?(?:the |its |el |al )?", "", v.strip())
@@ -271,6 +288,7 @@ CONVERTERS = {
     "app": _app,
     "alias": _alias,
     "language": _language,
+    "setting": _setting,
     "minutes": _minutes,
     "subject": _subject,
     "level": _level,
@@ -292,6 +310,7 @@ CONVERTER_HELP = {
     "app": "an app from the app list, by name",
     "alias": "an app, only by one of its exact spoken names",
     "language": "a language by name ('spanish', 'traditional chinese') as its code, or 'original'",
+    "setting": "a subtitles or audio command ('audio in spanish', 'no subtitles') as its fields (use with \"*\")",
     "minutes": "a duration in minutes ('half an hour', 'in 45')",
     "subject": "a title (season, episode), or nothing for 'this' / 'it': what's on (use with \"*\")",
     "level": "a volume level 0-100; 'the max' 100, 'the minimum' 1",
