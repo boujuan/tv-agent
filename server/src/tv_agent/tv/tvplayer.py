@@ -8,12 +8,14 @@ certificate). The agent listens on its LAN address at player_port, with the phon
 the player pins; only the TV's addresses may connect, with the token. One player at a time.
 
 Where Kodi is polled, this one tells: state, position every second while playing, tracks, the decoder, errors,
-and the position it closed at. `now()` answers from the last of those, without asking the TV.
+and the position it closed at. `now()` answers from the last of those, without asking the TV. It asks for preview
+pictures while ←/→ is held, which this computer makes from the file (thumbs.py).
 
 Its methods have kodi.py's surface (a player id first, Kodi-shaped track lists), so the agent drives either the
 same way; PID is this player's id where Kodi's is a number.
 """
 import asyncio
+import base64
 import hmac
 import itertools
 import json
@@ -24,6 +26,7 @@ from collections.abc import Callable
 
 from ..config import Config, lan_address, tailscale_address
 from .adb import Adb
+from .thumbs import ThumbError, Thumbs
 
 log = logging.getLogger(__name__)
 
@@ -84,6 +87,8 @@ class TvPlayer:
         self._adopt: str | None = None          # after a restart: the first item the player reports that starts so
         self._coming: tuple[str, str] | None = None    # (video, item id) of the start the loading screen is for
         self._no_loading: set[str | None] = set()      # player versions without the loading screen
+        self.thumbs = Thumbs()                  # preview pictures of the file playing, for a held ←/→
+        self._no_thumb: tuple[str, str] | None = None  # (item, why) last logged: a hold asks every 0.4 s
 
     # ---- the connection ----
 
@@ -163,6 +168,9 @@ class TvPlayer:
             fut = self._acks.pop(msg.get("id"), None)
             if fut and not fut.done():
                 fut.set_result(msg)
+            return
+        if t == "thumb_req":
+            asyncio.create_task(self._thumb(msg))
             return
         if self.item is None and self._adopt and str(msg.get("item") or "").startswith(self._adopt):
             self.item, self._adopt = msg["item"], None
@@ -292,6 +300,7 @@ class TvPlayer:
         coming, self._coming = self._coming, None
         self.item = coming[1] if coming and coming[0] == item else f"{item}#{self._run}-{next(self._loads)}"
         self.last, self._adopt = {}, None
+        self.thumbs.follow(self.item, url, headers)
         fields = {"url": url, "item": self.item, "title": title, "start_ms": max(0, int(resume_ms)), "audio": audio,
                   "subs": subs, "play": play}
         if headers:
@@ -303,6 +312,31 @@ class TvPlayer:
         if info:
             fields["info"] = info
         await self.call("load", timeout=6, **fields)
+
+    async def _thumb(self, req: dict):
+        """A preview picture for a held ←/→ (PROTOCOL.md, `thumb_req`): the keyframe at or before `ms` of the file
+        playing, made here. Answered with `thumb` (its JPEG, or why there's none); a request overtaken by a newer one
+        while it waited isn't answered."""
+        item, ms = str(req.get("item") or ""), int(req.get("ms") or 0)
+        fields: dict = {"item": item, "ms": ms}
+        try:
+            got = await self.thumbs.picture(item, ms, int(req.get("w") or 320))
+            if got is None:
+                return
+            fields |= {"at": got[0], "jpeg": base64.b64encode(got[1]).decode()}
+        except ThumbError as e:
+            if (item, str(e)) != self._no_thumb:
+                log.info("no preview at %d ms of %s: %s", ms, item, e)
+                self._no_thumb = (item, str(e))
+            fields["error"] = str(e)
+        except Exception:
+            log.exception("preview at %d ms of %s", ms, item)
+            fields["error"] = "the picture failed"
+        if self.up:
+            try:
+                await self.call("thumb", **fields)
+            except (PlayerError, asyncio.TimeoutError, OSError):
+                pass
 
     async def preload(self, url: str, start_ms: int = 0, *, item: str, headers: dict | None = None,
                       audio: str | None = None, subs: list[str] | None = None, bitrate: int = 0,

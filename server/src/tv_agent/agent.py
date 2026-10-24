@@ -304,6 +304,7 @@ class Agent:
             except (asyncio.TimeoutError, Exception):
                 self._progress.cancel()
         await self.http.aclose()
+        await self.tvplayer.thumbs.close()
         self.adb.close()
 
     async def tv(self, fn, *args):
