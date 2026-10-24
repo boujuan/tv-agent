@@ -4,7 +4,7 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
-## server — unreleased
+## server 0.5.0 — 2026-10-24
 
 ### Added
 - The activity history says more about each command, for debugging and for training on later: the agent's
@@ -84,7 +84,7 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   the TV is woken first, and with it still asleep Kodi is left to finish updating the first time it's opened.
 - A backup before a Kodi update is checked to have just been written (and not tiny) before anything is installed.
 
-## panel — unreleased
+## panel 0.5.0 — 2026-10-24
 
 ### Added
 - Overview › Processes lists the TV's apps and players while they run (TV Agent Player, Kodi, Just Player, the TV
