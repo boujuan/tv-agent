@@ -1752,6 +1752,7 @@ class Agent:
         info = await ctl.tracks(pid)
         np = self._session(pid)
         meta = await self._meta_of(np) if np and a.audio else {}
+        before = self._asked.get(np.imdb_id) if np else None
         if np and remember:
             asked = {}
             if a.audio:
@@ -1772,7 +1773,7 @@ class Agent:
                          or next((t for t in tracks if t.get("isdefault")), None) or (tracks[0] if tracks else None))
             if track is None:
                 if np and want and self.account:
-                    return await self._other_copy(np, meta, audio=want)
+                    return self._unless_failed(await self._other_copy(np, meta, audio=want), np, before)
                 return Outcome(False, f"No {languages.name(want or a.audio)} audio in this file")
             if track["index"] != (info.get("currentaudiostream") or {}).get("index"):
                 await ctl.set_audio(pid, track["index"])
@@ -1794,11 +1795,21 @@ class Agent:
             got = await self._show_subtitles(pid, ctl, info, langs, np)
             if got is None:
                 if np and a.subtitles != "on" and self.account and not said:
-                    return await self._other_copy(np, meta or await self._meta_of(np), subtitle=a.subtitles)
+                    return self._unless_failed(await self._other_copy(np, meta or await self._meta_of(np),
+                                                                      subtitle=a.subtitles), np, before)
                 return Outcome(False, "No subtitles in that language")
             said.append(got)
         text = ", ".join(said)
         return Outcome(True, text[:1].upper() + text[1:] if text else "OK")
+
+    def _unless_failed(self, out: Outcome, np: NowPlaying, before: tuple[float, dict] | None) -> Outcome:
+        """A copy switch that didn't happen leaves what was asked for the title as it was."""
+        if not out.ok:
+            if before is None:
+                self._asked.pop(np.imdb_id, None)
+            else:
+                self._asked[np.imdb_id] = before
+        return out
 
     async def _show_subtitles(self, pid: int | str, ctl, info: dict, langs: list[str],
                               np: NowPlaying | None) -> str | None:

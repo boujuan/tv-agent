@@ -255,8 +255,13 @@ def test_copies_that_say_nothing_are_read_and_a_file_that_says_wrong_is_passed_o
 
 def test_no_copy_with_the_language_leaves_what_plays_alone():
     a = playing(english_file(), [_aio("english", langs=["English"])], probed={})
+    a._ask("tt1160419", audio="eng")
     out = asyncio.run(Agent._tracks(a, A.Tracks(audio="jpn")))
     assert not out.ok and out.say == "No copy of Dune has Japanese audio: it goes on as it was" and a.played == []
+    assert a._asked_for("tt1160419") == {"audio": "eng"}             # its next start isn't asked for Japanese
+    a._asked.clear()
+    asyncio.run(Agent._tracks(a, A.Tracks(audio="jpn")))
+    assert a._asked == {}
 
 
 def test_subtitles_the_file_and_addons_lack_come_from_a_copy_that_has_them():
