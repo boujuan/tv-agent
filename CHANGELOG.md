@@ -4,6 +4,30 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
+## server — unreleased
+
+### Changed
+- A title d1 isn't sure of (under 40%), or can't be asked about (its hosted service answered 502 for a while on
+  2026-10-24, and the search's best match was then wrong for 10 of 16 misheard names), isn't played: the candidates
+  are listed on the TV, d1's likeliest first, and "number 2" plays that one as asked (its season, episode or the
+  episode described). Every d1 title pick in the history before was a wrong guess played: the 2000 Dune miniseries
+  (0.14) and Dune: Prophecy (0.25) for "Dune episode 2", Can't Buy Me Love (0.27) for "watch eBuy in 2023". In a
+  chain the list stops it there.
+- "Skip the intro" with no intro times (TheIntroDB, IntroDB, a chapter) jumps 90 s ahead instead of only saying so.
+- Listening measures quiet against the background as it is once you've spoken too: the remote's first 200 ms are
+  near-silent, and once its gain brought the film up over the threshold set then, a command went on listening to
+  the film until the TV app's limit (3 of the 190 voice tests). On the kept recordings those end in 2.5-3.1 s with
+  every word, and no other lost one. Nothing heard yet at 720 ms of quiet waits for 1.5 s, like an unfinished
+  sentence. Up to 16 s of audio is taken (the TV app 0.9.2 listens up to 15 s).
+
+## android 0.9.2 — 2026-10-24
+
+### Changed
+- Listens up to 15 s (was 10): describing a scene took longer three times.
+- Quiet is measured against the background as it is once you've spoken (the agent's rule, server unreleased): the
+  remote's near-silent first 200 ms no longer leave the film's sound counting as your voice. 15 s over the stream
+  needs a server newer than 0.10.0 (an older one decides on the first 12 s).
+
 ## server 0.10.0 — 2026-10-24
 
 ### Added

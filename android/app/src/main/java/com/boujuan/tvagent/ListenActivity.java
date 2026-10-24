@@ -38,6 +38,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.Arrays;
+import java.util.Collections;
 
 /**
  * Opened by the remote's mic button. The TV opens the remote's microphone on that press and hands it to an app
@@ -55,7 +56,12 @@ public class ListenActivity extends Activity {
     private static final int END_FRAMES = 35;              // 700 ms of quiet after speech = done (no stream)
     private static final int STREAM_END_FRAMES = 75;       // streaming: the laptop decides; 1.5 s is a safety net
     private static final int GIVE_UP_FRAMES = 200;         // 4 s without speech
-    private static final int MAX_FRAMES = 500;             // 10 s cap
+    private static final int MAX_FRAMES = 750;             // 15 s cap: describing a scene takes long
+    // Once you've spoken for a second, a frame within 8 dB of the quietest of the last second (the room, the film)
+    // is quiet too, unless it's within 25 dB of your loudest: the remote's first 200 ms are near-silent, so the
+    // threshold set from them sits under the film's sound once its gain comes up (the agent's listen_stream.py rule).
+    private static final int BACKGROUND_FRAMES = 50;
+    private static final double ABOVE_BACKGROUND = 8, BELOW_VOICE = 25;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final Runnable close = this::finish;
@@ -259,7 +265,8 @@ public class ListenActivity extends Activity {
         ArrayDeque<short[]> preroll = new ArrayDeque<>();
         double[] early = new double[10];
         int earlyCount = 0, frames = 0, loud = 0, quiet = 0;
-        double threshold = -45;
+        double threshold = -45, peak = -120;
+        ArrayDeque<Double> recent = new ArrayDeque<>();     // levels of the last second since speech started
         boolean speaking = false;
         short[] frame = new short[FRAME];
         rec.startRecording();
@@ -290,6 +297,7 @@ public class ListenActivity extends Activity {
                     preroll.addLast(Arrays.copyOf(frame, got));
                     if (preroll.size() > PREROLL_FRAMES) preroll.removeFirst();
                     loud = level > threshold ? loud + 1 : 0;
+                    peak = loud > 1 ? Math.max(peak, level) : level;
                     if (loud >= START_FRAMES) {
                         speaking = true;
                         for (short[] f : preroll) speech.write(toBytes(f, f.length), 0, f.length * 2);
@@ -299,7 +307,19 @@ public class ListenActivity extends Activity {
                     }
                 } else {
                     speech.write(toBytes(frame, got), 0, got * 2);
-                    quiet = level < threshold - 3 ? quiet + 1 : 0;
+                    recent.addLast(level);
+                    if (recent.size() > BACKGROUND_FRAMES) recent.removeFirst();
+                    boolean still = level < threshold - 3;
+                    if (!still && recent.size() == BACKGROUND_FRAMES) {
+                        double floor = Collections.min(recent);
+                        still = level < Math.min(floor + ABOVE_BACKGROUND, peak - BELOW_VOICE);
+                    }
+                    if (still) {
+                        quiet++;
+                    } else {
+                        quiet = 0;
+                        peak = Math.max(peak, level);
+                    }
                     if (quiet >= (stream != null ? STREAM_END_FRAMES : END_FRAMES)) break;
                 }
             }

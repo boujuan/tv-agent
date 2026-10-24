@@ -15,7 +15,12 @@ This module decides when you've finished, from the audio as it arrives (the same
 At each step the audio so far is transcribed and decided; if you start talking again, that result is dropped. When
 no voice was heard at all (the remote's mic sending near-silence, only the TV's own sound), nothing is transcribed:
 a line of the film's dialogue can't become a command.
+
+Quiet is measured against the background as it is once you've spoken too, not only as it was when the mic opened:
+the remote's first 200 ms are near-silent (-70…-90 dB), and after you speak its gain brings the film up to ~-50 dB,
+over the threshold set then, so a command went on listening to the film until the 10 s limit (3 of 190, 2026-10-24).
 """
+from collections import deque
 import asyncio
 import logging
 import math
@@ -30,6 +35,12 @@ log = logging.getLogger(__name__)
 FRAME = 320                          # samples: 20 ms at 16 kHz
 START_FRAMES = 3                     # 60 ms above the threshold = speech
 PREROLL = 15                         # frames kept before speech starts (300 ms), as the app does
+# Once you've spoken for a second, a frame within ABOVE_BACKGROUND dB of the quietest of the last second (the room or
+# the film) is quiet too, unless it's within BELOW_VOICE dB of your loudest. On the kept recordings: the three held
+# to the 10 s limit end at 2.5-3.1 s with every word, and none of the others lost one (2026-10-24).
+BACKGROUND_FRAMES = 50
+ABOVE_BACKGROUND = 8.0
+BELOW_VOICE = 25.0
 CHECKPOINTS = (8, 23, 36, 75)        # frames of quiet after speech: 160, 460, 720 ms, 1.5 s (the TV app's own end)
 # Last words that mean more is coming ("play the …", "season …", "volume …", "skip thirty …").
 OPEN_ENDED = re.compile(r"\b(?:the|a|an|to|of|on|in|and|then|with|by|for|from|at|season|series|episode|ep|part|play|"
@@ -55,7 +66,7 @@ def level_db(frame: np.ndarray) -> float:
 @dataclass
 class Endpointer:
     """Speech start and the quiet after it, frame by frame (the app's rule: threshold from the first 200 ms that
-    carry sound, 12 dB above their background, clamped to -55…-30 dB)."""
+    carry sound, 12 dB above their background, clamped to -55…-30 dB; then the background of the last second)."""
     threshold: float = -45.0
     speaking: bool = False
     quiet: int = 0                   # frames of quiet since the last voiced frame
@@ -63,6 +74,8 @@ class Endpointer:
     last_voice_at: float = 0.0       # monotonic time of the last voiced frame
     _early: list = field(default_factory=list)
     _loud: int = 0
+    _peak: float = -120.0            # your loudest frame so far (from the ones that started speech)
+    _recent: deque = field(default_factory=lambda: deque(maxlen=BACKGROUND_FRAMES))    # levels since speech started
 
     def feed(self, frame: np.ndarray, now: float | None = None):
         level = level_db(frame)
@@ -72,16 +85,22 @@ class Endpointer:
                 self.threshold = max(-55.0, min(-30.0, sorted(self._early)[2] + 12))
         self._loud = self._loud + 1 if level > self.threshold else 0
         if not self.speaking:
+            self._peak = max(self._peak, level) if self._loud > 1 else level
             if self._loud >= START_FRAMES:
                 self.speaking = True
                 self.voiced += 1
                 self.last_voice_at = now if now is not None else time.monotonic()
             return
-        if level < self.threshold - 3:
+        self._recent.append(level)
+        quiet = level < self.threshold - 3
+        if not quiet and len(self._recent) == BACKGROUND_FRAMES:
+            quiet = level < min(min(self._recent) + ABOVE_BACKGROUND, self._peak - BELOW_VOICE)
+        if quiet:
             self.quiet += 1
         else:
             self.quiet = 0
             self.voiced += 1
+            self._peak = max(self._peak, level)
             self.last_voice_at = now if now is not None else time.monotonic()
 
     @property
@@ -97,8 +116,8 @@ def ready(action, via: str, text: str, stage: int) -> bool:
     sentence (router.normalize)."""
     if stage >= 3:
         return True
-    if stage == 2:                   # "next episode" is whole; "… crystal at" waits for the name
-        return action.type == "next_episode" or not CUT.search(text)
+    if stage == 2:                   # "next episode" is whole; "… crystal at" waits for the name, nothing yet for words
+        return bool(text) and (action.type == "next_episode" or not CUT.search(text))
     if action.type == "none" or text in PREFIXES:
         return False
     if action.type != "next_episode" and OPEN_ENDED.search(text):   # "next episode" is whole; "season 3 episode" isn't

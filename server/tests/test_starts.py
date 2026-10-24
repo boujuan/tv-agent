@@ -26,10 +26,11 @@ SEASONS = {"tt1190634": 5, "tt0108713": 1, "tt2372566": 1, "tt2": 3}
 
 
 def title_agent(monkeypatch, catalog: dict[str, list[C.Meta]], sounds_like: list[str], prefer: list[str] = (),
-                library: list[dict] = (), slow: dict[str, float] = None, popularity: dict[str, float] = None):
+                library: list[dict] = (), slow: dict[str, float] = None, popularity: dict[str, float] = None,
+                sure: float | None = 0.5):
     """An Agent with only what title resolution uses: a fake title search (catalog by query, `slow` seconds before
     some queries answer, unless the caller found the title another way), the LLM's sound-alikes, and d1 picking the
-    first option named as in `prefer` (else the first option)."""
+    first option named as in `prefer` (else the first option), `sure` of it (None: d1 unreachable)."""
     a = Agent.__new__(Agent)
     a.cfg = types.SimpleNamespace(decide_off=[])
     a.rules = types.SimpleNamespace(title_candidates=4, title_question="Which title?")
@@ -69,8 +70,11 @@ def title_agent(monkeypatch, catalog: dict[str, list[C.Meta]], sounds_like: list
 
         async def choice(self, state, question, options):
             asked.append((state, dict(options)))
+            if sure is None:
+                raise httpx.HTTPStatusError("502", request=httpx.Request("POST", "https://d1"),
+                                            response=httpx.Response(502))
             key = next((k for want in prefer for k, label in options.items() if label.startswith(want)), "c0")
-            return Choice(key, 0.5, {})
+            return Choice(key, sure, {k: sure if k == key else (1 - sure) / len(options) for k in options})
 
     async def addons(max_age=3600):
         return []
@@ -312,3 +316,56 @@ def test_a_sound_alike_request_not_waited_for_is_in_the_trace(monkeypatch):
     found, trace = asyncio.run(run())
     asked = next(t for t in trace if t["step"] == "sound-alikes")
     assert found[2] == "Rebel Music" and asked["answered"] is False and asked["model"].startswith("deepseek")
+
+
+DUNE_2000 = C.Meta("tt0142032", "series", "Dune", "2000", 0)
+PROPHECY = C.Meta("tt10466872", "series", "Dune: Prophecy", "2024–", 2)
+DUNE_DOCS = C.Meta("tt9", "series", "Dune", "2021", 1)
+
+
+def unsure_agent(monkeypatch, sure):
+    """"Play Dune episode 2" (2026-10-24): the search has two series, d1 picks one `sure` of it."""
+    a, _ = title_agent(monkeypatch, {"dune": [DUNE_2000, DUNE_DOCS, PROPHECY]}, [], prefer=["Dune: Prophecy"],
+                       sure=sure)
+    a.state = types.SimpleNamespace(timings=types.SimpleNamespace(add=lambda *args: None))
+    a._shown, shown, played = None, [], []
+
+    async def show_on_tv(s):
+        shown.append(s)
+
+    async def play_found(ask, imdb, kind, name, playing_video=None):
+        played.append((ask, imdb))
+        return agent_mod.Outcome(True, f"Playing {name}")
+    a._show_on_tv, a._play_found = show_on_tv, play_found
+    return a, shown, played
+
+
+def test_a_title_d1_isnt_sure_of_is_listed_to_pick_not_guessed(monkeypatch):
+    """2026-10-24: "Play Dune episode 2" played the 2000 Dune miniseries, d1 0.14 sure of it; Dune: Prophecy 0.25."""
+    a, shown, played = unsure_agent(monkeypatch, 0.3)
+    ask = PlayTitle(title="dune", episode=2, kind="series")
+    out = asyncio.run(a._play_title(ask))
+    assert out.ok and "say a number" in out.say and played == []
+    assert [i.label for i in shown[0].items] == ["Dune: Prophecy (2024–, series)", "Dune (2000, series)",
+                                                 "Dune (2021, series)"]               # d1's likeliest first
+    asyncio.run(a.play_item(shown[0].items[1]))                                      # "number 2"
+    assert played == [(ask.model_copy(update={"title": "Dune"}), DUNE_2000.id)]     # episode 2 of that one
+
+
+def test_a_sure_pick_plays_and_no_d1_is_a_list_too(monkeypatch):
+    a, shown, played = unsure_agent(monkeypatch, 0.8)
+    asyncio.run(a._play_title(PlayTitle(title="dune", episode=2)))
+    assert shown == [] and played[0][1] == PROPHECY.id
+    a, shown, played = unsure_agent(monkeypatch, None)                               # d1 unreachable (502)
+    out = asyncio.run(a._play_title(PlayTitle(title="dune", episode=2)))
+    assert played == [] and len(shown[0].items) == 3 and out.ok
+
+
+def test_in_a_chain_a_title_asked_about_stops_it(monkeypatch):
+    a, shown, played = unsure_agent(monkeypatch, 0.1)
+
+    async def run():
+        agent_mod.chain.PLAN.set("go to 30:00")
+        return await a._play_title(PlayTitle(title="dune", episode=2))
+    out = asyncio.run(run())
+    assert not out.ok and shown and played == []

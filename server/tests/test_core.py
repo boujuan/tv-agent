@@ -472,6 +472,36 @@ def test_endpointer_counts_quiet_after_speech():
     assert stages.index(0) == 7 and stages.index(1) == 22 and stages.index(2) == 35   # 160, 460, 720 ms
 
 
+def test_the_films_sound_after_you_speak_is_quiet_too():
+    """2026-10-24: the remote's first 200 ms near-silent set the floor (-55 dB); after "Pasa treinta segundos" its
+    gain brought the film up to ~-50 dB, and listening went on to the 10 s limit."""
+    import numpy as np
+    from tv_agent.listen_stream import FRAME, Endpointer
+    rng = np.random.default_rng(5)
+    mic_waking = (rng.normal(0, 2, FRAME)).astype("<i2")                         # ~-84 dB
+    film = (rng.normal(0, 100, FRAME)).astype("<i2")                             # ~-50 dB
+    voice = (np.sin(np.arange(FRAME) / 5) * 8000).astype("<i2")                  # ~-15 dB
+    ep = Endpointer()
+    for f in [mic_waking] * 12 + [voice] * 60:
+        ep.feed(f, 0)
+    assert ep.threshold == -55 and ep.speaking
+    stages = []
+    for _ in range(80):
+        ep.feed(film, 0)
+        stages.append(ep.stage)
+    assert 2 in stages and stages.index(2) < 40                     # ~720 ms of the film, not 10 s
+    soft = (np.sin(np.arange(FRAME) / 5) * 600).astype("<i2")                     # ~-37 dB: a soft syllable
+    ep2 = Endpointer()
+    for f in [mic_waking] * 12 + ([voice] * 6 + [soft] * 6) * 20:                  # 5 s of speech, loud and soft
+        ep2.feed(f, 0)
+        assert ep2.stage == -1                                      # never quiet while you speak
+
+
+def test_nothing_heard_yet_waits_for_the_last_checkpoint():
+    from tv_agent.listen_stream import ready
+    assert not ready(A.Unclear(), "none", "", 2) and ready(A.Unclear(), "none", "", 3)
+
+
 def test_stream_session_drops_an_early_result_when_you_keep_talking():
     import asyncio
     import numpy as np
@@ -856,6 +886,35 @@ def test_auto_skip_jumps_a_sure_intro_as_it_comes_and_leaves_the_rest():
     # "play it and skip the intro": that intro, sure or not, even with auto skip off
     assert watch([unsure], 30_000, auto=False, also="intro") == [233_000]
     assert watch([sure], 30_000, auto=False) == []
+
+
+def test_skip_the_intro_with_no_times_known_goes_90_seconds_ahead():
+    """3 voice tests on 2026-10-24 got "No intro timestamps…" and nothing happened."""
+    import asyncio
+    import types
+    from tv_agent import agent as agent_mod
+    from tv_agent.agent import Agent
+    seeks = []
+
+    async def position(pid):
+        return 75_000, 1_300_000, 1.0
+
+    async def seek_to(pid, ms):
+        seeks.append(ms)
+
+    async def nothing(*args):
+        return []
+
+    async def player():
+        return agent_mod.tvplayer.PID
+    np = NowPlaying("tt1", "series", "tt1:1:6", "Breaking Bad", player="tvplayer")
+    ctl = types.SimpleNamespace(position=position, seek_to=seek_to)
+    me = types.SimpleNamespace(state=types.SimpleNamespace(now_playing=np), _player_id=player, segments=nothing,
+                               _ctl=lambda pid: ctl, cfg=types.SimpleNamespace(binge=False))
+    out = asyncio.run(Agent._skip(me, A.Skip(what="intro")))
+    assert out.ok and seeks == [165_000]
+    out = asyncio.run(Agent._skip(me, A.Skip(what="recap")))            # a recap isn't guessed
+    assert not out.ok and seeks == [165_000]
 
 
 def test_speech_model_download_is_checked_and_unpacked(tmp_path, monkeypatch):

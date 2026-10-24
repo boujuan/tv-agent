@@ -9,11 +9,11 @@ LAN, on this computer's address on the TV's network only (lan_address(), port 87
 
 LAN, port 8767 (stream_port): the same, streamed while you speak, so it's decided in your pause (listen_stream.py).
   app -> laptop  a JSON line {"token": "…", "rate": 16000}, then frames: a 2-byte big-endian length and PCM16 LE
-                 audio; a frame of length 0 ends the audio (mic pressed again, the 10 s cap, the app's own limit),
+                 audio; a frame of length 0 ends the audio (mic pressed again, the 15 s cap, the app's own limit),
                  a length of 0xFFFF cancels it (Back): nothing is decided
   laptop -> app  JSON lines: {"heard": "…"} as it understands, {"stop": true} when it has decided (stop recording),
                  then {"transcript", "say", "ok"} as /v1/utterance answers, or {"cancelled": true}; then it closes
-  Same address check and token; at most 12 s of audio; one at a time.
+  Same address check and token; at most 16 s of audio; one at a time.
 
 Paired phones (the TV Agent phone app, clients.py): HTTPS on phone_port (8768) with the local API's panel endpoints
 for a phone's own token, and the stream above over TLS on phone_stream_port (8769) with that token instead of the
@@ -78,7 +78,7 @@ from .tv.adb import Adb, TvUnreachable
 from .stt import model_dir as stt_model_dir
 
 log = logging.getLogger("tv_agent")
-MAX_BODY = 400_000          # 12 s of 16 kHz PCM16
+MAX_BODY = 512_000          # 16 s of 16 kHz PCM16 (the TV app sends 15 s at most)
 CANCEL = 0xFFFF             # in place of a frame's length: throw the audio away (stream protocol above)
 SOURCES = ("tv", "laptop", "text", "mcp", "phone")
 # Seconds a stop waits for open connections. A phone that went to sleep never answers the TLS close, and Python

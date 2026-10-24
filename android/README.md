@@ -38,7 +38,7 @@ Settings > Privacy > Microphone must be on (only the app records, and only while
 
 | Class | What it does |
 |---|---|
-| `ListenActivity` | The pill: streams the microphone (16 kHz, 20 ms chunks) and stops when the agent has decided; 10 s cap; falls back to recording until 0.7 s of quiet and uploading |
+| `ListenActivity` | The pill: streams the microphone (16 kHz, 20 ms chunks) and stops when the agent has decided; 15 s cap; falls back to recording until 0.7 s of quiet and uploading |
 | `Pairing`, `ConfigReceiver` | Where the agent is, its token and its audio-stream port; set over ADB only (`DUMP` permission) |
 | `ChoicesActivity` | The agent's numbered lists ("what was I watching?", "what's new?") with posters; "number 2", OK or a number key picks (`POST /v1/choose`); closes when playback covers it, on BACK or after 90 s; ADB only. In help mode ("what can you do?") every command as a pattern with its ‹placeholders› in blue, beside what it does, by section, in the language you asked in |
 | `SayReceiver` | Shows the agent's messages ("Playing The Bear · S3E2 · 4K") as a toast; ADB only |

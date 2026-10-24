@@ -59,6 +59,9 @@ PICTURE_EVERY = 15
 DECODER_FAILED = re.compile(r"dequeue(Output|Input)Buffer failed|Reset: flush failed")
 DUCK = 0.4                  # TV Agent Player's own volume while the pill listens
 SKIPS_WHERE = "Skipping works in TV Agent Player and Kodi, for what the agent started"
+# "Skip the intro" with no times known for it (no TheIntroDB/IntroDB entry, no chapter): about an opening's length
+# ahead, instead of nothing (3 of the 190 voice tests, 2026-10-24)
+INTRO_GUESS_MS = 90_000
 PRELOAD_BEFORE = 150_000    # the next episode opens in the background this long before the end (binge)
 LIST_SIZE = 6                # rows that fit the TV app's list
 STARTS = {"play_title", "continue_watching", "next_episode", "pick"}     # actions that start playback
@@ -77,6 +80,15 @@ HEARD: ContextVar[str] = ContextVar("heard", default="")    # what the command b
 # the decision, in order (`trace`: finding the title, then starting it), the title picked, the stages' times and the
 # stream played. Never a link.
 START: ContextVar[dict | None] = ContextVar("start", default=None)
+# A title d1 picked with less confidence than this, or that it couldn't be asked about (unreachable, off), isn't
+# played: its candidates are listed to choose from by number. Every d1 title choice in the history before this was
+# wrong (2026-10-24: Dune 2000 at 0.14 for "Dune episode 2", Dune: Prophecy 0.25, "Paul" 0, Can't Buy Me Love 0.27
+# for "watch eBuy in 2023", The Moment 0.31), and with d1 unreachable the search's best match was wrong for 10 of 16
+# misheard or vague names (Rebel Without a Cause for "rebel mung", Till Death Us Do Part for "do part two").
+TITLE_SURE = 0.4
+# While a title is found for a play: imdb id -> the candidates of a choice that wasn't sure enough (TITLE_SURE), and
+# "by": how the title was picked in the end (resolve)
+UNSURE: ContextVar[dict | None] = ContextVar("unsure", default=None)
 FIRST_FRAME_WAIT = 10.0     # how long a start waits for TV Agent Player's first frame, to report it
 ASKED_FOR = 12 * 3600       # audio or subtitles asked for a title by voice hold for it (its next episodes) this long
 PROBE_AT_MOST = 4           # copies whose tracks are read at once when none says it has the language asked for
@@ -117,6 +129,7 @@ class ListItem:
     detail: str               # "12 min left", "2 days ago · Doors"
     poster: str = ""
     video: str | None = None  # the episode to play; None: carry on where you were (or the film)
+    ask: PlayTitle | None = None    # a title asked about (not sure which): played as that request asked
 
 
 @dataclass(frozen=True)
@@ -652,10 +665,13 @@ class Agent:
                             expect: Callable[[str, str], None] | None = None) -> cinemeta.Meta:
         t = time.perf_counter()
 
-        def chose(m: cinemeta.Meta, by: str, **more) -> cinemeta.Meta:
-            """The pick, into the start's trace with the candidates it was made from (scores after popularity)."""
+        def chose(m: cinemeta.Meta, by: str, unsure: list[cinemeta.Meta] | None = None, **more) -> cinemeta.Meta:
+            """The pick, into the start's trace with the candidates it was made from (scores after popularity).
+            `unsure`: the candidates to list instead, if this ends up being what plays (UNSURE)."""
             _step("title", "choice", _ms(t), query=title, picked=m.label, by=by, **more,
-                  candidates=[f"{c.label} {score:.0f}" for score, c in hits[:4]])
+                  candidates=[f"{c.label} {score:.0f}" for score, c in hits[:4]], sure=False if unsure else None)
+            if unsure and (asked := UNSURE.get()) is not None:
+                asked[m.id] = unsure
             return m
         if self._decisive(title, hits):
             return chose(hits[0][1], "the search")
@@ -670,7 +686,7 @@ class Agent:
         firsts = [h for h in hits if h[1].rank == 0 or h[1].extra_rank == 0]
         top = (firsts + [h for h in hits if h not in firsts])[:self.rules.title_candidates]
         if "d1" in self.cfg.decide_off:
-            return chose(top[0][1], "the search (d1 off)")
+            return chose(top[0][1], "the search (d1 off)", [m for _, m in top])
         if expect:
             expect(top[0][1].id, top[0][1].type)
         t_d1 = time.perf_counter()
@@ -678,12 +694,15 @@ class Agent:
             pick = await self.d1.choice(utterance or f"play {title}", self.rules.title_question,
                                         {f"c{i}": m.label for i, (_, m) in enumerate(top)})
             log.info("d1 title choice %s (confidence %.2f)", pick.key, pick.confidence)
-            return chose(top[int(pick.key[1:])][1], "d1", confidence=round(pick.confidence, 2), d1_ms=_ms(t_d1),
+            ranked = sorted(range(len(top)), key=lambda i: -pick.probabilities.get(f"c{i}", 0))   # its likeliest first
+            return chose(top[int(pick.key[1:])][1], "d1",
+                         [top[i][1] for i in ranked] if pick.confidence < TITLE_SURE else None,
+                         confidence=round(pick.confidence, 2), d1_ms=_ms(t_d1),
                          model=f"{self.d1.last_source}: {self.d1.hosted_model}" if self.d1.last_source == "hosted"
                          else "local d1", of=len(top))
         except (httpx.HTTPError, KeyError, ValueError, IndexError) as e:
-            log.warning("d1 unavailable for title choice (%s); using the best match", type(e).__name__)
-            return chose(top[0][1], f"the search (d1: {type(e).__name__})")
+            log.warning("d1 unavailable for title choice (%s); the candidates will be listed", type(e).__name__)
+            return chose(top[0][1], f"the search (d1: {type(e).__name__})", [m for _, m in top])
 
     @staticmethod
     def _decisive(title: str, hits: list[tuple[float, cinemeta.Meta]]) -> bool:
@@ -714,6 +733,8 @@ class Agent:
 
         def picked(got: tuple[str, str, str] | None, by: str) -> tuple[str, str, str] | None:
             if got:
+                if (asked := UNSURE.get()) is not None:
+                    asked["by"] = by
                 _note_title(picked=got[2], imdb=got[0], by=by)
                 _step("title", "picked", _ms(t), title=got[2], imdb=got[0], by=by)
             return got
@@ -2011,7 +2032,12 @@ class Agent:
             kind = "series"
         else:
             t = time.perf_counter()
-            found = await self.resolve(a.title, a.kind, a.season, exact=a.guess, expect=self._expecting(a))
+            unsure = UNSURE.set({})
+            try:
+                found = await self.resolve(a.title, a.kind, a.season, exact=a.guess, expect=self._expecting(a))
+                asked = UNSURE.get()
+            finally:
+                UNSURE.reset(unsure)
             ms = _ms(t)
             self.state.timings.add("start:title", ms)
             _note_title(ms=ms)
@@ -2019,7 +2045,29 @@ class Agent:
             if not found:
                 return Outcome(False, f"Didn't get that: “{a.title}”" if a.guess else f"Couldn't find “{a.title}”")
             imdb, kind, name = found
+            if imdb in asked and asked.get("by") != "your library":
+                return await self._ask_title(a, asked[imdb])
         return await self._play_found(a, imdb, kind, name, playing_video)
+
+    async def _ask_title(self, a: PlayTitle, metas: list[cinemeta.Meta]) -> Outcome:
+        """A title d1 wasn't sure of (TITLE_SURE): its candidates listed on the TV, its likeliest first, instead of a
+        guess played; "number 2" plays that one as asked (the season, episode or episode said)."""
+        async def poster(m: cinemeta.Meta) -> str:
+            try:
+                return (await asyncio.wait_for(cinemeta.meta(self.http, m.type, m.id), 2)).get("poster") or ""
+            except Exception:
+                return ""
+        posters = await asyncio.gather(*(poster(m) for m in metas))
+        items = [ListItem(m.id, m.type, m.name, m.label, "", art, ask=a.model_copy(update={"title": m.name[:120]}))
+                 for m, art in zip(metas, posters)]
+        es = T.spanish(HEARD.get() or a.title or "")
+        self._shown = Shown(f"¿Cuál es “{a.title}”?" if es else f"Which “{a.title}”?", items, time.monotonic())
+        await self._show_on_tv(self._shown)
+        _note_title(asked=[m.label for m in metas])
+        log.info("title %r: not sure which, %d listed", a.title, len(items))
+        # In a chain the steps after the play can't run on a list: it stops there, saying why
+        return Outcome(not chain.PLAN.get(), "No estoy seguro de cuál: di un número" if es else
+                       "Not sure which one: say a number")
 
     def _expecting(self, a: PlayTitle) -> Callable[[str, str], None]:
         """Called with the title the search or the LLM leans to while the rest decides (d1, the other sound-alikes):
@@ -2562,7 +2610,10 @@ class Agent:
         return await self.play_item(shown.items[a.number - 1])
 
     async def play_item(self, it: ListItem) -> Outcome:
-        """One item of a list (on the TV, or on a phone): where you were, a series' first episode, or the film."""
+        """One item of a list (on the TV, or on a phone): where you were, a series' first episode, or the film; a
+        title asked about, as its request said."""
+        if it.ask is not None:
+            return await self._play_found(it.ask, it.imdb, it.kind, it.name)
         if it.video is None and (item := await self.library.get(it.imdb)) and library_mod.in_continue_watching(item):
             return await self._continue_item(item)
         if it.video is None and it.kind == "series":        # a recommended series: where you were, or episode 1
@@ -2613,6 +2664,13 @@ class Agent:
             return Outcome(True, f"Skipped the {what} (chapter)")
         if a.what == "credits":
             return Outcome(False, "The credits haven't started")
+        if what == "intro":
+            to = pos + INTRO_GUESS_MS
+            if total and to >= total - 5_000:
+                return Outcome(False, "No intro times for this one, and it's nearly over")
+            await ctl.seek_to(pid, to)
+            log.info("skip: %s intro by guess, %s to %s", np.video_id, _clock(pos), _clock(to))
+            return Outcome(True, f"No intro times known: {INTRO_GUESS_MS // 1000} s ahead")
         return Outcome(False, f"No {what} timestamps for this part of the episode; “skip 90 seconds” jumps ahead")
 
     async def _skip_chapter(self, what: str) -> bool:
