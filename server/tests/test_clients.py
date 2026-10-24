@@ -463,6 +463,40 @@ def test_a_phones_list_leaves_the_one_on_the_tv_alone(paths):
     assert r.json()["ok"] and played == ["tt1"] and svc.agent._shown is on_tv
 
 
+def test_a_phone_shows_the_list_on_the_tv_and_picks_from_it(paths, monkeypatch):
+    """The numbered list on the TV, as "number 2" sees it; a pick with the id seen, refused once another is shown."""
+    from tv_agent import agent as agent_mod
+    from tv_agent.agent import ListItem, Shown
+    svc = service(paths)
+    token = paired(svc)
+    items = [ListItem("tt1", "series", "The Bear", "The Bear (2022)", "series", "https://images.example/bear.jpg"),
+             ListItem("tt2", "movie", "Scream", "Scream (1996)", "", "")]
+    played = []
+
+    async def play_item(it):
+        played.append(it.imdb)
+        return types.SimpleNamespace(ok=True, say=f"Playing {it.name}")
+    svc.agent._shown, svc.agent.play_item = None, play_item
+    svc.record = lambda *a, **k: None
+    gate = C.gateway(svc, server.local_app(svc))
+    assert call(gate, "GET", "/v1/shown", token).json() == {"shown": None}
+    assert call(gate, "POST", "/v1/shown/pick", token, json={"number": 1}).status_code == 404
+
+    svc.agent._shown = Shown("Which “the bear”?", items, time.monotonic())
+    shown = call(gate, "GET", "/v1/shown", token).json()["shown"]
+    assert shown["title"] == "Which “the bear”?" and [i["number"] for i in shown["items"]] == [1, 2]
+    assert shown["items"][0]["poster"] == "https://images.example/bear.jpg" and shown["items"][1]["poster"] is None
+    for bad in ({"number": 0}, {"number": True}, {"number": "2"}, {"number": 3, "id": shown["id"]}):
+        assert call(gate, "POST", "/v1/shown/pick", token, json=bad).status_code == 422
+    r = call(gate, "POST", "/v1/shown/pick", token, json={"number": 2, "id": shown["id"]})
+    assert r.json() == {"ok": True, "say": "Playing Scream"} and played == ["tt2"]
+
+    svc.agent._shown = Shown("Which moment?", items[:1], time.monotonic() + 1)        # another list since
+    assert call(gate, "POST", "/v1/shown/pick", token, json={"number": 1, "id": shown["id"]}).status_code == 409
+    svc.agent._shown = Shown("Old", items, time.monotonic() - agent_mod.LIST_TTL - 1)   # too old for "number 1"
+    assert call(gate, "GET", "/v1/shown", token).json() == {"shown": None}
+
+
 def test_a_phone_sees_the_whole_vocabulary_sent_with_each_command(paths, monkeypatch):
     """Yours, the library's titles and the Twitch favourites (when on), each once: what the app lists."""
     import types

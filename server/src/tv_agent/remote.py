@@ -10,6 +10,8 @@ shortcuts, the lists to pick from, the activity history and its recordings, and 
     GET  /v1/apps                       the apps the agent may open: [{"key", "label"}]
     GET  /v1/lists?list=recent|new|movies   the numbered list voice shows on the TV, here instead
     POST /v1/lists/pick {"list", "imdb", "video"}   play one of them
+    GET  /v1/shown                      the numbered list on the TV now ("number 2" picks), or null
+    POST /v1/shown/pick {"number", "id"}   a number of it, as saying it does (409: the TV shows another list now)
     GET  /v1/activity?limit=&before=    the history, newest first     POST /v1/activity/mark {"t", "wrong", "heard"}
     GET  /v1/recording?name=            a kept recording (WAV)
     GET  /v1/settings, POST /v1/settings {…}   the panel Settings tab's playback, language and update settings, live
@@ -259,6 +261,51 @@ def routes(svc) -> APIRouter:
         t = time.perf_counter()
         out = await svc.agent.play_item(item)
         svc.record("phone", item.label, Decision(A.Pick(number=number), "remote", 1.0, "list"), out.ok, out.say,
+                   (time.perf_counter() - t) * 1000)
+        return {"ok": out.ok, "say": out.say}
+
+    # ---- the numbered list on the TV ----
+
+    def current_list():
+        """The list on the TV that "number 2" would pick from now (agent.LIST_TTL), or None."""
+        shown = svc.agent._shown
+        return shown if shown and time.monotonic() - shown.at <= LIST_TTL else None
+
+    def list_id(shown) -> int:
+        return int(shown.at * 1000)
+
+    @r.get("/v1/shown")
+    async def shown_now(request: Request):
+        """The numbered list on the TV now (suggestions, a title to make sure of, episodes or moments found, "go
+        there?"), for a phone to show it and pick with a tap; {"shown": null} when there's none."""
+        svc.check(request, lan=False)
+        shown = current_list()
+        if shown is None:
+            return {"shown": None}
+        return {"shown": {"id": list_id(shown), "title": shown.title, "age_s": round(time.monotonic() - shown.at),
+                          "items": [{"number": n, "label": i.label, "detail": i.detail, "poster": i.poster or None}
+                                    for n, i in enumerate(shown.items, 1)]}}
+
+    @r.post("/v1/shown/pick")
+    async def shown_pick(request: Request):
+        """A number of the list on the TV, as saying it does; with the id the phone saw, refused when the TV shows
+        another list by now."""
+        svc.check(request, lan=False)
+        body = await body_of(request)
+        number, seen = body.get("number"), body.get("id")
+        if not isinstance(number, int) or isinstance(number, bool) or number < 1:
+            raise HTTPException(422, "number: 1 or more")
+        shown = current_list()
+        if shown is None:
+            raise HTTPException(404, "No list on screen")
+        if seen is not None and seen != list_id(shown):
+            raise HTTPException(409, "The TV shows another list now")
+        if number > len(shown.items):
+            raise HTTPException(422, f"The list goes up to {len(shown.items)}")
+        item = shown.items[number - 1]
+        t = time.perf_counter()
+        out = await svc.agent.play_item(item)
+        svc.record("phone", item.label, Decision(A.Pick(number=number), "remote", 1.0, "shown"), out.ok, out.say,
                    (time.perf_counter() - t) * 1000)
         return {"ok": out.ok, "say": out.say}
 

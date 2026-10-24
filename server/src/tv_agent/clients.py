@@ -63,6 +63,7 @@ PHONE_ROUTES = {
     ("GET", "/v1/now-playing"), ("POST", "/v1/now-playing/track"), ("GET", "/v1/tv/volume"),
     ("POST", "/v1/remote/key"), ("POST", "/v1/remote/text"), ("GET", "/v1/apps"), ("GET", "/v1/lists"),
     ("POST", "/v1/lists/pick"), ("GET", "/v1/activity"), ("POST", "/v1/activity/mark"), ("GET", "/v1/recording"),
+    ("GET", "/v1/shown"), ("POST", "/v1/shown/pick"),
     ("GET", "/v1/settings"), ("POST", "/v1/settings"),
     ("GET", "/v1/clients/me"), ("POST", "/v1/clients/me/forget"),
     ("GET", "/v1/updates"), ("POST", "/v1/updates/check"),
