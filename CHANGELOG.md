@@ -4,6 +4,17 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
+## server 0.9.0 — 2026-10-24
+
+### Added
+- Pictures for TV Agent Player's held ← and → (player 0.5.0, its `thumb_req`), made on this computer: the TV can't
+  decode a second 4K frame while the film plays. The file's Matroska index is read once, 10 s after it opens; each
+  picture is then one range read of the keyframe at or before the target, decoded and tone-mapped by ffmpeg from a
+  pipe (libplacebo, so Dolby Vision profile 5 looks right too; zscale if libplacebo can't run) into a ~3 KB JPEG,
+  and kept per keyframe. On the TV a picture showed 0.45 s after the player asked (median), with ~0.35 s of ffmpeg
+  CPU each here. The link never goes on ffmpeg's command line. Needs `ffmpeg` (with libplacebo for HDR at its best);
+  files that aren't Matroska get no pictures.
+
 ## android 0.9.1 — 2026-10-24
 
 ### Fixed
