@@ -346,9 +346,9 @@ both cloud steps on, the local d1 server (llama-d1) can be stopped: the Decision
 The agent follows this computer's address on the TV's network while it runs: when it changes (Ethernet unplugged,
 Wi-Fi taking over, a new DHCP lease) its listeners move there within about 5 seconds and the TV app and TV Agent
 Player are paired again over ADB (the TV shows it; a TV in standby is paired once it answers). `lan_host`,
-`tv_hosts` and `phone_hosts` edited in `config.toml` are used the same way, without a restart. A phone paired with
-the old address needs the new one in the phone app (Agents › Addresses…), or a `phone_hosts` address that doesn't
-change, such as Tailscale's.
+`tv_hosts` and `phone_hosts` edited in `config.toml` are used the same way, without a restart. A paired phone learns
+the new address the next time it reaches the agent at any of its addresses (this computer's Tailscale one is offered
+by itself), and keeps its list current from then on (phone app 0.2.2).
 TV Agent Player's pictures for a held ←/→ need `ffmpeg` on this computer, built with libplacebo (Vulkan) to
 tone-map HDR and Dolby Vision the best way; without it they use zscale, and without ffmpeg there are none.
 Every setting: [config.example.toml](config.example.toml). Secrets: `~/.config/tv-agent/secrets.toml` (mode 600;

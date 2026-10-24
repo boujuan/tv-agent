@@ -48,7 +48,7 @@ PAIRING_TRIES = 5               # wrong codes from one address before that addre
 PAIRING_TRIES_ALL = 50          # wrong codes from everyone before the pairing closes (many addresses guessing)
 PAIR_PER_MINUTE = 10            # tries /v1/pair answers in a minute from one address, while a pairing is open
 MAX_DEVICES = 20
-MAX_BODY = 400_000              # audio: 12 s of 16 kHz PCM16, as for the TV
+MAX_BODY = 512_000              # audio: 16 s of 16 kHz PCM16, as for the TV (server.MAX_BODY)
 MAX_JSON = 64_000
 SEEN_EVERY = 60                 # last seen is written to clients.json at most once a minute
 
