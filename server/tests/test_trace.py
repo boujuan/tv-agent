@@ -137,7 +137,8 @@ def test_the_episode_search_leaves_its_steps(monkeypatch, tmp_path):
         return tr.close()
     steps, details = asyncio.run(go())
     labels = [s.get("label") for s in steps if s["stage"] == "episode"]
-    assert labels == ["Words to look for", "Plots ranked", "Which fit", "Checked in its subtitles", "Episode"]
+    assert labels == ["Episode asked for", "Words to look for", "Plots ranked", "Which fit", "Checked in its subtitles",
+                      "Episode"]
     ranked = next(s for s in steps if s.get("label") == "Plots ranked")
     assert ranked["method"]["id"] == "BM25 over the plots" and ranked["top"][0]["id"] == "tt1:1:10"
     assert "tt1:1:10" in details[ranked["detail"]]["plots"]

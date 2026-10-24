@@ -18,7 +18,8 @@ import time
 from pathlib import Path
 
 from tv_agent import actions as A
-from tv_agent import chain, config
+from tv_agent import chain, config, tracing
+from tv_agent import voicetests as V
 from tv_agent.agent import Agent, Outcome
 from tv_agent.state import NowPlaying
 from tv_agent.stremio import cinemeta
@@ -97,6 +98,7 @@ async def main() -> int:
         logging.basicConfig(level=logging.INFO, format="    %(name)s: %(message)s")
         logging.getLogger("httpx").setLevel(logging.WARNING)
     rows = [json.loads(line) for line in EVAL.read_text().splitlines() if line.strip()]
+    rows += [r | {"mine": True} for r in V.cases(V.FINDING) if r.get("find") in ("episode", "scene")]
     picked = {int(x) for x in args.rows.split(",")} if args.rows else None
     rows = [(n, r) for n, r in enumerate(rows, 1) if (not args.only or r["find"] == args.only)
             and (picked is None or n in picked)]
@@ -109,14 +111,20 @@ async def main() -> int:
             forget(agent, keep)
             for run in ("cold", "warm"):
                 t = time.perf_counter()
+                trace = tracing.Trace()
+                token = tracing.TRACE.set(trace)
                 try:
                     got, why = await (episode if row["find"] == "episode" else scene)(agent, row)
                 except Exception as e:                   # one failure doesn't stop the rest
                     got, why = "error", f"{type(e).__name__}: {e}"
+                finally:
+                    tracing.TRACE.reset(token)
                 ms = (time.perf_counter() - t) * 1000
                 ok = graded(row, got)
+                cost = sum(s.get("cost") or 0 for s in trace.close()[0] if s["stage"] in ("llm", "d1"))
                 times.setdefault((row["find"], run), []).append(ms)
-                results.append({"row": n, "run": run, "got": got, "ok": ok, "ms": round(ms), "why": why})
+                results.append({"row": n, "run": run, "wanted": row["wanted"], "got": got, "ok": ok,
+                                "ms": round(ms), "why": why, "cost": round(cost, 6), "mine": row.get("mine")})
                 mark = {True: "✓", False: "✗", None: "·"}[ok]
                 print(f"{mark} {n:2} {row['find']:7} {run} {ms:6.0f} ms  {row['name']}: {row['wanted']!r} -> {got}"
                       + (f"  ({why[:140]})" if why else ""), flush=True)

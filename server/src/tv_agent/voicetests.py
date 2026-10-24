@@ -33,6 +33,10 @@ from .decide.numbers import TENS, UNITS
 
 DIR = DATA_DIR / "voice-tests"
 LABELS = DIR / "labels.jsonl"
+# Your own cases for the benches that need no recording (the panel's "This was right / wrong"), kept here, never in
+# the repo: sentences (typed commands, chains: scripts/bench_chains.py) and episodes or scenes (bench_finding.py)
+SENTENCES = DIR / "sentences.jsonl"
+FINDING = DIR / "finding.jsonl"
 LEARNED = CONFIG_DIR / "learned.json"            # decide/learned.py's file (that module needs pydantic)
 # Left out of what's expected unless a label names them: the words heard, a title played as a guess, and film or
 # series (a search hint: "The Bear S3" is right with or without it)
@@ -307,3 +311,83 @@ def compare(before: dict, after: dict) -> dict:
             if not moved and words(a.get("transcript", "")) != words(b.get("transcript", "")):
                 out["changed"].append(item)
     return out
+
+
+def cases(path: Path) -> list[dict]:
+    """Your own cases of a bench (SENTENCES, FINDING)."""
+    try:
+        return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    except (OSError, ValueError):
+        return []
+
+
+def add_case(path: Path, case: dict, key: str) -> bool:
+    """One of your cases, replacing the one with the same `key` field (True when it replaced one)."""
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    with os.fdopen(fd, "r+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        have = [json.loads(line) for line in f.read().splitlines() if line.strip()]
+        kept = [c for c in have if c.get(key) != case.get(key)]
+        f.seek(0)
+        f.truncate()
+        for c in [*kept, case]:
+            f.write(json.dumps(c, ensure_ascii=False) + "\n")
+    return len(kept) < len(have)
+
+
+# ---- a command of the history kept as a test (the panel's “This was right / wrong”) ----
+
+def asked(e: dict, stage: str) -> dict | None:
+    """What an episode or scene search of this command was asked (its trace's "asked" step), and what it found: the
+    episode's id, or the time it jumped to."""
+    trace = [t for t in e.get("trace") or [] if isinstance(t, dict) and t.get("stage") == stage]
+    first = next((t for t in trace if t.get("step") == "asked"), None)
+    if not first:
+        return None
+    if stage == "episode":
+        done = next((t for t in trace if t.get("step") == "verdict"), {})
+        return {**first, "found": done.get("episode")}
+    jump = next((t for t in trace if t.get("step") == "jump" and t.get("verdict") == "done"), None)
+    return {**first, "found": jump.get("to") if jump else None}
+
+
+def _secs(clock: str) -> int | None:
+    m = re.fullmatch(r"\s*(?:(\d+):)?(\d{1,2}):(\d\d)\s*", clock or "")
+    return None if not m else int(m.group(1) or 0) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+
+
+def _episode_id(imdb: str, said: str) -> str | None:
+    m = re.fullmatch(r"\s*[sS](\d+)\s*[eE](\d+)\s*", said or "")
+    return f"{imdb}:{int(m.group(1))}:{int(m.group(2))}" if m else None
+
+
+def keep_command(e: dict, expect: dict | None, words: str, right: bool, episode: str | None = None,
+                 moment: str | None = None) -> list[str]:
+    """A command of the history as tests: a voice test when its recording is kept (else one of your sentences, by
+    its words), and its episode or scene case: the episode (S2E5) or moment (m:ss) given, or, when it was right,
+    what it found. What was added, in words."""
+    added = []
+    words = words.strip()
+    if expect and e.get("recording") and stt.recording(e["recording"]):
+        label = {"recording": e["recording"], "expect": expect, "exact": True, "heard": e.get("heard", ""),
+                 "from": "panel: right" if right else "panel: wrong, should be this", "t": e.get("t")}
+        if words:
+            label["text"] = words
+        add(label, LABELS, stt.RECORDINGS)
+        added.append("a voice test")
+    elif expect and words:
+        lang = "es" if re.search(r"[ñáéíóú¿¡]|\b(?:pon|el|la|que|del|y|luego)\b", words.lower()) else "en"
+        add_case(SENTENCES, {"lang": lang, "text": words, "expect": expect, "from": "panel", "t": e.get("t")}, "text")
+        added.append("one of your sentences")
+    if (ep := asked(e, "episode")) and (episode or right and ep.get("found")):
+        if want := _episode_id(ep["imdb"], episode) if episode else ep["found"]:
+            add_case(FINDING, {"find": "episode", "imdb": ep["imdb"], "name": ep.get("title", ""),
+                               "wanted": ep["wanted"], "expect": [want]}, "wanted")
+            added.append("an episode case")
+    if (sc := asked(e, "scene")) and (moment or right and sc.get("found")):
+        if (at := _secs(moment or sc["found"])) is not None:
+            add_case(FINDING, {"find": "scene", "video": sc["video"], "name": sc.get("title", ""),
+                               "wanted": sc["wanted"], "expect": [max(0, at - 20), at + 20]}, "wanted")
+            added.append("a scene case")
+    return added

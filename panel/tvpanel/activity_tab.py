@@ -13,10 +13,11 @@ import time
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QAction, QColor, QFont, QGuiApplication, QPainter, QPen
-from PySide6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QInputDialog, QLabel,
+from PySide6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel,
                                QLineEdit, QMenu, QMessageBox, QPushButton, QTableWidget, QTableWidgetItem, QToolTip,
                                QVBoxLayout, QWidget)
 
+from . import tuning
 from .common import (AMBER, BLUE, GREEN, GREY, RED, LevelBar, agent_activity, agent_stt, agent_voicetests, api,
                      card, dim, journal_history, offer_to_delete_recordings)
 
@@ -395,11 +396,12 @@ class Activity(QWidget):
         copy = QAction("Copy what was said", m)
         copy.triggered.connect(lambda: QGuiApplication.clipboard().setText(self.rows[row].get("heard", "")))
         e = self.rows[row]
-        teach = QAction("Teach the right action…", m)
-        teach.triggered.connect(lambda: self.teach(e))
-        wrong = QAction("Not wrong after all" if e.get("wrong") else "Mark as wrong", m)
-        wrong.triggered.connect(lambda: (agent_activity.mark(float(e["t"]), not e.get("wrong"), heard=e.get("heard")),
-                                         self.load()))
+        right = QAction("This was right", m)
+        right.setToolTip("Keep it as a test: a voice test, one of your sentences, an episode or scene case")
+        right.triggered.connect(lambda: self.tuned(tuning.this_was_right(self, e)))
+        wrong = QAction("This was wrong, it should be…", m)
+        wrong.setToolTip("Marked wrong, taught what it should do, and kept as a test")
+        wrong.triggered.connect(lambda: self.tuned(tuning.this_was_wrong(self, e)))
         forget = QAction("Forget what it was taught", m)
         forget.triggered.connect(lambda: self.forget(e))
         for a in (explain, decide, again, copy):
@@ -415,11 +417,8 @@ class Activity(QWidget):
                 a = QAction(label, sub)
                 a.triggered.connect(lambda _=False, w=where, mo=model, la=label: self.transcribe_again(e, w, mo, la))
                 sub.addAction(a)
-            test = QAction("Add to voice tests…", m)
-            test.triggered.connect(lambda: self.add_voice_test(e))
-            m.addAction(test)
         m.addSeparator()
-        for a in (teach, wrong) + ((forget,) if e.get("taught") else ()):
+        for a in (right, wrong) + ((forget,) if e.get("taught") else ()):
             m.addAction(a)
         m.exec(self.table.viewport().mapToGlobal(pos))
 
@@ -441,69 +440,11 @@ class Activity(QWidget):
         self.panel.bg.run(lambda: api("/v1/transcribe", {"recording": e["recording"], "where": where, "model": model},
                                       timeout=60), done)
 
-    def add_voice_test(self, e: dict):
-        """This recording and what it should do (what it did, or was taught) as a voice test for
-        scripts/bench_voice.py, with the words said, checked here (voicetests.py)."""
-        try:
-            label, why = agent_voicetests.label(e, agent_voicetests.learned(), asked=True)
-            had = any(x["recording"] == e["recording"] for x in agent_voicetests.load())
-        except (OSError, ValueError) as err:
-            QMessageBox.warning(self, "TV Agent", f"Voice tests: {err}")
-            return
-        if label is None:
-            QMessageBox.information(self, "TV Agent", f"Not added: {why}.")
-            return
-        said, ok = QInputDialog.getText(self, "Add to voice tests",
-                                        f"It should do: {agent_voicetests.describe(label['expect'])}"
-                                        + (" (this replaces its voice test)" if had else "")
-                                        + (" (if it should have done something, cancel and teach it that first)"
-                                           if label["expect"]["type"] == "none" else "") +
-                                        "\n\nWhat was said, word for word (the transcripts are judged against it;"
-                                        " correct it if it was misheard, empty: not judged):",
-                                        QLineEdit.EchoMode.Normal, e.get("heard", ""))
-        if not ok:
-            return
-        if said.strip():
-            label["text"] = said.strip()
-        try:
-            agent_voicetests.add(label)
-        except (OSError, ValueError) as err:
-            QMessageBox.warning(self, "TV Agent", f"Not added: {err}")
-            return
-        self.reply.setText(f"<span style='color:{GREEN}'>Voice test {'updated' if had else 'added'}: "
-                           f"{html.escape(agent_voicetests.describe(label['expect']))}</span> <span style='color:gray'>"
-                           "(scripts/bench_voice.py)</span>")
-
-    def teach(self, e: dict):
-        """“When I say this, do what that command does”: the agent decides the command typed here, and once you
-        agree, the sentence said is saved with that action (learned.json, checked before the rules)."""
-        heard = e.get("heard", "").strip()
-        if not heard:
-            return
-        meant, ok = QInputDialog.getText(self, "Teach the right action",
-                                         f"When I say “{heard}”, do what this command does\n"
-                                         "(say it the way the agent understands, e.g. “pause”, "
-                                         "“play the bear season 3”):")
-        if not ok or not meant.strip():
-            return
-        try:
-            d = api("/v1/decide", {"text": meant.strip()})
-        except Exception as err:
-            QMessageBox.warning(self, "TV Agent", f"The voice agent isn't answering: {err}")
-            return
-        if d["action"]["type"] == "none":
-            QMessageBox.information(self, "TV Agent", f"“{meant}” isn't understood either; say it another way.")
-            return
-        if QMessageBox.question(self, "TV Agent", f"From now on, “{heard}” will do: {d.get('describe', '')} "
-                                f"({d['action']['type'].replace('_', ' ')}). Save?") != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            api("/v1/learn", {"say": heard, "do": d["action"], "t": e["t"], "heard": e.get("heard")})
-        except Exception as err:
-            QMessageBox.warning(self, "TV Agent", f"Not saved: {err}")
-            return
-        self.reply.setText(f"<span style='color:{GREEN}'>Taught: “{heard}” → {d.get('describe', '')}</span>")
-        self.load()
+    def tuned(self, said: str | None):
+        """After “This was right / wrong”: what was kept, and the list again (the marks)."""
+        if said:
+            self.reply.setText(said)
+            self.load()
 
     def forget(self, e: dict):
         try:

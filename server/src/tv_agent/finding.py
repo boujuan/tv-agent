@@ -534,6 +534,7 @@ class EpisodeFind:
 
 
 async def episode(agent, imdb: str, name: str, eps: list[dict], wanted: str) -> EpisodeFind:
+    tracing.step("episode", "asked", label="Episode asked for", imdb=imdb, title=name, wanted=wanted)
     found = await _episode(agent, imdb, name, eps, wanted)
     tracing.step("episode", "verdict", label="Episode", method=tracing.method("local", "finding.py"),
                  verdict="play" if found.episode else "list" if found.choices else "none", why=found.why,
@@ -755,6 +756,8 @@ async def scene(agent, video: str, title: str, wanted: str, heard: str = "", str
         return SceneFind(why="Finding a moment needs the LLM (Settings › API keys: OpenRouter)")
     spanish = T.spanish(wanted) or T.spanish(heard)
     langs = ["spa", "eng"] if spanish else ["eng", "spa"]
+    tracing.step("scene", "asked", label="Moment asked for", video=video, title=title, wanted=wanted,
+                 language="Spanish" if spanish else "English")
     looking = _looking(agent.llm, title, wanted, False)
     addons = await agent.addons()
     first = asyncio.create_task(track(agent.http, addons, video, langs[0], stream=stream,

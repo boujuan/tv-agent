@@ -40,13 +40,22 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
   press again to send at once); the history of everything said from the remote, the computer, typed or via
   Claude, with how it was decided and what happened; **Export** (JSON lines or CSV), **Import** (merges, skipping
   duplicates), **Erase**; double-click a line to see in Decisions what happened, as recorded (how it was decided,
-  then how its title was found and how it started, step by step), or right-click it to decide it again now; with
-  **Keep recordings** on, right-click a
-  spoken command (🔊) to play it, transcribe it again with another model, or **Add to voice tests…** (what it
-  should do and the words said, for `server/scripts/bench_voice.py`). **Response times**: a chart of the
+  then how its title was found and how it started, step by step), or right-click it to decide it again now, or
+  say **This was right** or **This was wrong, it should be…** (what it should have done, the words said, the right
+  episode or moment; taught unless you untick it): either way it becomes a test, a voice test when its recording is
+  kept, else one of your sentences, and an episode or scene case when it searched for one (for
+  `server/scripts/bench_voice.py`, `bench_chains.py`, `bench_finding.py`; also in Decisions, beside Copy as JSON). With
+  **Keep recordings** on, right-click a spoken command (🔊) to play it or transcribe it again with another model. **Response times**: a chart of the
   last commands (speech-to-text, deciding, waiting for your pause; doing it) with typical and slowest times by
   step, model and action, and the cloud cost. History lives in `~/.local/share/tv-agent/activity.jsonl`, recordings
   in `recordings/` beside it (mode 600; nothing is written with "Keep a history" off).
+- **Quality:** how well the agent does, from the history (today, the last 7 or 30 days, all; from the TV, the
+  phones, typed or the laptop's mic): each step's success rate and p50/p95 time (speech to text, deciding, the
+  title, the episode, the scene, the streams, the start, the whole command), which rule or model decided and how
+  often rightly, each model's calls and cost, the cost per day, the commonest failures (double-click: an example in
+  Decisions). The **nightly check** (04:30; **Set up the nightly check** if it isn't): each night's run of the voice
+  tests, sentences and chains, episodes and scenes against the baseline, its regressions and fixes, its cost; **Run
+  it now**; **Accept as the baseline** after a change made on purpose. A regression notifies you once.
 - **Commands:** everything you can say, as patterns with ‹placeholders›, by section, in English or Spanish, with a
   filter; **try** fills one in with an example you can edit, then explains it (nothing sent) or does it on the TV.
 - **Decisions:** how a command is decided, as a diagram whose decision steps (fixed phrases, pattern rules, the
@@ -91,7 +100,8 @@ one, else `../server/src`. Run it directly with `python3 tv_agent_panel.py` (`--
 |---|---|
 | `tv_agent_panel.py` | Entry point |
 | `tvpanel/app.py` | Window, tray icon, single instance, resource sampling |
-| `tvpanel/overview.py`, `activity_tab.py`, `commands_tab.py`, `decisions.py`, `settings_tab.py` | The five tabs |
+| `tvpanel/overview.py`, `activity_tab.py`, `quality_tab.py`, `commands_tab.py`, `decisions.py`, `settings_tab.py` | The six tabs |
+| `tvpanel/tuning.py` | "This was right / wrong, it should be…" for a command of the history: taught, kept as a test |
 | `tvpanel/tv_card.py`, `speech_tab.py`, `about.py` | Overview's TV card; Decisions › Speech to text; About |
 | `tvpanel/timeline.py` | A recorded command's whole trace in Decisions (stdlib only: tested with the server's tests) |
 | `tvpanel/phones.py` | Settings › Phones: paired phones, pairing with a QR code |

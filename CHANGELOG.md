@@ -15,6 +15,30 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   without text subtitles of its own (only picture ones) is left as it was. What's measured is kept per file and
   subtitle, so the next play sends it with the subtitles at once (`delay_ms`). The file's own subtitles are never
   moved.
+- Quality numbers from the history's traces (`quality.py`, `GET /v1/quality?days=&sources=`): for each step
+  (speech to text, deciding, the title, the episode, the scene, the streams, the start, the whole command) how often
+  it went right or asked, its p50/p95 time; which rule or model decided and how often rightly; each model's calls
+  and cost; the cost per day; the commonest failures with an example.
+- A nightly check (`tv-agent setup nightly --enable`: `tv-agent-nightly.timer`, 04:30; `tv-agent quality nightly`):
+  the voice tests through the agent's own speech to text, `bench_chains.py` and `bench_finding.py`, nothing sent to
+  the TV, each case against its baseline; the runs kept in `quality/runs/` with their cost; a regression leaves an
+  alert for the panel and the phones (`alert` in `GET /v1/quality`, `POST /v1/quality/seen`).
+- Your own sentences and episode or scene cases, from the panel's "This was right / wrong", in
+  `voice-tests/sentences.jsonl` and `finding.jsonl` (never in the repo): `bench_chains.py` and `bench_finding.py` run
+  them with the repo's (`--no-mine` without); `--out` keeps a run's results, with what it cost.
+- The episode and scene searches' traces start with what was asked for.
+
+## panel — unreleased
+
+### Added
+- **Quality** tab: each step's success rate and p50/p95 time, who decided and how often rightly, the models' calls
+  and cost, the cost per day, the commonest failures (double-click: an example in Decisions), over today, 7 or 30
+  days or all, from the TV, the phones, typed or the laptop's mic; the nightly check's runs against the baseline,
+  their regressions, fixes and cost, **Run it now**, **Accept as the baseline**; a regression notifies you once.
+- **This was right** and **This was wrong, it should be…** for a command (right-click in Activity, or beside Copy as
+  JSON in Decisions): the words said, what it should have done (taught unless unticked), the right episode or
+  moment; it becomes a voice test, or one of your sentences, and an episode or scene case. They replace "Add to
+  voice tests…", "Teach the right action…" and "Mark as wrong".
 
 ## server 0.12.0 — 2026-10-24
 

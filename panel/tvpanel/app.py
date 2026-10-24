@@ -19,12 +19,13 @@ from PySide6.QtWidgets import (QApplication, QDialog, QDialogButtonBox, QHBoxLay
 from .about import About
 from .activity_tab import Activity
 from .commands_tab import Commands
-from .common import (APP_ID, ICON, PLAYER_NAMES, REPO, SERVICES, STYLE, Async, Prefs, WheelGuard, agent_config, api,
-                     clock, episode_of, gpu_of, gpu_totals, human, pill, run_doctor, run_eval, unit_info, GREEN, AMBER,
-                     RED)
+from .common import (APP_ID, ICON, PLAYER_NAMES, REPO, SERVICES, STYLE, Async, Prefs, WheelGuard, agent_config,
+                     agent_quality, api, clock, episode_of, gpu_of, gpu_totals, human, pill, run_doctor, run_eval,
+                     unit_info, GREEN, AMBER, RED)
 from .decisions import Decisions
 from .mic import Mic
 from .overview import Overview
+from .quality_tab import Quality
 from .settings_tab import Settings
 
 SAMPLE_MS, HIDDEN_SAMPLE_MS = 1500, 5000
@@ -124,8 +125,9 @@ class Panel(QMainWindow):
         self.commands = Commands(self)
         self.decisions = Decisions(self)
         self.settings = Settings(self)
-        for w, name in ((self.overview, "Overview"), (self.activity, "Activity"), (self.commands, "Commands"),
-                        (self.decisions, "Decisions"), (self.settings, "Settings")):
+        self.quality = Quality(self)
+        for w, name in ((self.overview, "Overview"), (self.activity, "Activity"), (self.quality, "Quality"),
+                        (self.commands, "Commands"), (self.decisions, "Decisions"), (self.settings, "Settings")):
             self.tabs.addTab(w, name)
         self.tabs.currentChanged.connect(self.tab_changed)
         self.setCentralWidget(self.tabs)
@@ -134,6 +136,11 @@ class Panel(QMainWindow):
         self.tray = Tray(self) if QSystemTrayIcon.isSystemTrayAvailable() else None
         if self.tray:
             self.tray.show()
+        self._alerted = ""                       # the nightly run whose regressions were notified
+        self.alert_timer = QTimer(self)          # the nightly check's regressions: a notification, once each
+        self.alert_timer.timeout.connect(self.check_alert)
+        self.alert_timer.start(30 * 60 * 1000)
+        QTimer.singleShot(5000, self.check_alert)
         self.mic.result.connect(self.mic_result)
 
         self.sample_timer = QTimer(self)
@@ -354,6 +361,13 @@ class Panel(QMainWindow):
         if self.tray:
             self.tray.hide()
         QApplication.quit()
+
+    def check_alert(self):
+        a = agent_quality.alert()
+        if a and a.get("run") != self._alerted:
+            self._alerted = a["run"]
+            self.notify("TV Agent: the nightly check found regressions",
+                        f"{a['regressions']} commands it got right before are wrong now: see the Quality tab")
 
     def notify(self, title: str, text: str):
         if self.tray and self.prefs.get("notify"):

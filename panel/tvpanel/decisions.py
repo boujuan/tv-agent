@@ -10,13 +10,13 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QAction, QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
-                               QFormLayout, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
+                               QFormLayout, QFrame, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMenu, QMessageBox,
                                QPlainTextEdit, QPushButton, QScrollArea, QSpinBox, QSplitter, QTableWidget,
                                QTableWidgetItem, QTabWidget, QToolButton, QVBoxLayout, QWidget)
 
-from . import timeline
+from . import timeline, tuning
 from .common import (AMBER, BLUE, GREEN, GREY, RED, TV_AGENT, WHERE, ApiError, KeyLine, Say, agent_activity,
                      agent_config, agent_stt, api, card, dim, openrouter_check, systemctl)
 from .speech_tab import SpeechToText
@@ -765,6 +765,13 @@ class Decisions(QWidget):
         self.add_phrase_btn = QPushButton("Add as fixed phrase…")
         self.add_phrase_btn.setToolTip("Make this exact sentence always do a given action")
         self.add_phrase_btn.clicked.connect(self.add_phrase_for_test)
+        self.right_btn = QPushButton("This was right")
+        self.right_btn.setToolTip("Keep this command as a test: a voice test, one of your sentences, an episode or "
+                                  "scene case")
+        self.right_btn.clicked.connect(lambda: self.tune(True))
+        self.wrong_btn = QPushButton("This was wrong…")
+        self.wrong_btn.setToolTip("What it should have done: marked wrong, taught, and kept as a test")
+        self.wrong_btn.clicked.connect(lambda: self.tune(False))
         self.copy_btn = QPushButton("Copy as JSON")
         self.copy_btn.setToolTip("The command shown from the history: its record and details, for debugging")
         self.copy_btn.clicked.connect(self.copy_json)
@@ -772,6 +779,9 @@ class Decisions(QWidget):
         trow.addWidget(self.test, 1)
         trow.addWidget(go)
         trow.addWidget(self.add_phrase_btn)
+        for b in (self.right_btn, self.wrong_btn):
+            b.setVisible(False)
+            trow.addWidget(b)
         trow.addWidget(self.copy_btn)
         dl.addLayout(trow)
         self.explanation = QLabel("")
@@ -780,6 +790,8 @@ class Decisions(QWidget):
         self.explanation.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse
                                                  | Qt.TextInteractionFlag.LinksAccessibleByMouse)
         self.explanation.linkActivated.connect(self.open_link)     # a step's details, the settings at the time
+        self.explanation.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.explanation.customContextMenuRequested.connect(self.recorded_menu)
         dl.addWidget(self.explanation)
         self.recorded: tuple[dict, dict | None] | None = None      # the command shown from the history, its details
         dl.addStretch(1)                           # room to spare goes below, not inside the diagram
@@ -1419,7 +1431,8 @@ class Decisions(QWidget):
             return
         self.explanation.setText("…")
         self.recorded = None
-        self.copy_btn.setVisible(False)
+        for b in (self.copy_btn, self.right_btn, self.wrong_btn):
+            b.setVisible(False)
         # A play request's title is found as a start would find it (nothing is played): its steps are drawn too
         self.panel.bg.run(lambda: api("/v1/decide", {"text": text, "title": True}, timeout=30), self.show_decision)
 
@@ -1437,7 +1450,8 @@ class Decisions(QWidget):
                   + ("" if e.get("ok") is not False else f" <span style='color:{AMBER}'>(it didn't work)</span>"))
         details = agent_activity.details(e)
         self.recorded = (e, details)
-        self.copy_btn.setVisible(True)
+        for b in (self.copy_btn, self.right_btn, self.wrong_btn):
+            b.setVisible(True)
         self.show_decision({"trace": e["trace"], "action": e.get("action") or {"type": e.get("type", "none")},
                             "via": e.get("via"), "rule": e.get("rule"), "describe": e.get("say", "")}, None,
                            header=f"<span style='color:gray'>What happened {when} (recorded; agent "
@@ -1466,6 +1480,32 @@ class Decisions(QWidget):
         text.setPlainText(what if isinstance(what, str) else json.dumps(what, ensure_ascii=False, indent=1))
         lay.addWidget(text)
         box.show()
+
+    def tune(self, right: bool):
+        """“This was right / wrong” for the command shown from the history (tuning.py)."""
+        if not self.recorded:
+            return
+        said = (tuning.this_was_right if right else tuning.this_was_wrong)(self, self.recorded[0])
+        if said:
+            self.panel.say(said, 8000)
+
+    def recorded_menu(self, pos):
+        """The explanation's right-click: copy what's selected; for a command from the history, right or wrong."""
+        m = QMenu(self)
+        if self.explanation.hasSelectedText():
+            copy = QAction("Copy", m)
+            copy.triggered.connect(lambda: QApplication.clipboard().setText(self.explanation.selectedText()))
+            m.addAction(copy)
+        if self.recorded:
+            m.addSeparator()
+            for text, do in (("This was right", lambda: self.tune(True)),
+                             ("This was wrong, it should be…", lambda: self.tune(False)),
+                             ("Copy as JSON", self.copy_json)):
+                a = QAction(text, m)
+                a.triggered.connect(do)
+                m.addAction(a)
+        if m.actions():
+            m.exec(self.explanation.mapToGlobal(pos))
 
     def copy_json(self):
         if self.recorded:

@@ -1,6 +1,7 @@
 """Installing tv-agent on a computer and its app on the TV: user services, the TV app, and pairing.
 
     tv-agent setup services [--enable]   write ~/.config/systemd/user/{llama-d1,tv-agent}.service for this install
+    tv-agent setup nightly [--enable]    write the nightly check's service and timer (tv-agent-nightly.timer)
     tv-agent tv install <apk>            install the TV app (grant the microphone, allow it to start) or TV Agent
                                          Player (allow it to start, compile it ahead of time), and pair it
     tv-agent tv pair                     tell the TV app, and TV Agent Player if it's installed, where this agent is
@@ -58,6 +59,45 @@ def _arg(path) -> str:
     if "\n" in text:
         raise SystemExit(f"{text!r}: a path with a line break can't go in a systemd unit")
     return '"' + text.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%") + '"'
+
+
+NIGHTLY_AT = "04:30"        # when the TV is off: the nightly check sends nothing to it, but it uses the network
+
+
+def write_nightly(enable: bool) -> list[Path]:
+    """The nightly check (quality.py): a oneshot service and the timer that starts it every night (missed nights run
+    at the next start-up)."""
+    units = {
+        "tv-agent-nightly.service": f"""[Unit]
+Description=tv-agent's nightly check: voice tests, sentences, episode and scene searches against their baselines
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart={tv_agent_command()} quality nightly
+Nice=10
+""",
+        "tv-agent-nightly.timer": f"""[Unit]
+Description=tv-agent's nightly check, every night at {NIGHTLY_AT}
+
+[Timer]
+OnCalendar=*-*-* {NIGHTLY_AT}:00
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
+""",
+    }
+    UNIT_DIR.mkdir(parents=True, exist_ok=True)
+    written = []
+    for name, text in units.items():
+        (UNIT_DIR / name).write_text(text)
+        written.append(UNIT_DIR / name)
+    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+    if enable:
+        subprocess.run(["systemctl", "--user", "enable", "--now", "tv-agent-nightly.timer"], check=True)
+    return written
 
 
 def write_services(cfg: Config, enable: bool) -> list[Path]:

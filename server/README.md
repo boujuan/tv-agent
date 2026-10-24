@@ -369,7 +369,8 @@ the daemon refuses to start otherwise). For services across logouts: `loginctl e
 | Let Claude Code drive the TV | `claude mcp add --scope user tv-agent -- $PWD/.venv/bin/tv-agent-mcp` (12 tools, no shell) |
 | Use it from my phone | The [TV Agent phone app](https://github.com/boujuan/tv-agent-phone); pair it in the panel's Settings › Phones |
 | Stop it for a while | `systemctl --user stop tv-agent llama-d1` (the mic button then says "Agent offline") |
-| Fix a command it got wrong | Say "that's wrong" right after; then in the panel's Activity tab right-click it, "Teach the right action…" (or `tv-agent review` for the list, with an LLM's guess) |
+| Fix a command it got wrong | Say "that's wrong" right after; then in the panel's Activity tab right-click it, "This was wrong, it should be…": it's taught and becomes a test (or `tv-agent review` for the list, with an LLM's guess) |
+| See how well it does, step by step | The panel's Quality tab ([quality](#quality-and-the-nightly-check)); `tv-agent quality nightly` runs the night's check now |
 
 ## Voice tests
 
@@ -392,8 +393,11 @@ Nothing is sent to the TV; the LLM and hosted models are called, and cost, as in
   history, doesn't take it. Removing a test: its line and its `.wav`.
 - `--seed` labels each recording not labelled yet with the action it got, when it worked and wasn't marked "that's
   wrong", or with what you taught it in the Activity tab; it says how many it left out and why (not understood,
-  didn't work, marked wrong but not taught). In the panel, right-click a spoken command, **Add to voice tests…**:
-  that also asks for the words said, so the transcripts are judged too.
+  didn't work, marked wrong but not taught). In the panel, right-click a command (Activity or Decisions), **This
+  was right** or **This was wrong, it should be…**: that also asks for the words said, so the transcripts are judged
+  too. A typed command (no recording) becomes one of your sentences for `bench_chains.py`, and an episode or a scene
+  it searched for a case for `bench_finding.py`, with the episode or moment it found or the one you give
+  (`voice-tests/sentences.jsonl`, `finding.jsonl`, yours alone like the labels).
 - A label: `{"recording": "…wav", "expect": {…}, "exact": true, "text": "what was said"}`. `expect` is as in
   `eval/*.jsonl`; with `exact` every field it doesn't name must be at its default (film or series and a guessed
   title count only when named). Edit one by hand to loosen it (`"exact": false`; `"title_any"`,
@@ -410,6 +414,23 @@ Nothing is sent to the TV; the LLM and hosted models are called, and cost, as in
 - `--save` / `--compare` with a bare file name keep the run with the voice tests (its transcripts are yours);
   `--compare` lists regressions, fixes, changed transcripts and what changed in the setup (commit, models, steps).
   Also `--no-learned` (without the taught sentences), `--failures` (only what's wrong).
+
+## Quality and the nightly check
+
+The panel's **Quality** tab reads the history's traces (today, the last 7 or 30 days, or all; from the TV, the
+phones, typed or the laptop's mic) into `quality.py`'s numbers: for each step (speech to text, deciding, the title,
+the episode, the scene, the streams, the start, the whole command) how often it went right, how often it asked
+instead of guessing, and its p50/p95 time; which rule or model decided and how often that was right (it worked and
+wasn't marked wrong); each model's calls, cost and time; the cost per day; the commonest failures, each opening an
+example in Decisions.
+
+Every night at 04:30 (`tv-agent-nightly.timer`, `tv-agent setup nightly --enable`; missed nights run at the next
+start) `tv-agent quality nightly` runs `bench_voice.py` (your voice tests through the agent's own speech to text),
+`bench_chains.py` and `bench_finding.py` with your setup, nothing sent to the TV, and compares each case with its
+baseline (the first run's, until a run is accepted as the baseline after a change made on purpose). The runs stay in
+`~/.local/share/tv-agent/quality/runs/` with what they cost (the LLM, d1 and a hosted speech model are called as in
+use: about $0.05–0.15 a night). A regression leaves `quality/alert.json`: the panel notifies you, and a paired phone
+asking `GET /v1/quality` sees it, until it's seen.
 
 ## HTTP API
 
@@ -446,6 +467,7 @@ Localhost (127.0.0.1:8766), for the panel, the CLI and the MCP server, same toke
 | `GET /v1/tv/volume`; `GET /v1/apps` | the TV's volume; the apps the agent may open |
 | `GET /v1/lists?list=recent\|new\|movies`; `POST /v1/lists/pick` `{"list", "imdb", "video"}` | the numbered lists voice shows on the TV, returned instead; play one (it's also what "number 2" picks from) |
 | `GET /v1/activity?limit=&before=`; `POST /v1/activity/mark` `{"t", "wrong", "heard"}`; `GET /v1/recording?name=` | the history, newest first, a page at a time; mark one wrong; a kept recording (WAV) |
+| `GET /v1/quality?days=7&sources=tv,phone`; `POST /v1/quality/seen` | the [Quality](#quality-and-the-nightly-check) numbers (`days=0`: all), the last nightly runs, a regression not seen yet (`alert`, `null` once seen); seen |
 | `GET/POST /v1/settings` | the Settings tab's playback and language settings (`remote.SETTINGS`), checked, saved and live; `choices` lists what each takes (`audio_language` with "original", `subtitles_when`) |
 | `GET /v1/updates`; `POST /v1/updates/check`; `POST /v1/updates/tv`, `/tvplayer` | the latest GitHub release of the agent, panel, TV app, TV Agent Player and phone app against what runs (`updates.py`; checked every 6 h unless `updates = "off"`); install the TV app's or the player's release over ADB (localhost only; only with GitHub's SHA-256 for it; the player not while it plays) |
 | `GET /v1/clients`; `POST /v1/clients/pairing`, `GET` it, `/pairing/cancel`; `POST /v1/clients/revoke\|rename` `{"id"}` | paired phones (localhost only): list, pair (a one-time code and the QR code's link), revoke |
@@ -549,7 +571,8 @@ rm -rf ~/.config/tv-agent ~/.local/share/tv-agent ~/.local/opt/llama.cpp ~/.loca
 | `src/tv_agent/config.py`, `redact.py`, `state.py`, `activity.py` | Settings and secrets, log redaction, memory between commands, the history file |
 | `src/tv_agent/mcp_server.py` | MCP tools for Claude Code (`tv-agent-mcp`) |
 | `systemd/` | User services for a packaged install (`tv-agent setup services` writes them for a checkout) |
-| `src/tv_agent/voicetests.py` | Voice tests: labels for kept recordings, seeded from the history; comparing runs |
+| `src/tv_agent/voicetests.py` | Voice tests: labels for kept recordings, seeded from the history; comparing runs; a command kept as tests |
+| `src/tv_agent/quality.py` | The Quality numbers from the history's traces; the nightly check against its baselines |
 | `scripts/` | `fetch-models.sh`; `bench_voice.py` (your voice tests), `bench_fallbacks.py` (decision paths and models on `eval/`), `bench_chains.py` (chained commands), `bench_finding.py` (episodes and scenes from a description, timed), Phase 0 benchmarks |
 | `eval/` | `utterances.jsonl` (107 labelled sentences, the panel's tests), `commands.jsonl` (654, made by `build_commands.py`: every action, titles made of command words, numbers in every form, fillers, mishearings, non-commands), `chains.jsonl` (chained commands, ones that aren't, ones refused), `finding.jsonl` (episodes and scenes described, with the right answers) |
 | `tests/` | Offline unit tests |

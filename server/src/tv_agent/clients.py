@@ -66,7 +66,7 @@ PHONE_ROUTES = {
     ("GET", "/v1/shown"), ("POST", "/v1/shown/pick"),
     ("GET", "/v1/settings"), ("POST", "/v1/settings"),
     ("GET", "/v1/clients/me"), ("POST", "/v1/clients/me/forget"),
-    ("GET", "/v1/updates"), ("POST", "/v1/updates/check"),
+    ("GET", "/v1/updates"), ("POST", "/v1/updates/check"), ("GET", "/v1/quality"), ("POST", "/v1/quality/seen"),
 }
 APP_VERSION = re.compile(r"[0-9A-Za-z.+-]{1,32}")      # what a phone says its app is (X-App-Version)
 

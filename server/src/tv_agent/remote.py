@@ -29,6 +29,7 @@ from fastapi.responses import Response
 
 from . import actions as A
 from . import activity
+from . import quality
 from . import config as config_mod
 from . import stt as stt_mod
 from .agent import LIST_TTL, Shown
@@ -316,6 +317,30 @@ def routes(svc) -> APIRouter:
         return {"ok": out.ok, "say": out.say}
 
     # ---- activity ----
+
+    @r.get("/v1/quality")
+    async def quality_state(request: Request):
+        """How well the agent does (quality.py) over the last `days` (0: all), from `sources` (tv,phone,text…), the
+        nightly check's runs, and a regression it found that hasn't been seen: a phone asks now and then, and notifies
+        you of that."""
+        svc.check(request, lan=False)
+        q = request.query_params
+        try:
+            days = float(q.get("days", 7))
+        except ValueError:
+            raise HTTPException(422, "days: a number") from None
+        sources = {x for x in (q.get("sources") or "").split(",") if x} or None
+        rows = await asyncio.to_thread(activity.read)
+        since = time.time() - days * 86400 if days else None
+        return {"summary": quality.summary(quality.pick(rows, since, sources)), "runs": quality.runs(limit=10),
+                "alert": quality.alert()}
+
+    @r.post("/v1/quality/seen")
+    async def quality_seen(request: Request):
+        """The regression alert seen (the panel or a phone showed it)."""
+        svc.check(request, lan=False)
+        quality.seen()
+        return {"ok": True}
 
     @r.get("/v1/activity")
     async def activity_list(request: Request):

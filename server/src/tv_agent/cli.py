@@ -5,7 +5,8 @@
     tv-agent do '{"type":"open_app","app":"kodi"}' [--dry-run]   run one action
     tv-agent doctor                                             check the TV, models, secrets
     tv-agent eval [-v]                                          score the rules on eval/utterances.jsonl
-    tv-agent setup token|stremio|kodi|services                  one-time setup steps
+    tv-agent setup token|stremio|kodi|services|nightly          one-time setup steps
+    tv-agent quality nightly [--only voice,chains,finding]      the nightly check now (quality.py)
     tv-agent tv host|shell|install|pair                         the TV: find it, run a command, set up its app
     tv-agent secret agent_token                                 print one secret
 """
@@ -329,6 +330,25 @@ def _doctor() -> int:
     return 0 if ok else 1
 
 
+def _nightly(only: list[str]) -> int:
+    """The nightly check, with the agent's own speech to text (its hosted model, else this laptop's): exit 1 on a
+    regression."""
+    from . import quality
+    cfg = config.load()
+    stt_spec = cfg.stt_hosted_model if cfg.stt_where.startswith("hosted") else "local"
+    run = quality.nightly(stt_spec, only or None)
+    for name, b in run["benches"].items():
+        if b.get("error"):
+            print(f"{quality.BENCHES[name]}: {b['error']}")
+            continue
+        print(f"{quality.BENCHES[name]}: {b['right']}/{b['of']} right, {len(b['regressions'])} regressions, "
+              f"{len(b['fixes'])} fixed, ${b['cost']:.4f}, {b['seconds']} s")
+        for k in b["regressions"]:
+            print(f"  ✗ {k}")
+    print(f"cost ${run['cost']:.4f}")
+    return 1 if run["regressions"] else 0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="tv-agent", description="Voice decision agent for the living-room TV")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -346,10 +366,13 @@ def main(argv=None):
     sy.add_argument("text")
     sy.add_argument("--dry-run", action="store_true")
     s = sub.add_parser("setup", help="one-time setup steps")
-    s.add_argument("what", choices=["token", "stremio", "kodi", "services", "stt", "liquid", "openrouter"])
+    s.add_argument("what", choices=["token", "stremio", "kodi", "services", "nightly", "stt", "liquid", "openrouter"])
     s.add_argument("name", nargs="?", help="stt: the speech model to download (if needed) and use")
     s.add_argument("--rotate", action="store_true", help="token: replace it (then run `tv-agent tv pair`)")
     s.add_argument("--enable", action="store_true", help="services: also enable and start them")
+    q = sub.add_parser("quality", help="the nightly check: voice tests, sentences, episode and scene searches")
+    q.add_argument("what", choices=["nightly"])
+    q.add_argument("--only", default="", help="some of: voice, chains, finding")
     tv = sub.add_parser("tv", help="the TV over ADB: find it, run a command, install and pair its app")
     tv.add_argument("what", choices=["host", "shell", "install", "pair"])
     tv.add_argument("args", nargs=argparse.REMAINDER,
@@ -397,6 +420,13 @@ def main(argv=None):
         return 0
     if args.cmd == "tv":
         return _tv(args.what, args.args)
+    if args.cmd == "setup" and args.what == "nightly":
+        from .install import write_nightly
+        for path in write_nightly(getattr(args, "enable", False)):
+            print(f"wrote {path}")
+        return 0
+    if args.cmd == "quality":
+        return _nightly([x for x in args.only.split(",") if x])
     if args.cmd == "setup" and args.what == "stt":
         return _setup_stt(args.name)
     if args.cmd == "setup" and args.what in ("liquid", "openrouter"):
