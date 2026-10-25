@@ -15,6 +15,7 @@ label. Nothing is sent to the TV; the LLM and the hosted models are called (and 
 --no-learned  without the sentences taught in the panel (a taught recording otherwise matches its own sentence)
 --transcripts  reuse a saved run's transcripts (same --stt names): the decision steps alone, without speech to
               text's cost or its answers changing from one run to the next
+--recordings  only these voice tests (file names, comma-separated): the nightly check runs a case again with it
 --save, --compare  keep a run's results, or show the regressions and fixes since one (exits 1 on a regression).
               A bare file name is kept with the voice tests, out of the repo: the transcripts are yours.
 """
@@ -317,6 +318,7 @@ async def main() -> int:
     ap.add_argument("--save", help="keep this run's results (a bare name: with the voice tests)")
     ap.add_argument("--compare", help="show regressions and fixes since a saved run")
     ap.add_argument("--transcripts", help="reuse a saved run's transcripts: the decision steps only")
+    ap.add_argument("--recordings", help="only these voice tests (comma-separated file names)")
     args = ap.parse_args()
     cfg = config.load()
     specs = [s.strip() for s in args.stt.split(",") if s.strip()]
@@ -348,6 +350,9 @@ async def main() -> int:
                   + (f"; {already} already labelled" if already else "")
                   + (f"; not labelled: {', '.join(f'{v} {k}' for k, v in done.most_common())}" if done else ""))
         labels = V.load()
+        if args.recordings:
+            wanted = {r.strip() for r in args.recordings.split(",") if r.strip()}
+            labels = [lab for lab in labels if lab["recording"] in wanted]
     except ValueError as e:                              # a label file edited into something else
         print(e, file=sys.stderr)
         return 2

@@ -1,8 +1,10 @@
 """How fast a start gets to the player, and that it starts the right title: the title search racing the LLM's
 sound-alikes, d1 left out when the answer is certain, stream lookups started ahead, slow addons not waited for."""
 import asyncio
+import re
 import time
 import types
+from pathlib import Path
 
 import httpx
 
@@ -663,3 +665,12 @@ def test_a_link_check_for_the_player_reads_the_files_head_and_keeps_where_its_in
     assert link == "https://cdn.example/f.mkv" and sent == [f"bytes=0-{agent_mod.thumbs.HEAD - 1}"] * 2
     assert m.ranges(0) == [{"at": 17 + 4096, "bytes": agent_mod.thumbs.INDEX_GUESS},
                            {"at": 37, "bytes": agent_mod.thumbs.START_AHEAD}]
+
+
+def test_tv_agent_player_is_the_default_player(tmp_path, monkeypatch):
+    from tv_agent import config
+    monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.toml")
+    monkeypatch.setattr(config, "SECRETS_FILE", tmp_path / "secrets.toml")
+    assert config.Config().player == "tvplayer" and config.load().player == "tvplayer"     # no config file
+    example = (Path(__file__).resolve().parents[1] / "config.example.toml").read_text()
+    assert re.search(r'^player = "tvplayer"', example, re.M)

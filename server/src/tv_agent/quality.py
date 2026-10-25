@@ -7,7 +7,10 @@ summary()   per step (speech, deciding, the title, the episode, the scene, the s
             models' calls and cost; the cost per day; the commonest failures, each with an example.
 nightly()   runs scripts/bench_voice.py (the agent's own speech to text), bench_chains.py and bench_finding.py, nothing
             sent to the TV, compares each case with the baseline (the first run's, until one is accepted), and keeps
-            the run in quality/runs/. A regression leaves an alert (quality/alert.json) for the panel and the phones.
+            the run in quality/runs/. A case right before and wrong now is run again, twice at most: a regression
+            only when it's wrong every time, else "unsteady" (the models' answers vary from run to run). One that
+            couldn't be checked (the hosted speech model or a subtitle addon failing) is neither. A regression
+            leaves an alert (quality/alert.json) for the panel and the phones.
             `tv-agent quality nightly` runs it; the tv-agent-nightly timer every night.
 """
 import json
@@ -162,48 +165,85 @@ def summary(entries: list[dict]) -> dict:
 BENCHES = {"voice": "Voice tests", "chains": "Sentences and chains", "finding": "Episodes and scenes"}
 
 
+RECHECKS = 2          # a case that went wrong is run this many times more: a regression only if wrong every time
+
+
 def _cases(name: str, data) -> dict[str, dict]:
-    """A bench's results as case -> {"ok", "got", "cost"} (the voice tests by recording and speech model)."""
+    """A bench's results as case -> {"ok", "got", "cost"} (the voice tests by recording and speech model). "ok" is
+    None for a case that couldn't be checked: the hosted speech model failed, a subtitle addon's downloads failed."""
     out = {}
     if name == "voice":
         for rec, by in (data.get("results") or {}).items():
             for spec, r in by.items():
                 if isinstance(r, dict) and "ok" in r:
-                    out[f"{rec} ({spec})"] = {"ok": bool(r["ok"]), "got": r.get("transcript"),
+                    out[f"{rec} ({spec})"] = {"ok": None if r.get("error") else bool(r["ok"]),
+                                              "got": r.get("error") or r.get("transcript"),
                                               "cost": (r.get("cost") or 0) + (r.get("stt_cost") or 0)}
     elif name == "chains":
         for r in data.get("rows") or []:
             out[r["text"]] = {"ok": bool(r["ok"]), "got": r.get("got"), "cost": r.get("cost") or 0}
     else:
         for r in data if isinstance(data, list) else []:
-            if r.get("ok") is not None:
-                out[f"{r['row']}. {r.get('wanted', '')} ({r['run']})"] = {"ok": bool(r["ok"]), "got": r.get("got"),
-                                                                          "cost": r.get("cost") or 0}
+            if r.get("ok") is not None or r.get("unavailable"):
+                out[f"{r['row']}. {r.get('wanted', '')} ({r['run']})"] = {
+                    "ok": None if r.get("unavailable") else bool(r["ok"]),
+                    "got": r.get("unavailable") or r.get("got"), "cost": r.get("cost") or 0}
     return out
 
 
 def compare(base: dict[str, dict], now: dict[str, dict]) -> dict:
     common = set(base) & set(now)
-    return {"right": sum(c["ok"] for c in now.values()), "of": len(now),
-            "regressions": sorted(k for k in common if base[k]["ok"] and not now[k]["ok"]),
-            "fixes": sorted(k for k in common if not base[k]["ok"] and now[k]["ok"]),
-            "new": sorted(set(now) - set(base)), "cost": round(sum(c.get("cost") or 0 for c in now.values()), 5)}
+    return {"right": sum(c["ok"] is True for c in now.values()), "of": sum(c["ok"] is not None for c in now.values()),
+            "regressions": sorted(k for k in common if base[k]["ok"] is True and now[k]["ok"] is False),
+            "fixes": sorted(k for k in common if base[k]["ok"] is False and now[k]["ok"] is True),
+            "new": sorted(set(now) - set(base)),
+            "unavailable": sorted(k for k, c in now.items() if c["ok"] is None),
+            "cost": round(sum(c.get("cost") or 0 for c in now.values()), 5)}
 
 
-def _bench(name: str, stt: str, out: Path) -> tuple[object, float]:
-    """One bench run by the agent's own Python (its scripts' folder on the path): its saved results."""
+def _only(name: str, keys: list[str], out: Path) -> list[str]:
+    """The bench's arguments that run just these cases."""
+    if name == "voice":
+        return ["--recordings", ",".join(sorted({k.rsplit(" (", 1)[0] for k in keys}))]
+    if name == "chains":
+        texts = out.with_suffix(".texts.json")
+        texts.write_text(json.dumps(sorted(keys), ensure_ascii=False))
+        return ["--texts", str(texts)]
+    return ["--rows", ",".join(sorted({k.split(".", 1)[0] for k in keys}, key=int))]
+
+
+def _bench(name: str, stt: str, out: Path, only: list[str] | None = None) -> tuple[object, float]:
+    """One bench run by the agent's own Python (its scripts' folder on the path): its saved results. `only`: just
+    these cases."""
     python, t = sys.executable, time.monotonic()
     args = {"voice": ["bench_voice.py", "--stt", stt, "--save", str(out)],
             "chains": ["bench_chains.py", "--out", str(out)],
-            "finding": ["bench_finding.py", "--out", str(out)]}[name]
+            "finding": ["bench_finding.py", "--out", str(out)]}[name] + (_only(name, only, out) if only else [])
     env = {**os.environ, "PYTHONPATH": str(SCRIPTS.parent / "src")}
     subprocess.run([python, str(SCRIPTS / args[0]), *args[1:]], cwd=SCRIPTS.parent, env=env, timeout=3600,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return json.loads(out.read_text()), time.monotonic() - t
 
 
+def recheck(name: str, stt: str, flagged: list[str], raw: Path) -> tuple[list[str], list[str], float, float]:
+    """The cases that went wrong, run again (up to RECHECKS times, the ones still wrong each time): (wrong every
+    time, right in a run again: the model's answers or the speech model's transcripts vary), and the reruns' cost
+    and seconds. A case missing from a rerun stays wrong."""
+    still, cost, secs = list(flagged), 0.0, 0.0
+    for n in range(1, RECHECKS + 1):
+        if not still:
+            break
+        data, took = _bench(name, stt, raw.with_name(f"{raw.stem}-recheck{n}.json"), still)
+        again = _cases(name, data)
+        cost += sum(again.get(k, {}).get("cost") or 0 for k in still)
+        secs += took
+        still = [k for k in still if again.get(k, {"ok": False})["ok"] is False]
+    return still, [k for k in flagged if k not in still], round(cost, 5), secs
+
+
 def nightly(stt: str, only: list[str] | None = None, folder: Path | None = None) -> dict:
-    """The three benches against their baselines; the run kept in runs/<date>.json, an alert on a regression."""
+    """The three benches against their baselines, what went wrong run again before it's called a regression; the
+    run kept in runs/<date>.json, an alert on a regression."""
     folder = folder or DIR
     stamp = time.strftime("%Y-%m-%d-%H%M")
     for sub in (folder, folder / "runs", folder / "baselines"):     # the runs hold your transcripts: yours alone
@@ -214,15 +254,20 @@ def nightly(stt: str, only: list[str] | None = None, folder: Path | None = None)
         raw = folder / "runs" / f"{stamp}-{name}.json"
         try:
             data, secs = _bench(name, stt, raw)
+            now = _cases(name, data)
+            base_file = folder / "baselines" / f"{name}.json"
+            if not base_file.exists():
+                shutil.copy(raw, base_file)             # the first run is the baseline until one is accepted
+            base = _cases(name, json.loads(base_file.read_text()))
+            b = compare(base, now)
+            if b["regressions"]:
+                b["regressions"], b["unsteady"], more, took = recheck(name, stt, b["regressions"], raw)
+                b["cost"] = round(b["cost"] + more, 5)
+                secs += took
         except (OSError, ValueError, subprocess.SubprocessError) as e:
             run["benches"][name] = {"error": f"{type(e).__name__}: {e}"[:200]}
             continue
-        now = _cases(name, data)
-        base_file = folder / "baselines" / f"{name}.json"
-        if not base_file.exists():
-            shutil.copy(raw, base_file)                 # the first run is the baseline until one is accepted
-        base = _cases(name, json.loads(base_file.read_text()))
-        run["benches"][name] = {**compare(base, now), "seconds": round(secs), "raw": raw.name,
+        run["benches"][name] = {**b, "seconds": round(secs), "raw": raw.name,
                                 "baseline": time.strftime("%Y-%m-%d", time.localtime(base_file.stat().st_mtime))}
     run["cost"] = round(sum(b.get("cost") or 0 for b in run["benches"].values()), 5)
     run["regressions"] = sum(len(b.get("regressions") or []) for b in run["benches"].values())

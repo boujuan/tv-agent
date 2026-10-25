@@ -111,8 +111,9 @@ class Quality(QWidget):
         bl.addWidget(QLabel("<b>Nightly check</b>"))
         bl.addWidget(dim("Every night at 04:30 (tv-agent-nightly.timer): your voice tests through the agent's own "
                          "speech to text, the sentences and chains, the episode and scene searches, each case against "
-                         "the baseline. Nothing is sent to the TV; the models cost what the run shows. A regression "
-                         "notifies you here and on paired phones."))
+                         "the baseline. Nothing is sent to the TV; the models cost what the run shows. What went "
+                         "wrong is run twice more: a regression only when it's wrong every time, and it notifies you "
+                         "here and on paired phones."))
         self.runs = table(["Night", "Voice tests", "Sentences", "Episodes, scenes", "Regressions", "Fixed", "Cost"])
         self.runs.itemSelectionChanged.connect(self.show_run)
         bl.addWidget(self.runs)
@@ -206,8 +207,14 @@ class Quality(QWidget):
                          f"{b.get('seconds', 0)} s, against the baseline of {b.get('baseline', '?')}")
             for k in b.get("regressions") or []:
                 parts.append(f"&nbsp;&nbsp;<span style='color:{RED}'>✗ now wrong: {html.escape(k)}</span>")
+            for k in b.get("unsteady") or []:
+                parts.append(f"&nbsp;&nbsp;<span style='color:{AMBER}'>~ wrong, then right when run again (the "
+                             f"models vary): {html.escape(k)}</span>")
             for k in b.get("fixes") or []:
                 parts.append(f"&nbsp;&nbsp;<span style='color:{GREEN}'>✓ now right: {html.escape(k)}</span>")
+            if b.get("unavailable"):
+                parts.append(f"&nbsp;&nbsp;<span style='color:gray'>{len(b['unavailable'])} couldn't be checked (a "
+                             f"service failing: the speech model, a subtitle addon)</span>")
             if b.get("new"):
                 parts.append(f"&nbsp;&nbsp;<span style='color:{AMBER}'>{len(b['new'])} new cases</span>")
         self.run_text.setText("<br>".join(parts))

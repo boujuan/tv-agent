@@ -1,4 +1,4 @@
-"""Chains, read: "pon el capítulo 5 de la segunda temporada de The Bear y vete al minuto 12" is a play and then a
+"""Chains, read: "pon el capítulo 5 de la segunda temporada de X y vete al minuto 12" is a play and then a
 jump, one after the other (actions.Sequence, run by tv_agent/chain.py). What may be chained is fixed
 (actions.chain_problem): one step that plays a title or an episode, then one or two that act on what it plays (a
 jump to a time, a scene or past the intro, the audio or subtitle language, the volume, a pause), in the order said.
@@ -72,14 +72,18 @@ ENDINGS = [
 
 
 # "subtítulos en inglés", "audio in Spanish": the language belongs to the words before it, not to a play
-OF_TRACKS = re.compile(rf"\b(?:{_SUBS}|audio|sound|sonido|voices|voces)$")
+OF_TRACKS = re.compile(rf"\b(?:{_SUBS}|audio|sound|sonido|voices|voces|language|idioma|doblaje|dubbing)$")
+# A word of acknowledgement or a filler, then a comma, before the command ("vale, ¿puedes…?", "ok, play…"): not a
+# first part of a chain
+LEAD = re.compile(r"^(?:(?:vale|ok|okay|bueno|venga|oye|pues|a ver|eh|um|uh|erm|hmm|hey|so|well|alright|all right)"
+                  r"\s*,\s*)+")
 
 
 def clean(text: str) -> str:
     """The sentence as said: lower case, no quotes, no final full stop. It's cut before the clean-up, which then reads
     each part on its own: its fixes match at a part's start ("vete al minuto 12" is a jump only there)."""
     t = re.sub(r"[“”\"!?¿¡]", "", text.lower().strip())
-    return re.sub(r"\s+", " ", t).rstrip(". ").strip()
+    return LEAD.sub("", re.sub(r"\s+", " ", t).rstrip(". ").strip())
 
 
 def cuts(t: str) -> list[list[str]]:
@@ -101,8 +105,8 @@ def cuts(t: str) -> list[list[str]]:
 
 def endings(part: str) -> tuple[str, list[str]]:
     """A play part without the endings that ride on it, and those endings as commands, in the order said (three at
-    most, one more than a chain takes, so a title doesn't keep the third): "pon oppenheimer desde el principio con
-    subtítulos en español" -> ("pon oppenheimer desde el principio", ["subtítulos en español"])."""
+    most, one more than a chain takes, so a title doesn't keep the third): "pon x desde el principio con
+    subtítulos en español" -> ("pon x desde el principio", ["subtítulos en español"])."""
     found: list[str] = []
     for _ in range(3):
         for rx, command in ENDINGS:
@@ -163,9 +167,9 @@ volume_down, volume_set, mute, unmute or pause. Keep each step's own fields in i
 part of the play). A moment described in words ("when…", "the part where…") is find_scene, never seek_to: seek_to
 only for a time that was said. Never add a step that wasn't asked for.
 
-"pon el capítulo 5 de la segunda temporada de the bear y vete al minuto 12" -> {"steps":[{"action":"play_title","title":"The Bear","season":2,"episode":5},{"action":"seek_to","seconds":720}]}
-"put inception on and take me to when he spins the top" -> {"steps":[{"action":"play_title","title":"Inception"},{"action":"find_scene","query":"Cobb spins the top"}]}
-"quiero ver amélie en versión original con subtítulos en inglés" -> {"steps":[{"action":"play_title","title":"Amélie"},{"action":"audio","language":"original"},{"action":"subtitles","language":"english"}]}
+"pon el capítulo 5 de la segunda temporada de X y vete al minuto 12" -> {"steps":[{"action":"play_title","title":"X","season":2,"episode":5},{"action":"seek_to","seconds":720}]}
+"put X on and take me to when he spins the top" -> {"steps":[{"action":"play_title","title":"X"},{"action":"find_scene","query":"he spins the top"}]}
+"quiero ver X en versión original con subtítulos en inglés" -> {"steps":[{"action":"play_title","title":"X"},{"action":"audio","language":"original"},{"action":"subtitles","language":"english"}]}
 "turn it up a bit" -> {"steps":[{"action":"volume_up"}]}""")
 
 
@@ -247,7 +251,7 @@ def sounds_chained(t: str) -> bool:
 
 
 def has_steps(title: str) -> bool:
-    """Whether a title the rules took has words of a step that can follow in it ("the bear y vete al minutes 12"):
+    """Whether a title the rules took has words of a step that can follow in it ("x y vete al minutes 12"):
     then the rules' reading isn't trusted for a sentence that sounds chained."""
     return any(re.search(rx, title) for key, rx in SAID.items() if key not in ("find_scene", "audio")) or bool(
         JOIN.search(title))

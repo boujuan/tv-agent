@@ -4,13 +4,13 @@ steps (router.py; its place and on/off in the panel's Decisions tab). Only with 
 reasoning effort for models that reason ("" sends nothing, for models that take no reasoning setting).
 
 It gets what you said, what's playing, the app names and up to 10 of your library's titles that sound like what you
-said, so a misheard name can still be matched ("the bare" -> The Bear), and a title can come from its own knowledge
-("the one with the robbers in Dalí masks" -> La casa de papel). The fastest provider that enforces the JSON shape
+said, so a misheard name can still be matched, and a title can come from its own knowledge (a film or series
+described instead of named). The fastest provider that enforces the JSON shape
 answers (`llm_private` keeps to providers that keep no data). Its answer is checked like everything else: numbers in
 range, an app from the list, one of the agent's own actions; a title it names still has to be found by the title
-search before anything plays. `titles()` asks it which real titles a name the search can't find sounds like
-("ceberance": Severance); the agent keeps the one that sounds closest. `recommend()` suggests real titles for a
-request ("something like Dark", "a short comedy"), with your recent viewing as taste; the agent checks each one with
+search before anything plays. `titles()` asks it which real titles a name the search can't find sounds like; the
+agent keeps the one that sounds closest. `recommend()` suggests real titles for a request ("something like X", "a
+short comedy"), with your recent viewing as taste; the agent checks each one with
 the title search before it lists it.
 """
 import json
@@ -72,37 +72,38 @@ stop_after_this, turn_off_after_this (when what's playing ends) · stop_in, turn
 cancel_timer · binge_on, binge_off (the next episode starts by itself)
 library_add, library_remove, mark_watched, mark_unwatched: title, season, episode, or all null for what's on
 show_recent (a list of what was being watched, not finished yet), show_new ("what's new"), show_movies (new films),
-help ("what can you do") · recommend: query (they want suggestions: "something like Dark", "a short comedy", "what
+help ("what can you do") · recommend: query (they want suggestions: "something like X", "a short comedy", "what
 should we watch?"; the query is their request, in their words)
-find_scene: query (a moment of what's playing described in words, in English: "go to the part where Mr. Burns
-gets shot"). Going to an episode ("ve al episodio de … donde", "¿puedes ir al episodio en el que…?") is play_title.
+find_scene: query (a moment of what's playing described in words, in English: "go to the part where he gets
+shot"). Going to an episode ("ve al episodio de … donde", "¿puedes ir al episodio en el que…?") is play_title.
 pick: number (an item of the list on screen) · wrong ("that's wrong": the last command was misunderstood)
 cancel ("cancel", "never mind": stop what was asked a moment ago, still on its way; not playback itself)
 
-Titles: copy one exactly from "candidates" when it's what was said, even misheard ("the bare" is "The Bear"). When
-a film or series is described instead of named, give its real title. Otherwise copy the title as said.
+Titles: copy one exactly from "candidates" when it's what was said, even misheard (a word heard as another that
+sounds alike, words split or run together). When a film or series is described instead of named, give its real
+title. Otherwise copy the title as said. In the examples, X and Y stand for any title, name or event.
 Numbers as digits ("season three" -> 3, "a couple of minutes" -> 120 seconds). Languages in English ("spanish").
 
 Examples:
-"put that bear show on, third season" -> {"action":"play_title","title":"The Bear","season":3}
-"the series with the chemistry teacher who cooks meth" -> {"action":"play_title","title":"Breaking Bad"}
-"pon community, el capítulo del Dungeons and Dragons" -> {"action":"play_title","title":"Community","episode_name":"Dungeons and Dragons"}
-"the simpsons episode where mr burns gets shot" -> {"action":"play_title","title":"The Simpsons","episode_name":"Mr. Burns gets shot"}
+"put that X show on, third season" -> {"action":"play_title","title":"X","season":3}
+"pon X, el capítulo del Y" -> {"action":"play_title","title":"X","episode_name":"Y"}
+"the X episode where Y gets shot" -> {"action":"play_title","title":"X","episode_name":"Y gets shot"}
 "can you make it so I can actually hear them" -> {"action":"volume_up"}
 "I'm off to bed, switch it all off when this one's done" -> {"action":"turn_off_after_this"}
 "take me to the halfway point" -> {"action":"seek_percent","number":50}
 "beach mode oh" -> {"action":"binge_on"}
 "sops off" -> {"action":"subtitles_off"}
 "de ahora en adelante quiero todo sin subtítulos" -> {"action":"default_subtitles","language":"off"}
-"is ibai live?" -> {"action":"twitch","query":"ibai"}
-"what episode of severance am I on" -> {"action":"info","title":"Severance"}
+"is X live on twitch?" -> {"action":"twitch","query":"X"}
+"what episode of X am I on" -> {"action":"info","title":"X"}
 "este ya lo he visto" -> {"action":"mark_watched"}
 "empieza el capítulo otra vez" -> {"action":"start_over"}
 "go back to what I was watching yesterday" -> {"action":"continue_watching"}
+"what can I say?" -> {"action":"help"}
 "the second thing on the list" -> {"action":"pick","number":2}
 "algo de miedo que no sea muy largo" -> {"action":"recommend","query":"algo de miedo que no sea muy largo"}
-"vete al minuto en el que mr burns le dispara" -> {"action":"find_scene","query":"Mr. Burns gets shot"}
-"¿puedes ir al episodio de friends en el que ross se casa?" -> {"action":"play_title","title":"Friends","episode_name":"Ross gets married"}
+"vete al minuto en el que le disparan" -> {"action":"find_scene","query":"he gets shot"}
+"¿puedes ir al episodio de X en el que Y se casa?" -> {"action":"play_title","title":"X","episode_name":"Y gets married"}
 "what was the weather like yesterday" -> {"action":"none"}"""
 
 
@@ -116,8 +117,9 @@ TITLE_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["t
                 "properties": {"titles": {"type": "array", "items": {"type": "string"}, "maxItems": 3}}}
 TITLE_SYSTEM = """Someone asked their TV for a film or series by voice. Speech-to-text wrote its name down wrong, as
 "spelled", and a title search found nothing by that name. Say it out loud: which real films or series sound like
-that? Give up to 3 of their real titles (English or original name, as on IMDb), the closest-sounding first. Examples:
-"ceberance" -> Severance, "the bare" -> The Bear, "stranger tings" -> Stranger Things. "watched" lists titles they
+that? Give up to 3 of their real titles (English or original name, as on IMDb), the closest-sounding first. Names
+are misheard the way speech-to-text mishears: a sound taken for a near one (b/v, th/d/t, an ending dropped), words
+split or run together, a title in English written the way a Spanish speaker says it. "watched" lists titles they
 have watched; use one only when it sounds like "spelled". Answer only with the JSON object; an empty list when nothing
 sounds like it."""
 
@@ -131,7 +133,7 @@ REC_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["max
                                  "why": {"type": "string"}}}}}}
 REC_SYSTEM = """Someone asked their TV, by voice, for something to watch ("request", from speech-to-text, maybe in
 Spanish). Suggest 10 real films or series that fit it, the best fit first. When they name a title ("something like
-Dark"), suggest similar ones, not that one. When they describe what they want ("a short comedy", "algo de miedo de los
+X"), suggest similar ones, not that one. When they describe what they want ("a short comedy", "algo de miedo de los
 80"), every suggestion must meet every condition they give: genre, length, decade, country, language, mood, film or
 series ("kind", when given). "taste" lists what they watched lately, newest first: lean towards it when the request
 leaves room. Leave out what's in "seen". Give each title as on IMDb (original or English name), its year of release,
@@ -208,7 +210,7 @@ class Llm:
         return answer if isinstance(answer, dict) else None
 
     async def titles(self, heard: str, sentence: str, library: list[str]) -> list[str]:
-        """Real titles a misheard one may be ("ceberance" -> ["Severance", …]), most likely first."""
+        """Real titles a misheard one may be (a name misheard -> the real titles it sounds like), most likely first."""
         try:
             data = await self._post({
                 "response_format": {"type": "json_schema",

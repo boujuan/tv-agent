@@ -76,7 +76,7 @@ class Config:
     probe_streams: bool = True              # turn off while the TV uses Mullvad (debrid one-IP rules)
     # "tvplayer" (TV Agent Player: Media3, driven over its own connection), "kodi" (full remote control) or "just"
     # (Just Player)
-    player: str = "kodi"
+    player: str = "tvplayer"
     # The tracks a start plays (ISO 639-2 codes, as Kodi reports them; languages.py). Titles made in
     # native_language play in it; everything else in audio_language ("original": the language it was made in) when
     # the file has it, else its own default, and streams with it come first. Subtitles in your order, shown per

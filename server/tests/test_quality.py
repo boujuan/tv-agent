@@ -1,6 +1,7 @@
 """The Quality numbers (quality.py) from commands' traces, the nightly check against its baselines, and a command of
 the history kept as a test (voicetests.keep_command, the panel's “This was right / wrong”)."""
 import json
+from pathlib import Path
 
 from tv_agent import quality as Q
 from tv_agent import stt
@@ -61,9 +62,10 @@ def test_nightly_compares_with_the_baseline_and_alerts_only_on_a_regression(tmp_
     results = {"chains": {"rows": [{"text": "pause", "ok": True, "cost": 0.0},
                                    {"text": "play dune then go to 1:00", "ok": False, "cost": 0.01}]}}
 
-    def bench(name, spec, out):
-        out.write_text(json.dumps(results[name]))
-        return results[name], 1.0
+    def bench(name, spec, out, only=None):
+        got = {"rows": [r for r in results[name]["rows"] if only is None or r["text"] in only]}
+        out.write_text(json.dumps(got))
+        return got, 1.0
     monkeypatch.setattr(Q, "_bench", bench)
     monkeypatch.setattr(Q.time, "strftime", lambda f, *a: "2026-10-24-0430" if f == "%Y-%m-%d-%H%M" else "2026-10-24")
     first = Q.nightly("local", ["chains"], tmp_path)
@@ -78,7 +80,7 @@ def test_nightly_compares_with_the_baseline_and_alerts_only_on_a_regression(tmp_
     run = Q.nightly("local", ["chains"], tmp_path)
     b = run["benches"]["chains"]
     assert (b["regressions"], b["fixes"], b["new"]) == (["pause"], ["play dune then go to 1:00"], ["new one"])
-    assert run["regressions"] == 1 and run["cost"] == 0.01
+    assert b["unsteady"] == [] and run["regressions"] == 1 and run["cost"] == 0.01     # wrong in both reruns too
     assert Q.alert(tmp_path)["run"] == "2026-10-25-0430.json"
     assert [r["file"] for r in Q.runs(tmp_path)][0] == "2026-10-25-0430.json"
     Q.seen(tmp_path)
@@ -88,8 +90,46 @@ def test_nightly_compares_with_the_baseline_and_alerts_only_on_a_regression(tmp_
     assert again["regressions"] == 0 and again["benches"]["chains"]["new"] == []
 
 
+def test_a_case_right_again_when_rerun_is_unsteady_not_a_regression(tmp_path, monkeypatch):
+    runs = iter([[True, True], [False, True], [False], [True]])    # baseline, tonight, then its two reruns
+
+    def bench(name, spec, out, only=None):
+        oks = next(runs)
+        texts = only or ["pause", "stop"]
+        got = {"rows": [{"text": t, "ok": ok, "cost": 0.001} for t, ok in zip(texts, oks)]}
+        out.write_text(json.dumps(got))
+        return got, 1.0
+    monkeypatch.setattr(Q, "_bench", bench)
+    monkeypatch.setattr(Q.time, "strftime", lambda f, *a: "2026-10-24-0430" if f == "%Y-%m-%d-%H%M" else "2026-10-24")
+    Q.nightly("local", ["chains"], tmp_path)
+    monkeypatch.setattr(Q.time, "strftime", lambda f, *a: "2026-10-25-0430" if f == "%Y-%m-%d-%H%M" else "2026-10-25")
+    run = Q.nightly("local", ["chains"], tmp_path)
+    b = run["benches"]["chains"]
+    assert b["regressions"] == [] and b["unsteady"] == ["pause"] and run["regressions"] == 0
+    assert Q.alert(tmp_path) is None and b["cost"] == 0.004            # the reruns' cost counted
+    assert (tmp_path / "runs" / "2026-10-25-0430-chains-recheck2.json").exists()
+
+
+def test_what_couldnt_be_checked_is_neither_right_nor_a_regression():
+    base = Q._cases("finding", [{"row": 3, "run": "cold", "wanted": "x", "ok": True, "got": "100"}])
+    now = Q._cases("finding", [{"row": 3, "run": "cold", "wanted": "x", "ok": None, "got": "none",
+                                "unavailable": "couldn't be checked: subtitles offered, but the downloads failed"}])
+    b = Q.compare(base, now)
+    assert (b["regressions"], b["unavailable"], b["right"], b["of"]) == ([], ["3. x (cold)"], 0, 0)
+    voice = Q._cases("voice", {"results": {"a.wav": {"m": {"ok": False, "error": "ReadTimeout", "transcript": ""}}}})
+    assert voice["a.wav (m)"]["ok"] is None
+
+
+def test_a_rerun_runs_only_the_flagged_cases(tmp_path):
+    out = tmp_path / "x-chains.json"
+    assert Q._only("voice", ["a.wav (m)", "b.wav (m)", "a.wav (n)"], out) == ["--recordings", "a.wav,b.wav"]
+    assert Q._only("finding", ["15. walt (cold)", "3. x (warm)", "15. walt (warm)"], out) == ["--rows", "3,15"]
+    args = Q._only("chains", ["pause, then stop"], out)
+    assert args[0] == "--texts" and json.loads(Path(args[1]).read_text()) == ["pause, then stop"]
+
+
 def test_a_bench_that_fails_is_shown_not_compared(tmp_path, monkeypatch):
-    def broken(name, spec, out):
+    def broken(name, spec, out, only=None):
         raise ValueError("no output")
     monkeypatch.setattr(Q, "_bench", broken)
     run = Q.nightly("local", ["finding"], tmp_path)

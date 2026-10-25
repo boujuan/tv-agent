@@ -63,6 +63,8 @@ databases agreeing). Rules and coverage: [research §2.6](../docs/research-2026-
 In Spanish too, with the multilingual speech model (`tv-agent setup stt parakeet-v3`): "pausa", "siguiente
 capítulo", "pon la casa de papel temporada dos capítulo tres", "sube el volumen", "¿qué hay de nuevo?", "salta la
 intro", "eso está mal". A clean-up layer turns the Spanish into the English the rules know; titles stay as said.
+A request asked politely is the command itself: "¿puedes poner…?", "¿me pones…?", "¿podrías ir al minuto 20?", "¿me
+bajas el volumen?", "¿puedes cerrarlo?" ("close it", "ciérralo": stop).
 
 Anything it doesn't understand shows "Didn't get that: …" and does nothing. While the pill listens, the volume
 is halved (Kodi's own volume when Kodi plays, else the TV's) and comes back afterwards; nothing is paused.
@@ -134,7 +136,10 @@ other (`scripts/bench_voice.py --seed`, below).
 `finding.py`. Nothing other than what you asked for plays without asking: when it isn't clear, a list to pick from
 ("number 2"; "yes" or "sí" for the first).
 
-**An episode** by its name ("Advanced Dungeons & Dragons") is matched at once. By what happens in it:
+**An episode** by its name ("Advanced Dungeons & Dragons") is matched at once. Described after the show's name ("play
+‹show›, the one where…", "‹show› episode where…", "the episode of ‹show› where…", "pon ‹show›, el capítulo donde…",
+"¿puedes poner el episodio de ‹show› en el que…?"), the rules take it at once: the show's name goes to the title
+search and the rest to this search, never one title made of both. By what happens in it:
 
 1. Each episode's plot: Cinemeta's line, TVmaze's summary and English Wikipedia's ("List of … episodes" and each
    season's page, which tell the side plots too), kept a week in `~/.local/share/tv-agent/finding/plots/`, and
@@ -154,8 +159,12 @@ other (`scripts/bench_voice.py --seed`, below).
    what happens), then the other language. Kept on disk (`finding/subs/`) and fetched ahead from every addon when a
    title starts; a search doesn't wait for slow addons (OpenSubtitles PRO answers in 6-9 s): what the fast ones
    (SubSense, ~0.5 s) give is used, and the rest is there next time.
-3. The words to look for, in both languages and the show's own names (Dune's worm is Shai-Hulud); the passages that
-   hold the most of them (your own words count more) go to the LLM: about 200 lines instead of 1,700.
+3. The words to look for, in both languages and the show's own names for things (a nickname, what the characters
+   call a creature or a place); the passages that hold the most of them (your own words count more) go to the LLM:
+   about 200 lines instead of 1,700. Each reaches further back than forward (10 lines before a line with the words,
+   6 after: a moment often comes just before the lines that react to it or talk about it), and a gap of a few lines
+   between two passages is sent too. The line it's placed by is said before the moment or as it happens, never one
+   that explains it afterwards.
 4. The LLM is asked twice at once and quotes the line it places the moment by; the agent finds that line in the
    subtitles (the model's own arithmetic was once 7 hours off), and it must be among the passages with your words.
    Both answers at the same place: the jump, 3 s before the line, after the line shows on the TV in your language
@@ -179,7 +188,7 @@ plots of what you're watching are kept, so a real request is usually the warm on
 
 ## Player: TV Agent Player, Kodi or Just Player
 
-`player = "tvplayer"`, `"kodi"` (the default) or `"just"` in `~/.config/tv-agent/config.toml` (or the panel's
+`player = "tvplayer"` (the default), `"kodi"` or `"just"` in `~/.config/tv-agent/config.toml` (or the panel's
 Settings). Whichever it is, it's brought up while the stream is still being looked up.
 
 **TV Agent Player** ([boujuan/tv-agent-player](https://github.com/boujuan/tv-agent-player)) is a Media3 player
@@ -330,7 +339,7 @@ save your own), editable in the panel's **Decisions** tab and used at once, with
 
    A step that can't be reached passes to the next. When no model answered (off or unreachable), what's left is
    treated as the d1 tab's "when no model answers" intent (a title to play, or nothing).
-3. **Chains** ("play Severance episode 2 and go to the middle"), before the steps: the sentence cut at its joins,
+3. **Chains** ("play ‹title› episode 2 and go to the middle"), before the steps: the sentence cut at its joins,
    every part after the first a command the rules know, the first part through the steps; else, when it sounds
    like one, the LLM's steps, checked. See [Chains](#chains-a-play-and-what-follows).
 4. **Apps and hooks:** the only apps the agent may start, the names you can call them, and which app gets YouTube,
@@ -338,6 +347,9 @@ save your own), editable in the panel's **Decisions** tab and used at once, with
 
 Saving checks everything first (regexes compile, actions and fields exist, hooks point at real apps) and keeps the
 current rules if anything's wrong; a hand-edited `rules.json` is picked up on the next command the same way.
+The rules and the models' prompts are general: none names a title, a show, a character or an episode (their examples
+say X, ‹title›), so a fix for one command is a fix for every command said that way; real titles are only test data
+(`eval/`, your voice tests).
 A `rules.json` saved before rules version 2 keeps working (its broad `transport` and `volume` intents are still
 understood) but doesn't get the new phrases, patterns and intents: in the panel, **Reset to defaults**, then redo
 your own changes.
@@ -375,16 +387,18 @@ scripts/fetch-models.sh                     # llama.cpp b11804 (Vulkan) + d1-3B 
 uv sync --extra mcp --group dev             # Python 3.13 environment in .venv
 .venv/bin/tv-agent setup token              # the token the TV app sends
 .venv/bin/tv-agent setup stremio            # prints a link; approve it where you're signed in to Stremio
-# On the TV: Kodi > Settings > Services > Control > Allow remote control via HTTP (8080, user kodi, a password)
-.venv/bin/tv-agent setup kodi               # asks for that password, checks it with Kodi, saves it
 .venv/bin/tv-agent setup services --enable  # writes ~/.config/systemd/user/{llama-d1,tv-agent}.service for this copy
 ../android/build-and-install.sh             # the TV app: install, microphone permission, pairing
+.venv/bin/tv-agent tv install tv-agent-player-<version>.apk   # TV Agent Player, the default player: install, pairing
 .venv/bin/tv-agent doctor                   # all "ok"
 ```
 
 Optional:
 
 ```bash
+# Kodi as the player instead (player = "kodi"): on the TV, Kodi > Settings > Services > Control > Allow remote
+# control via HTTP (8080, user kodi, a password); then this asks for that password, checks it with Kodi, saves it
+.venv/bin/tv-agent setup kodi
 .venv/bin/tv-agent setup stt                # the speech models; `setup stt parakeet-v3` downloads (487 MB) and uses
                                             # the multilingual one (Spanish commands), checked against its SHA-256
 op read "op://Personal/<item>/credential" | .venv/bin/tv-agent setup liquid      # Liquid's hosted d1
@@ -488,7 +502,11 @@ example in Decisions.
 Every night at 04:30 (`tv-agent-nightly.timer`, `tv-agent setup nightly --enable`; missed nights run at the next
 start) `tv-agent quality nightly` runs `bench_voice.py` (your voice tests through the agent's own speech to text),
 `bench_chains.py` and `bench_finding.py` with your setup, nothing sent to the TV, and compares each case with its
-baseline (the first run's, until a run is accepted as the baseline after a change made on purpose). The runs stay in
+baseline (the first run's, until a run is accepted as the baseline after a change made on purpose). A case that was
+right and is wrong now is run again, twice at most: it's a regression only when it's wrong every time, else it's
+"unsteady" (the LLM's answers and a hosted speech model's transcripts vary from run to run; shown, not alerted). A
+case that couldn't be checked (the hosted speech model failing, a subtitle addon's downloads failing) counts neither
+way. The runs stay in
 `~/.local/share/tv-agent/quality/runs/` with what they cost (the LLM, d1 and a hosted speech model are called as in
 use: $0.10 and 3 minutes for 207 voice tests, 29 sentences and 24 searches). The folder is yours alone (mode 700). A
 regression leaves `quality/alert.json`: the panel notifies you, and a paired phone

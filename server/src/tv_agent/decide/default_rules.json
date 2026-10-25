@@ -36,14 +36,89 @@
         "note": "Spanish: “oye”, “venga”, “a ver” (and hesitations) before a command"
       },
       {
+        "from": "^(?:(?:me|nos) )?(?:puedes|podr[ií]as|pod[eé]is|podr[ií]ais|puede|podr[ií]a|quieres|querr[ií]as)\\s+(?:(?:me|nos) )?(?=(?:poner|ponerme|ponernos|ir|irme|quitar|quitarme|subir|bajar|saltar|saltarte|pasar|pasarte|abrir|cambiar|buscar|seguir|parar|volver|empezar|mostrar|mostrarme|ense[nñ]ar|ense[nñ]arme|activar|desactivar|reproducir|apagar|encender|silenciar|repetir|decir|decirme|cerrar|cerrarlo|cerrarla)\\b)",
+        "to": "",
+        "note": "Spanish: a request asked politely (“¿puedes poner…?”, “¿me podrías quitar…?”) is the command itself"
+      },
+      {
+        "from": "^(?:pon(?:er|erme|ernos)|(?:(?:me|nos) )pon(?:es|[eé]is))\\b",
+        "to": "pon",
+        "note": "Spanish: “poner…” after a polite request, “¿me pones…?”: pon"
+      },
+      {
+        "from": "^(?:ir|irme|irnos|(?:(?:me|nos) )?vas|(?:(?:me|nos) )?llevas)(?= a\\b| al\\b)",
+        "to": "ve",
+        "note": "Spanish: “ir al minuto…” after a polite request, “¿me llevas al…?”: ve"
+      },
+      {
+        "from": "^(?:(?:me|nos) )?((?:quit|baj|salt|pas|cambi|busc|activ|desactiv|par|apag|silenci)a)(?:r(?:me|nos|te|lo|la|los|las)?|s)\\b",
+        "to": "\\1",
+        "note": "Spanish: “quitar los subtítulos”, “¿me bajas el volumen?”: quita, baja"
+      },
+      {
+        "from": "^(?:(?:me|nos) )?(?:subir|subes)\\b",
+        "to": "sube",
+        "note": "Spanish: “¿me subes el volumen?”: sube"
+      },
+      {
+        "from": "^(?:(?:me|nos) )?(?:abrir|abres)\\b",
+        "to": "abre",
+        "note": "Spanish: “¿me abres YouTube?”: abre"
+      },
+      {
+        "from": "^(?:(?:me|nos) )?(?:seguir|sigues)\\b",
+        "to": "sigue",
+        "note": "Spanish: “¿puedes seguir viendo…?”: sigue"
+      },
+      {
+        "from": "^(?:(?:me|nos) )?(?:volver|vuelves)\\b",
+        "to": "vuelve",
+        "note": "Spanish: “¿puedes volver al principio?”: vuelve"
+      },
+      {
+        "from": "^(?:(?:me|nos) )?(?:empezar|empiezas)\\b",
+        "to": "empieza",
+        "note": "Spanish: “¿puedes empezar el capítulo otra vez?”: empieza"
+      },
+      {
+        "from": "^(?:(?:me|nos) )?(?:mostrar(?:me|nos)?|muestras|ense[nñ]ar(?:me|nos)?|ense[nñ]as)\\b",
+        "to": "muéstrame",
+        "note": "Spanish: “¿me enseñas…?”, “¿puedes mostrarme…?”: muéstrame"
+      },
+      {
+        "from": "^(?:(?:me|nos) )?(?:reproducir|reproduces)\\b",
+        "to": "reproduce",
+        "note": "Spanish: “¿puedes reproducir…?”: reproduce"
+      },
+      {
+        "from": "^(?:(?:me|nos) )?(?:encender|enciendes)\\b",
+        "to": "enciende",
+        "note": "Spanish: “¿puedes encender los subtítulos?”: enciende"
+      },
+      {
+        "from": "^(?:(?:me|nos) )?(?:repetir|repites)\\b",
+        "to": "repite",
+        "note": "Spanish: “¿puedes repetir eso?”: repite"
+      },
+      {
+        "from": "^(?:decir(?:me|nos)|(?:(?:me|nos) )dices)\\b",
+        "to": "dime",
+        "note": "Spanish: “¿me dices qué estoy viendo?”: dime"
+      },
+      {
+        "from": "^(?:(?:me|nos) )?(?:cerrar|cierras)(lo|la)?\\b",
+        "to": "cierra\\1",
+        "note": "Spanish: “¿puedes cerrarlo?”, “¿me cierras el vídeo?”: ciérralo, cierra"
+      },
+      {
         "from": "^(?:pon|pong|ponga|pongan|pongo|pom|pung|paul)[,:.]?\\s+(?=\\S)",
         "to": "pon ",
-        "note": "Spanish: “pon” as the hosted model often hears it (“Paul Dune”, “Pong: Rebel Moon”), measured 2026-10-24"
+        "note": "Spanish: “pon” as the hosted model often hears it (“Pong:”, “Paul”, “Ponga” before a title), measured 2026-10-24"
       },
       {
         "from": "^(?:(?:okay |ok )?so|right|well|now|oh|yeah|and(?: then)?|then|let'?s)(?:\\s*,\\s*|\\s+(?=(?:play|put|watch|start|stream|open|launch|pause|stop|resume|continue|skip|go|jump|turn|switch|volume|mute|unmute|next|previous|what|show|set|add|mark|remove|subtitles|subs|louder|quieter|rewind|fast|back|cancel|help|pon|ponme|abre|quita|sube|baja|salta|para|sigue|ve)\\b))",
         "to": "",
-        "note": "“so”, “right”, “now”, “let's”… before a command, not the start of a title (“Now You See Me”)"
+        "note": "“so”, “right”, “now”, “let's”… before a command, not the start of a title (one that begins with “now”)"
       },
       {
         "from": "^got to\\b",
@@ -213,7 +288,7 @@
       {
         "from": "^(?:por d[oó]nde (?:voy|vamos|iba|[ií]bamos)|en qu[eé] (?:cap[ií]tulo|episodio) (?:voy|vamos|iba|[ií]bamos)|cu[aá]l (?:es|fue) el [uú]ltimo (?:cap[ií]tulo|episodio) que (?:vi|he visto|vimos|hemos visto)) (?:de|en|con) ",
         "to": "where am i in ",
-        "note": "Spanish: ¿por dónde voy de Severance?"
+        "note": "Spanish: ¿por dónde voy de ‹título›?"
       },
       {
         "from": "^(?:qu[eé] estaba(?:mos)? viendo|qu[eé] (?:he|hemos) estado viendo)$",
@@ -253,12 +328,12 @@
       {
         "from": "^(?:a[nñ]ade|guarda) (.+?) (?:a|en) (?:mi |la )?(?:biblioteca|lista)$",
         "to": "add \\1 to my library",
-        "note": "Spanish: añade Severance a mi biblioteca"
+        "note": "Spanish: añade ‹título› a mi biblioteca"
       },
       {
         "from": "^(?:quita|borra|elimina) (.+?) de (?:mi |la )?(?:biblioteca|lista)$",
         "to": "remove \\1 from my library",
-        "note": "Spanish: quita Friends de mi biblioteca"
+        "note": "Spanish: quita ‹título› de mi biblioteca"
       },
       {
         "from": "^(?:a[nñ]ade|guarda|a[nñ][aá]delo|gu[aá]rdalo) (?:a|en) (?:mi |la )?(?:biblioteca|lista)$",
@@ -268,12 +343,12 @@
       {
         "from": "^marca (.+?) como no visto$",
         "to": "mark \\1 as unwatched",
-        "note": "Spanish: marca The Bear como no visto"
+        "note": "Spanish: marca ‹título› como no visto"
       },
       {
         "from": "^marca (.+?) como visto$",
         "to": "mark \\1 as watched",
-        "note": "Spanish: marca The Bear como visto"
+        "note": "Spanish: marca ‹título› como visto"
       },
       {
         "from": "^(?:m[aá]rcalo|marca|ponlo) como no visto$",
@@ -381,9 +456,9 @@
         "note": "Spanish: adelanta treinta segundos"
       },
       {
-        "from": "^(?:atrasa|retrocede|rebobina|vuelve atr[aá]s|echa atr[aá]s)\\b",
+        "from": "^(?:atrasa|retrocede|rebobina|vuelve atr[aá]s|echa atr[aá]s|(?:vuelve|vu[eé]lvete|ve|vete) (?:para )?atr[aá]s|vuelve(?= (?:\\S+ )?(?:\\S+ )?(?:segundos?|minutos?|seconds?|minutes?)$))\\b",
         "to": "go back",
-        "note": "Spanish: atrasa diez segundos"
+        "note": "Spanish: atrasa diez segundos, vuelve 10 segundos, vete atrás un minuto"
       },
       {
         "from": "\\bun poc?quito\\b|\\bun poco\\b",
@@ -438,12 +513,12 @@
       {
         "from": "^(?:pon(?:me|nos)?|mira|ver)?\\s*(?:a\\s+)?(.+?)\\s+en\\s+twitch$",
         "to": "\\1 on twitch",
-        "note": "Spanish: ibai en twitch"
+        "note": "Spanish: ‹canal› en twitch"
       },
       {
         "from": "^(?:ens[eé][nñ]ame|mu[eé]strame|abre) (.+?) en stremio$",
         "to": "show me \\1 in stremio",
-        "note": "Spanish: enséñame The Office en Stremio"
+        "note": "Spanish: enséñame ‹título› en Stremio"
       },
       {
         "from": "^(?:abre|abrir|ve a|vete a|cambia a)\\s+",
@@ -453,12 +528,12 @@
       {
         "from": "^(?:sigue|contin[uú]a)(?: viendo| con)\\s+",
         "to": "continue ",
-        "note": "Spanish: sigue viendo the bear"
+        "note": "Spanish: sigue viendo ‹título›"
       },
       {
         "from": "^(?:pon(?:me|nos)?|reproduce|quiero ver|queremos ver|vamos a ver|echa)\\s+",
         "to": "play ",
-        "note": "Spanish: pon la casa de papel"
+        "note": "Spanish: pon ‹título›"
       },
       {
         "from": "\\b(?:desde el principio|desde el inicio)\\b",
@@ -533,7 +608,7 @@
       {
         "from": "\\b(?:el|la) ((?:(?:primer[oa]?|segund[oa]|tercer[oa]?|cuart[oa]|quint[oa]|sext[oa]|s[eé]ptim[oa]|octav[oa]|noven[oa]|d[eé]cim[oa]) )?(?:season|episode)(?: \\w+)?(?: (?:season|episode) \\w+)?) de\\b",
         "to": "\\1 of",
-        "note": "Spanish: la temporada dos de The Bear, el primer capítulo de …"
+        "note": "Spanish: la temporada dos de ‹título›, el primer capítulo de …"
       },
       {
         "from": "^(play |go to )?(?:el|la) (?=(?:(?:primer[oa]?|segund[oa]|tercer[oa]?|cuart[oa]|quint[oa]|sext[oa]|s[eé]ptim[oa]|octav[oa]|noven[oa]|d[eé]cim[oa]) )?(?:season|episode)\\b)",
@@ -645,7 +720,30 @@
         "detén el vídeo",
         "deten el video",
         "quit",
-        "quit it"
+        "quit it",
+        "close it",
+        "close this",
+        "close that",
+        "close the video",
+        "close the movie",
+        "close the film",
+        "close the episode",
+        "close the show",
+        "close the player",
+        "close the app",
+        "ciérralo",
+        "cierralo",
+        "cierra esto",
+        "cierra eso",
+        "cierra el vídeo",
+        "cierra el video",
+        "cierra la película",
+        "cierra la peli",
+        "cierra el capítulo",
+        "cierra el episodio",
+        "cierra el reproductor",
+        "cierra la app",
+        "cierra la aplicación"
       ],
       "do": {
         "type": "transport",
@@ -838,7 +936,7 @@
       "do": {
         "type": "cancel"
       },
-      "note": "stops what's still to come of a chain (“play The Bear and go to minute 12”), or a start on its way"
+      "note": "stops what's still to come of a chain (“play ‹title› and go to minute 12”), or a start on its way"
     },
     {
       "id": "timer_cancel",
@@ -910,7 +1008,7 @@
         "type": "recommend",
         "query": "{q|text}"
       },
-      "note": "“something like Dark”, “a film like Inception”: not a title to play"
+      "note": "“something like ‹title›”, “a film like ‹title›”: not a title to play"
     },
     {
       "id": "recommend_kind",
@@ -930,17 +1028,17 @@
         "type": "recommend",
         "query": "{q|text}"
       },
-      "note": "Spanish: recomiéndame algo, ¿qué vemos?, algo como Dark, pon una peli de miedo"
+      "note": "Spanish: recomiéndame algo, ¿qué vemos?, algo como ‹título›, pon una peli de miedo"
     },
     {
       "id": "find_scene",
       "stage": "grammar",
-      "match": "^(?:go|jump|skip|take me|fast forward|rewind|go back|open|play|put on|show me|watch|salta|s[aá]ltate|ll[eé]vame|pon(?:lo)?|ve|vete|mu[eé]strame|ens[eé][nñ]ame)(?: back)?\\s+(?:to |a |al |hasta )?(?:the |la |el )?(?:minute|moment|part|bit|scene|point|place|time|minuto|momento|parte|escena|trozo|punto)s?\\s+(?:(?:in|of|de|del|en) (?:this|the|este|el|esta|la) (?:episode|movie|film|show|episodio|cap[ií]tulo|peli(?:cula)?|serie)\\s+)?(?:where|when|in which|that|en (?:el|la) (?:que|cual)|donde|cuando|del? que)\\b\\s*(?P<what>.+)$",
+      "match": "^(?:go|jump|skip|take me|fast forward|rewind|go back|open|play|put on|show me|watch|salta|s[aá]ltate|ll[eé]vame|pon(?:lo)?|ve|vete|mu[eé]strame|ens[eé][nñ]ame)(?: back)?\\s+(?:(?:to |a |al |hasta )?(?:the |la |el )?(?:minute|moment|part|bit|scene|point|place|time|minuto|momento|parte|escena|trozo|punto)s?(?:\\s*,\\s*|\\s+))+(?:(?:in|of|de|del|en) (?:this|the|este|el|esta|la) (?:episode|movie|film|show|episodio|cap[ií]tulo|peli(?:cula)?|serie)\\s+)?(?:where|when|in which|that|en (?:el|la) (?:que|cual)|donde|cuando|del? que)\\b\\s*(?P<what>.+)$",
       "do": {
         "type": "find_scene",
         "what": "{what|text!}"
       },
-      "note": "“go to the part where they kiss”, “play the moment where…”, “vete al minuto en el que…”: found in the subtitles"
+      "note": "“go to the part where they kiss”, “play the moment where…”, “vete al minuto en el que…”: found in the subtitles; “go to the place, to the minute where…”"
     },
     {
       "id": "find_scene_when",
@@ -950,7 +1048,7 @@
         "type": "find_scene",
         "what": "{what|text!}"
       },
-      "note": "“jump to when Paul rides the worm”, “salta a cuando se besan” (not “go to when I stopped”)"
+      "note": "“jump to when he rides the horse”, “salta a cuando se besan” (not “go to when I stopped”)"
     },
     {
       "id": "previous_episode",
@@ -1360,7 +1458,7 @@
         "type": "info",
         "title": "{what|continue}"
       },
-      "note": "“what's the last episode of Severance I watched?”"
+      "note": "“what's the last episode of ‹title› I watched?”"
     },
     {
       "id": "thats_wrong",
@@ -1438,6 +1536,30 @@
       },
       "match": "^(?P<n>one|two|three|four|five|six|seven|eight|nine|ten|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|[1-9]|1[0-9]|20)$",
       "note": "a number on its own; does nothing without a list on screen"
+    },
+    {
+      "id": "described_episode",
+      "stage": "grammar",
+      "match": "^(?:(?:play|watch|put on|start)\\s+)?(?!(?:skip|go|jump|take|open|show|find|search|look|what|which|who|is|are|was|tell|how|ve|vete|salta|busca|muestra|mu[eé]strame|ens[eé][nñ]ame|dime|cu[aá]l|qu[eé]|qui[eé]n|c[oó]mo)\\b)(?!(?:the|an?|that|this|el|la|ese|esa|este|esta|aquel)\\s+(?:one|episode|ep)\\b)(?P<what>(?:(?!\\b(?:where|when|in which|donde|cuando|en (?:el|la) que)\\b)[^.;:])+?)(?:[,\\s]+(?:um|uh|erm|er|eh|hmm|este|pues|o sea|like|you know))*(?:,\\s*(?:el|la|aquel|aquella|ese|esa)(?= (?:where|when|in which|in that|with|about|that|donde|cuando|en (?:el|la) que|en que|del?|sobre|que|con) )|,?\\s+(?:(?:in|of|from|en|de) )?(?:(?:the|that|this) (?:one|episode|ep)|(?:the |an? )?episode|(?:el|ese|aquel|este) episode))\\s+(?:where|when|in which|in that|with|about|that|donde|cuando|en (?:el|la) que|en que|del?(?!.*\\b(?:donde|where|en (?:el|la) que|in which|cuando|when)\\b)|sobre|que|con)\\s+(?!(?:i|we) (?:left|stopped|was|were)\\b|lo dej|me qued|nos qued|lo hab[ií]a)(?P<desc>(?:(?!\\s(?:y|and|then|luego|despu[eé]s)\\s+(?:(?:luego|then|after that|despu[eé]s)\\s+)?(?:vete|ve|go|play|jump|skip|pon|ponlo|ponme|salta|put|take|ll[eé]vame|show|start|turn|set|sube|baja|quita|activa|with|con|pause|para)\\b).)+)$",
+      "do": {
+        "type": "play_title",
+        "*": "{what|play!}",
+        "episode_name": "{desc|text!}",
+        "kind": "series"
+      },
+      "note": "an episode described after the show's name: “‹show›, the one where…”, “‹show›, el capítulo donde…”, “‹show› episode where…”: found by its plot"
+    },
+    {
+      "id": "episode_of_described",
+      "stage": "grammar",
+      "match": "^(?:(?:play|watch|put on|start|go to|open|ve al|vete al|ir al|ll[eé]vame al)\\s+)?(?:the |an? |el |un )?episode (?:of|from|de|del) (?P<what>(?:(?!\\b(?:where|when|in which|donde|cuando|en (?:el|la) que)\\b)[^.;:])+?)(?:[,\\s]+(?:um|uh|erm|er|eh|hmm|este|pues|o sea|like|you know))*\\s+(?:where|when|in which|in that|about|donde|cuando|en (?:el|la) que|en que|sobre)\\s+(?!(?:i|we) (?:left|stopped|was|were)\\b|lo dej|me qued|nos qued|lo hab[ií]a)(?P<desc>(?:(?!\\s(?:y|and|then|luego|despu[eé]s)\\s+(?:(?:luego|then|after that|despu[eé]s)\\s+)?(?:vete|ve|go|play|jump|skip|pon|ponlo|ponme|salta|put|take|ll[eé]vame|show|start|turn|set|sube|baja|quita|activa|with|con|pause|para)\\b).)+)$",
+      "do": {
+        "type": "play_title",
+        "*": "{what|play!}",
+        "episode_name": "{desc|text!}",
+        "kind": "series"
+      },
+      "note": "“the episode of ‹show› where…”, “el capítulo de ‹show› en el que…”: found by its plot"
     },
     {
       "id": "latest_episode",
@@ -1604,7 +1726,7 @@
         "type": "play_title",
         "*": "{all|episode_title!}"
       },
-      "note": "a title said with a season or episode, without “play” (“community season two episode two”)"
+      "note": "a title said with a season or episode, without “play” (“‹title› season two episode two”)"
     }
   ],
   "model": {
@@ -1616,10 +1738,10 @@
     "title_candidates": 4,
     "intents": {
       "play_title": {
-        "describe": "play a named movie or series, maybe a given season or episode (e.g. 'play the bear season 3 episode 2')"
+        "describe": "play a named movie or series, maybe a given season or episode (e.g. 'play X season 3 episode 2')"
       },
       "continue_watching": {
-        "describe": "continue a named title, or whatever was watched last, from where it was left (e.g. 'continue severance')"
+        "describe": "continue a named title, or whatever was watched last, from where it was left (e.g. 'continue X')"
       },
       "next_episode": {
         "describe": "go to the next episode of what is playing (e.g. 'next episode')"
@@ -1628,13 +1750,13 @@
         "describe": "go back to the previous episode of what is playing (e.g. 'previous episode')"
       },
       "open_in_stremio": {
-        "describe": "show a title's page in Stremio without playing it (e.g. 'open the office in stremio')"
+        "describe": "show a title's page in Stremio without playing it (e.g. 'open X in stremio')"
       },
       "youtube": {
         "describe": "play or search something on YouTube (e.g. 'lofi on youtube')"
       },
       "twitch": {
-        "describe": "watch a streamer's channel on Twitch (e.g. 'put ibai on twitch')"
+        "describe": "watch a streamer's channel on Twitch (e.g. 'put X on twitch')"
       },
       "open_app": {
         "describe": "open an app such as YouTube, Stremio, Twitch, Movistar+, Prime Video, Kodi or the TV's settings (e.g. 'open stremio')"
@@ -1703,7 +1825,7 @@
         "describe": "choose a numbered item of the list on screen (e.g. 'number two')"
       },
       "latest_episode": {
-        "describe": "play the newest episode of a named series (e.g. 'play the latest episode of the bear')"
+        "describe": "play the newest episode of a named series (e.g. 'play the latest episode of X')"
       },
       "library": {
         "describe": "add to or remove from my library, or mark as watched (e.g. 'add this to my library')"
@@ -1718,7 +1840,7 @@
         "describe": "not a TV command, or not understandable (e.g. 'what time is it')"
       },
       "info": {
-        "describe": "say what is playing, or how far the user is in a named series (e.g. 'what am I watching', 'where am I in severance')"
+        "describe": "say what is playing, or how far the user is in a named series (e.g. 'what am I watching', 'where am I in X')"
       },
       "wrong": {
         "describe": "the last command was misunderstood (e.g. 'that's wrong')",
@@ -1748,7 +1870,7 @@
         }
       },
       "recommend": {
-        "describe": "suggest something to watch: like a given title, or a kind of film or series (e.g. 'something like dark', 'a short comedy')",
+        "describe": "suggest something to watch: like a given title, or a kind of film or series (e.g. 'something like X', 'a short comedy')",
         "do": {
           "type": "recommend",
           "query": "{text|text}"

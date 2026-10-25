@@ -170,10 +170,10 @@ DESCRIBED = re.compile(r"^(?:the one (?:with|where|about|that)|la de|el de|la qu
                        r"\b(?:film|movie|series|show|documentary|peli|pel[ií]cula|serie|documental)\s+"
                        r"(?:that\s+|esa\s+|ese\s+|esta\s+|este\s+)?(?:about|where|in which|with the|sobre|donde|"
                        r"en la que|del?)\b|"
-                       # an episode or scene described: "the simpsons, that episode where mr. burns is shot"
+                       # an episode or scene described: "x, that episode where someone is shot"
                        r"\b(?:episode|episodio|cap[ií]tulo|scene|escena)s?\s+(?:where|when|in which|with|that|about|"
                        r"donde|cuando|en (?:el|la) que|del? que|sobre)\b|"
-                       # "the episode of the simpsons where…", "el capítulo de los simpson en el que…"
+                       # "the episode of x where…", "el capítulo de x en el que…"
                        r"\b(?:episode|episodio|cap[ií]tulo|scene|escena)s?\b.*\b(?:where|in which|donde|en (?:el|la) que)\b")
 LONGEST_TITLE = 12                      # words: a longer "title" is a description, for the LLM
 
@@ -189,7 +189,7 @@ def _play(v, rules):
 
 
 def _episode_title(v, rules):
-    """A title said with a season or episode number ("community season two episode two"): like play, but only when
+    """A title said with a season or episode number ("x season two episode two"): like play, but only when
     a season or episode was actually found ("…once this episode is done" isn't one)."""
     s = _play(v, rules)
     return s if s and (s["season"] is not None or s["episode"] is not None) else None

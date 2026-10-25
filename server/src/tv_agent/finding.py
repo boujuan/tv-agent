@@ -19,12 +19,12 @@ Scenes (scene())
   2. The episode's subtitles in the language asked in first, hearing-impaired before plain (their [sound cues] tell
      what happens), then the other language; kept on disk, and fetched ahead when a title starts (prefetch_subs()).
      Addons that answer late (OpenSubtitles PRO: 6-9 s) aren't waited for: they fill the cache for next time.
-  3. look() gives the words in both languages (names, other names: Dune's worm is Shai-Hulud); only the lines with
+  3. look() gives the words in both languages (names, and the other names the story uses for a thing); only the lines with
      them and the lines around them go to the LLM (MAX_LINES instead of thousands).
   4. No line has any: not in this episode. The episodes before and after are searched; found there, it's offered
      (a list of one: "yes" or "number 1" goes there), never played unasked.
   5. The LLM quotes the line it places the moment by; chain.place_scene finds its time, and it must be among the
-     lines that have the words (WINDOW cues away at most). The line shows on the TV in the language asked in.
+     lines that have the words (BEFORE cues before one, WINDOW after, at most). The line shows on the TV in the language asked in.
 """
 import asyncio
 import gzip
@@ -58,7 +58,9 @@ VERIFY_S = 1.5
 CORPUS_S = 3.0
 AT_ONCE = 8
 CANDIDATES = 10
-WINDOW = 6                           # lines around each line with the words
+WINDOW = 6                           # lines after each line with the words
+BEFORE = 10                          # and before it: a moment often comes just before the lines that react to it
+GAP = 8                              # a gap this short between two passages is sent too (the same scene)
 MAX_LINES = 200
 AGREE_S = 4.0                        # the two placements of a moment waited for together
 AGREE_MS = 30_000                    # two placements this close are the same moment
@@ -125,10 +127,10 @@ LOOK_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["en
                                   "properties": {"season": {"type": "integer"}, "episode": {"type": "integer"}}}}}}
 LOOK_SYSTEM = """Someone asked their TV, by voice, for {what} of "{title}": "{wanted}" (maybe misremembered, maybe
 in Spanish). Give the words most likely written {where}: the characters' names as the show says them, key nouns and
-verbs, other names for the same thing (in Dune a sandworm is also Shai-Hulud, a worm, a maker). Up to 8 in English
-("en") and up to 8 in Spanish ("es"), single words or short phrases. "episodes": up to 3 episodes it could be, from
-what you know of the show, the likeliest first, as season and episode numbers; empty when you don't know or it isn't
-about an episode. Answer only with the JSON object."""
+verbs, the other names the story uses for the same thing (a nickname, a title, what the characters call a creature
+or a place). Up to 8 in English ("en") and up to 8 in Spanish ("es"), single words or short phrases. "episodes": up
+to 3 episodes it could be, from what you know of the show, the likeliest first, as season and episode numbers; empty
+when you don't know or it isn't about an episode. Answer only with the JSON object."""
 
 
 @dataclass
@@ -228,6 +230,7 @@ def forget():
     _partial.clear()
     _cues.clear()
     _busy.clear()
+    _failed.clear()
 
 
 # ---- plots ----
@@ -290,7 +293,7 @@ async def _wiki_pages(http: httpx.AsyncClient, titles: list[str]) -> dict[str, s
 
 async def _wikipedia(http: httpx.AsyncClient, name: str, seasons: list[int]) -> dict[tuple[int, int], str]:
     """English Wikipedia's episode summaries: its "List of … episodes" page and each season's own page (found by
-    title, both ways shows name them: "Community (season 1)", "The Simpsons season 3")."""
+    title, both ways shows name them: "X (season 1)", "X season 3")."""
     asked = {f"List of {name} episodes": 0}
     for n in seasons:
         asked[f"{name} (season {n})"] = asked[f"{name} season {n}"] = n
@@ -441,16 +444,18 @@ async def track(http, addons, video: str, lang: str, wait_s: float = SUBS_S, sdh
     """track_() into the trace when `label` says what for."""
     t = time.perf_counter()
     lines, sdh = await track_(http, addons, video, lang, wait_s, sdh_wanted, stream)
+    failed = _failed.pop(f"{video}.{lang}", None)
     if label:
-        src = _source.get(f"{video}.{lang}.{'sdh' if sdh else 'plain'}", "none came in time")
+        src = _source.get(f"{video}.{lang}.{'sdh' if sdh else 'plain'}", failed or "none came in time")
         tracing.step("scene", "subtitles", label=label, ms=tracing.since(t),
                      method=tracing.method("cache" if src.startswith("kept") else "addon", src), video=video,
                      language=lang, hearing_impaired=sdh, lines=len(lines),
-                     verdict="found" if lines else "none")
+                     verdict="found" if lines else "failed" if failed else "none", why=None if lines else failed)
     return lines, sdh
 
 
 _source: dict[str, str] = {}             # where each set of subtitles came from, for the trace
+_failed: dict[str, str] = {}             # "<video>.<lang>": subtitles offered whose downloads all failed, and why
 
 
 async def track_(http, addons, video: str, lang: str, wait_s: float = SUBS_S,
@@ -475,12 +480,15 @@ async def track_(http, addons, video: str, lang: str, wait_s: float = SUBS_S,
     if plain and not any(s.impaired for s in offered):
         return plain, False
     best = sorted(offered, key=lambda s: (not s.impaired, s.ai, SLOW.search(s.addon) is not None))[:2]
+    failed = []
 
     async def get(sub) -> list[tuple[int, str]]:
         try:
             return subtitles.cues(await subtitles.download(http, sub.url, timeout=DOWNLOAD_S))
         except (httpx.HTTPError, OSError, ValueError) as e:
             log.info("subtitles of %s from %s: %s", video, sub.addon, type(e).__name__)
+            code = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else None
+            failed.append(f"{sub.addon}: {f'HTTP {code}' if code else type(e).__name__}")
             return []
     for sub, got in zip(best, await asyncio.gather(*(get(sub) for sub in best))):   # both at once, the first kept
         if len(got) >= 20:
@@ -491,6 +499,10 @@ async def track_(http, addons, video: str, lang: str, wait_s: float = SUBS_S,
             _source[key] = f"{sub.addon}: {sub.name[:80]}"
             _write(_path("subs", f"{key}.json.gz"), got)
             return got, sub.impaired
+    if failed and not plain:
+        if len(_failed) > 300:
+            _failed.clear()
+        _failed[f"{video}.{lang}"] = "offered, but the downloads failed (" + ", ".join(failed) + ")"
     return plain or [], False
 
 
@@ -697,7 +709,9 @@ PLACE_SYSTEM = """Someone watching a film or episode ("watching") asked to jump 
 ("wanted", maybe misremembered). Below are lines of its subtitles that may be near it, one cue per line: "m:ss text"
 (or "h:mm:ss"); "…" between parts far apart; [in brackets]: sounds, in subtitles for the deaf. Find where that
 moment starts: what's said just before or as it happens; a moment without words is between the lines around it.
-What you know about the story helps tell which of these parts it is (the first time it happens, unless they say
+The line you place it by is said before the moment or as it happens, never after it: a line that explains, names or
+reacts to what just happened (what it was, how it was done, someone asking about it) comes after, so the moment is
+earlier: place it by the last line before the action. What you know about the story helps tell which of these parts it is (the first time it happens, unless they say
 otherwise). Answer only with the JSON object: "line", the subtitle you placed it by (said in the moment, or the last
 line before it), copied exactly without its time; "at", the time listed before that line, copied exactly ("51:25"); "how":
 "words" when that line is said in the moment itself or right as it happens, "around" when the moment has no words
@@ -727,10 +741,10 @@ def clock(ms: int) -> str:
 
 
 def windows(cues: list[tuple[int, str]], terms: list[str]) -> tuple[list[int], list[int], float]:
-    """The lines with the words, the indexes of the passages around them that go to the LLM (WINDOW lines each side,
-    in order, MAX_LINES at most), and the best passage's score. A passage counts the different words it has, each by
-    how rare it is in the episode: Paul, the worm and Shai-Hulud together beat a [worm chittering] alone (subtitles
-    for the deaf have worm sounds all through Dune)."""
+    """The lines with the words, the indexes of the passages around them that go to the LLM (BEFORE lines before
+    each, WINDOW after, a short GAP between two filled, in order, MAX_LINES at most), and the best passage's score. A passage counts the different words it has, each by
+    how rare it is in the episode: a name, a thing and its other name together beat one sound cue alone (subtitles
+    for the deaf can repeat a sound all through a film)."""
     want = {k for t in terms for k in keys(t)}
     if not want or not cues:
         return [], [], 0.0
@@ -741,14 +755,18 @@ def windows(cues: list[tuple[int, str]], terms: list[str]) -> tuple[list[int], l
     hits = [i for i, h in enumerate(has) if h]
     scored = []
     for i in hits:
-        around = range(max(0, i - WINDOW), min(len(cues), i + WINDOW + 1))
+        around = range(max(0, i - BEFORE), min(len(cues), i + WINDOW + 1))
         scored.append((sum(idf[k] for k in set().union(*(has[j] for j in around))), i))
     keep: set[int] = set()
     for _, i in sorted(scored, reverse=True):
-        around = set(range(max(0, i - WINDOW), min(len(cues), i + WINDOW + 1)))
+        around = set(range(max(0, i - BEFORE), min(len(cues), i + WINDOW + 1)))
         if len(keep | around) > MAX_LINES:
             break
         keep |= around
+    kept = sorted(keep)
+    for a, b in zip(kept, kept[1:]):
+        if 1 < b - a <= GAP + 1 and len(keep) + b - a - 1 <= MAX_LINES:
+            keep.update(range(a + 1, b))
     return hits, sorted(keep), max((x for x, _ in scored), default=0.0)
 
 
@@ -890,7 +908,7 @@ async def _one_place_(llm, body: dict, cues, hits: list[int], keep: list[int]) -
     if ms is None:
         return SceneFind(why=why, line=line, lines_sent=len(keep)), got
     at = next(i for i in keep if cues[i][0] == ms)
-    if not any(abs(at - h) <= WINDOW for h in hits):
+    if not any(h - BEFORE <= at <= h + WINDOW for h in hits):
         return SceneFind(why="nothing of what you said is near the line it found", line=line,
                          lines_sent=len(keep)), got
     shown = re.sub(r"^\d+:\d\d(?::\d\d)?\s+", "", str(got.get("shown") or ""))[:160] or line

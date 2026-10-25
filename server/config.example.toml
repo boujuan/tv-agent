@@ -15,9 +15,9 @@ d1_url = "http://127.0.0.1:8091"
 kodi_port = 8080
 kodi_user = "kodi"
 
-player = "kodi"            # "tvplayer" for TV Agent Player (github.com/boujuan/tv-agent-player: fastest, exact jumps,
-                           # tracks by name, add-on subtitles; `tv-agent tv install` + `tv-agent tv pair`),
-                           # "kodi" for Kodi, "just" for Just Player (simpler; fewer controls)
+player = "tvplayer"        # TV Agent Player (github.com/boujuan/tv-agent-player: fastest, exact jumps, tracks by
+                           # name, add-on subtitles; `tv-agent tv install` + `tv-agent tv pair`), "kodi" for Kodi
+                           # (`tv-agent setup kodi`), "just" for Just Player (simpler; fewer controls)
 # player_port = 8770       # TV Agent Player connects here (TLS with the phones' certificate, its own token), on
                            # the LAN address, phone_hosts and this computer's Tailscale address
 max_height = 2160          # largest resolution to pick

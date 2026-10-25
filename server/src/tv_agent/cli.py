@@ -325,6 +325,9 @@ def _doctor() -> int:
             what = name.removesuffix("_api_key")
             print(f"ok    secret {name}: {'set' if cfg.secret(name) else f'not set (optional: tv-agent setup {what})'}")
             continue
+        if name == "kodi_password" and cfg.player != "kodi" and not cfg.secret(name):
+            print(f"ok    secret {name}: not needed (the player is {cfg.player})")
+            continue
         check(f"secret {name}", lambda name=name: "set" if cfg.secret(name) else "missing (see README setup)")
     agent.adb.close()
     return 0 if ok else 1
@@ -342,7 +345,9 @@ def _nightly(only: list[str]) -> int:
             print(f"{quality.BENCHES[name]}: {b['error']}")
             continue
         print(f"{quality.BENCHES[name]}: {b['right']}/{b['of']} right, {len(b['regressions'])} regressions, "
-              f"{len(b['fixes'])} fixed, ${b['cost']:.4f}, {b['seconds']} s")
+              f"{len(b['fixes'])} fixed, ${b['cost']:.4f}, {b['seconds']} s"
+              + (f"; right again when rerun: {len(b['unsteady'])}" if b.get("unsteady") else "")
+              + (f"; couldn't be checked: {len(b['unavailable'])}" if b.get("unavailable") else ""))
         for k in b["regressions"]:
             print(f"  ✗ {k}")
     print(f"cost ${run['cost']:.4f}")

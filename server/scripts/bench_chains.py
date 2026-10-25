@@ -2,7 +2,7 @@
 taught sentences, steps on and off, the LLM): each sentence's chain, single command or refusal, judged step by step.
 Nothing is sent to the TV; the LLM is called (and costs) as in use (`--off llm`: rules only).
 
-    .venv/bin/python scripts/bench_chains.py [--off llm] [--failures] [--out results.json] [--no-mine]
+    .venv/bin/python scripts/bench_chains.py [--off llm] [--failures] [--out results.json] [--no-mine] [--texts f]
 
 Your own sentences (the panel's "This was right / wrong" for typed commands, in ~/.local/share/tv-agent/voice-tests/
 sentences.jsonl, never in the repo) are judged too, unless --no-mine. --out keeps each row's result (the nightly
@@ -38,6 +38,7 @@ async def main() -> int:
     ap.add_argument("--failures", action="store_true", help="only what's wrong")
     ap.add_argument("--out", help="each row's result, as JSON")
     ap.add_argument("--no-mine", action="store_true", help="without your own sentences")
+    ap.add_argument("--texts", help="only these sentences: a JSON file with a list of them")
     args = ap.parse_args()
     cfg = config.load()
     agent = Agent(cfg, dry_run=True)
@@ -48,6 +49,9 @@ async def main() -> int:
     router = Router(agent.d1, rules, agent.llm, agent.llm_context, cfg.decide_steps, off)
     rows = [json.loads(line) for line in EVAL.read_text().splitlines() if line.strip()]
     rows += [] if args.no_mine else [r | {"mine": True} for r in V.cases(V.SENTENCES) if r.get("text")]
+    if args.texts:
+        wanted = set(json.loads(Path(args.texts).read_text()))
+        rows = [r for r in rows if r["text"] in wanted]
     right, cost, results = 0, 0.0, []
     try:
         for row in rows:

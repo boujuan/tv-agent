@@ -1683,14 +1683,44 @@ def test_play_and_pause_go_to_the_app_in_front_not_to_kodi_behind_it():
     assert not asyncio.run(Agent._transport(me, A.Transport(op="seek_to", seconds=60))).ok
 
 
-@pytest.mark.parametrize("text", [
-    "Can you play The Simpsons, um, that episode where Mr. Burns is killed?",
-    "Can you play the scenes um in that episode where Mr. Burns is killed?",
-    "pon el capítulo de los simpson en el que homer va al espacio",
+@pytest.mark.parametrize("text, title, described", [
+    ("Can you play The Simpsons, um, that episode where Mr. Burns is killed?", "the simpsons", "mr. burns is killed"),
+    ("Can you play the scenes um in that episode where Mr. Burns is killed?", "the scenes", "mr. burns is killed"),
+    ("pon el capítulo de los simpson en el que homer va al espacio", "los simpson", "homer va al espacio"),
+    ("Play X, the one where they kiss", "x", "they kiss"),
+    ("play x season 2 the one with the wedding", "x", "the wedding"),
+    ("pon x, el capítulo donde se besan", "x", "se besan"),
+    ("pon x, el del baile", "x", "baile"),
+    ("x episode where they kiss", "x", "they kiss"),
+    ("¿Puedes poner el episodio de X donde se casan?", "x", "se casan"),
+    ("ve al capítulo de x en el que se casan", "x", "se casan"),
 ])
-def test_a_described_episode_is_for_the_llm_not_the_title_search(text):
+def test_an_episode_described_after_its_show_goes_to_the_episode_finder(text, title, described):
+    """The show's name to look up, and what happens in the episode to find by its plot (finding.py), not one title
+    made of both; a misheard name ("the scenes") is the title search's to correct."""
     got = rule_action(text)
-    assert got is None or got.type != "play_title", got
+    assert got.type == "play_title" and got.title == title and got.episode_name == described, got
+
+
+@pytest.mark.parametrize("text", [
+    "play the episode where they kiss",                     # no show named: the LLM knows what's on
+    "play the episode of x where i left off",
+    "what episode of x is the one where they kiss",
+    "skip to the episode where they kiss",
+    "play the man with the golden gun", "play dancing with the stars",
+])
+def test_not_an_episode_described(text):
+    got = rule_action(text)
+    assert got is None or not getattr(got, "episode_name", None), got
+
+
+@pytest.mark.parametrize("text, want", [
+    ("¿puedes poner x?", "play_title"), ("¿me pones x?", "play_title"), ("¿podrías poner x?", "play_title"),
+    ("¿me puedes quitar los subtítulos?", "tracks"), ("¿me bajas el volumen?", "volume"),
+    ("¿puedes ir al minuto 20?", "transport"), ("¿me subes el volumen?", "volume"),
+])
+def test_a_spanish_request_asked_politely_is_the_command(text, want):
+    assert rule_action(text).type == want
 
 
 def test_the_llm_names_an_episode():
@@ -1934,3 +1964,34 @@ def test_the_tvs_own_apps_and_players_get_cpu_and_memory_rows():
     assert [a["name"] for a in got] == ["TV Agent Player", "TV app"]       # in WATCHED's order; unknown ones left out
     assert got[0]["cpu"] == 11.1 and got[0]["rss_kb"] == 132948           # 50 of 450 ticks
     assert got[1]["cpu"] == 0.0                                            # no stat lines for it: idle
+
+
+@pytest.mark.parametrize("text, want", [
+    ("Vale, ¿puedes ir a la escena en la cual le dispara?", "find_scene"),      # "vale" isn't a first step
+    ("Ok, play x season 2", "play_title"),
+    ("¿Puedes poner el idioma en español?", "tracks"),                          # not a title "el idioma"
+    ("Play X, the one where they kiss and then go to minute 10", "sequence"),
+    ("Close it.", "transport"), ("¿Puedes cerrarlo?", "transport"),
+    ("Vuelve 10 segundos.", "transport"), ("Can you go to the place, to the minute where he is shot?", "find_scene"),
+    # a description that runs into a second command isn't one: the LLM reads it as a chain ("that" = the episode's)
+    ("Pon x en el episodio en que se casan y vete al momento en que pasa eso", "none"),
+    ("Play the episode of x where they marry and play the exact moment where he cries", "none"),
+    ("¿Ves este episodio de x donde se casan?", "none"),                         # "de x" is the show, not the event
+    ("Hey, quiero ver x. ¿Me puedes poner el episodio donde se casan?", "none"),  # a title doesn't cross a "."
+])
+def test_whole_sentences_without_the_models(text, want):
+    """The rules and the chain reading alone (the models off: what they'd get is left to them, "none" here)."""
+    import asyncio
+
+    class NoD1:
+        async def choice(self, *args):
+            raise router.httpx.ConnectError("off")
+
+    rules = R.build(R.defaults_raw(), "defaults")
+    rules.fallback_intent = "none"
+    got = asyncio.run(router.Router(NoD1(), rules).decide(text)).action
+    assert got.type == want, got
+    if want == "tracks":
+        assert got.audio == "spa"
+    if want == "sequence":
+        assert got.steps[0].title == "x" and got.steps[0].episode_name == "they kiss" and got.steps[1].seconds == 600

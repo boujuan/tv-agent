@@ -77,6 +77,21 @@ def test_passages_with_several_of_the_words_beat_one_word_repeated():
     assert finding_first                                 # a lone word still finds its lines
 
 
+def test_a_passage_reaches_further_back_than_forward_and_short_gaps_are_filled():
+    """A moment often comes just before the lines that talk about it ("what was that?"); two passages a few lines
+    apart are one scene, and the lines between them are sent too."""
+    cues = [(i * 1000, f"line {i}") for i in range(300)]
+    cues[100] = (100_000, "what was that crystal")
+    _, keep, _ = finding.windows(cues, ["crystal"])
+    assert keep == list(range(100 - finding.BEFORE, 100 + finding.WINDOW + 1))
+    cues[125] = (125_000, "the crystal again")             # its passage starts 125 - BEFORE = 115: a gap of 8
+    _, keep, _ = finding.windows(cues, ["crystal"])
+    assert keep == list(range(100 - finding.BEFORE, 125 + finding.WINDOW + 1))
+    cues[160] = (160_000, "more crystal")                  # far enough away: a passage of its own
+    _, keep, _ = finding.windows(cues, ["crystal"])
+    assert 140 not in keep and 150 in keep
+
+
 # ---- plots ----
 
 LIST_PAGE = """==Series overview==
@@ -365,3 +380,36 @@ def test_yes_picks_the_one_offered():
     from test_chain import decide
     assert decide("yes").action == A.Pick(number=1)
     assert decide("sí").action == A.Pick(number=1)
+
+
+def test_subtitles_offered_whose_downloads_fail_are_told_apart_from_none(monkeypatch):
+    """The trace says the addon failed (and how), so a bench doesn't count it against the agent."""
+    from tv_agent import tracing
+    from tv_agent.stremio import subtitles
+    offered = [subtitles.Subtitle("https://subs.example/1.srt", "eng", "x", "Subs", impaired=True)]
+
+    async def listing(*args):
+        return offered
+
+    async def download(http, url, timeout):
+        raise httpx.HTTPStatusError("down", request=httpx.Request("GET", url),
+                                    response=httpx.Response(503, request=httpx.Request("GET", url)))
+    monkeypatch.setattr(finding, "_listing", listing)
+    monkeypatch.setattr(subtitles, "download", download)
+    trace = tracing.Trace()
+    token = tracing.TRACE.set(trace)
+    try:
+        lines, _ = asyncio.run(finding.track(None, [], "tt1:1:1", "eng", label="Subtitles"))
+    finally:
+        tracing.TRACE.reset(token)
+    step = trace.close()[0][-1]
+    assert lines == [] and step["verdict"] == "failed" and "Subs: HTTP 503" in step["why"]
+
+    offered.clear()                                  # none offered at all: just none
+    trace = tracing.Trace()
+    token = tracing.TRACE.set(trace)
+    try:
+        asyncio.run(finding.track(None, [], "tt1:1:2", "eng", label="Subtitles"))
+    finally:
+        tracing.TRACE.reset(token)
+    assert trace.close()[0][-1]["verdict"] == "none"

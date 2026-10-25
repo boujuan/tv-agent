@@ -121,10 +121,16 @@ async def main() -> int:
                     tracing.TRACE.reset(token)
                 ms = (time.perf_counter() - t) * 1000
                 ok = graded(row, got)
-                cost = sum(s.get("cost") or 0 for s in trace.close()[0] if s["stage"] in ("llm", "d1"))
+                steps = trace.close()[0]
+                cost = sum(s.get("cost") or 0 for s in steps if s["stage"] in ("llm", "d1"))
+                # nothing to search because a subtitle addon failed: not the agent's answer, so not graded
+                down = [s["why"] for s in steps if s.get("step") == "subtitles" and s.get("verdict") == "failed"]
+                if got in ("none", "error") and down:
+                    ok, why = None, f"couldn't be checked: subtitles {down[0]}"
                 times.setdefault((row["find"], run), []).append(ms)
                 results.append({"row": n, "run": run, "wanted": row["wanted"], "got": got, "ok": ok,
-                                "ms": round(ms), "why": why, "cost": round(cost, 6), "mine": row.get("mine")})
+                                "ms": round(ms), "why": why, "cost": round(cost, 6), "mine": row.get("mine"),
+                                **({"unavailable": why} if down and ok is None and got in ("none", "error") else {})})
                 mark = {True: "✓", False: "✗", None: "·"}[ok]
                 print(f"{mark} {n:2} {row['find']:7} {run} {ms:6.0f} ms  {row['name']}: {row['wanted']!r} -> {got}"
                       + (f"  ({why[:140]})" if why else ""), flush=True)

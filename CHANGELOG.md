@@ -4,6 +4,40 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
+## server — unreleased
+
+### Changed
+- TV Agent Player is the default player (`player = "tvplayer"`); Kodi and Just Player stay a setting away, and
+  `tv-agent doctor` no longer asks for the Kodi password unless Kodi is the player.
+- No rule or prompt names a title any more (the user's ground rule: every fix general). The LLM's examples, its
+  sound-alike and suggestion prompts, the chain prompt, the episode and scene prompts and d1's intent descriptions
+  use X / ‹title› and say the pattern in words instead; rule notes too.
+- The nightly check runs a case that went wrong again, twice at most: a regression only when it's wrong every time,
+  else "unsteady" (shown, not alerted). A case that couldn't be checked (the hosted speech model or a subtitle addon
+  failing) counts neither way. `bench_voice.py --recordings`, `bench_chains.py --texts` run just some cases.
+
+### Fixed
+- An episode described after the show's name ("play ‹show›, the one where they kiss", "‹show› episode where…", "the
+  episode of ‹show› where…", "pon ‹show›, el capítulo donde…") goes to the episode finder by rule: the show's name to
+  the title search, the description to the plots. It was a title search for both, or the LLM's call (which once
+  made it a scene search).
+- Spanish requests asked politely ("¿puedes poner…?", "¿me pones…?", "¿podrías ir al minuto 20?", "¿me bajas el
+  volumen?") are understood by the rules, as "can you…" was.
+- "Close it", "ciérralo", "cierra el vídeo" stop, like "stop" (the LLM sometimes took "close it" for nothing).
+- The scene search sends the lines just before the words it looks for (10 before, 6 after, and a short gap between
+  two passages filled): the moment itself was sometimes left out between two passages, and the model placed it by a
+  line explaining it two minutes later. It's also told the line it places a moment by comes before it or as it
+  happens, never after. On the kept subtitles of the nightly's scene cases: the one wrong now right 3 times of 3, the
+  others unchanged.
+- A subtitle addon whose downloads fail says so in the trace ("offered, but the downloads failed (addon: HTTP
+  503)"), instead of "none came in time".
+
+## panel — unreleased
+
+### Changed
+- Quality › the nightly run's details: what went wrong and was right when run again ("unsteady", amber, not
+  alerted), and how many cases couldn't be checked (a service failing).
+
 ## server 0.13.1 — 2026-10-25
 
 ### Fixed
