@@ -58,6 +58,7 @@ from . import install
 from . import remote
 from . import tracing
 from . import updates as updates_mod
+from . import tv_apps as tv_apps_mod
 from . import kodi_versions
 from .agent import Agent
 from . import config as config_mod
@@ -202,6 +203,8 @@ class Service:
         self.clients = clients_mod.Clients()
         self._busy = asyncio.Lock()
         self.updates = updates_mod.Updates(self)
+        self.tv_apps = tv_apps_mod.TvApps(self)          # the apps on the TV, from the last time they were read
+        self.tv_apps.merge(self.agent.rules)
         self.kodi_versions = kodi_versions.KodiVersions(self)
         self._running: asyncio.Task | None = None
         self._rules_mtime = self._mtime()
@@ -227,6 +230,8 @@ class Service:
 
     def use_rules(self, rules: R.Rules, error: str | None = None):
         self._learn(rules)
+        if hasattr(self, "tv_apps"):
+            self.tv_apps.merge(rules)                   # the TV's apps beside the rules' own (tv_apps.py)
         self.agent.rules = self.router.rules = rules
         if self.agent.llm:
             self.agent.llm.rules = rules
@@ -1199,7 +1204,7 @@ async def serve(cfg: Config):
 
     log.info("listening for the panel on 127.0.0.1:%d", cfg.local_port)
     tasks = [asyncio.create_task(keepalive()), asyncio.create_task(updates_mod.loop(svc)),
-             asyncio.create_task(listeners.watch())]
+             asyncio.create_task(listeners.watch()), asyncio.create_task(tv_apps_mod.loop(svc))]
     try:
         await local_api.serve()
     finally:

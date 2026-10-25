@@ -7,12 +7,17 @@ shortcuts, the lists to pick from, the activity history and its recordings, and 
     POST /v1/remote/key {"key", "long"} a key from KEYS (d-pad, OK, numbers…); "long" holds it
     POST /v1/remote/text {"text"}       typed into the TV's focused field (ASCII: the TV's input command)
     GET  /v1/tv/volume                  {"level"}
-    GET  /v1/apps                       the apps the agent may open: [{"key", "label"}]
+    GET  /v1/apps                       the apps on the TV the agent may open: [{"key", "label", "package", "icon"}]
+    GET  /v1/apps/icon?package=         one's icon (PNG)      POST /v1/apps/refresh   read the TV's apps again now
+    GET  /v1/help?lang=en|es            everything you can say, by section, with an example of each (commands.py)
     GET  /v1/lists?list=recent|new|movies   the numbered list voice shows on the TV, here instead
     POST /v1/lists/pick {"list", "imdb", "video"}   play one of them
     GET  /v1/shown                      the numbered list on the TV now ("number 2" picks), or null
     POST /v1/shown/pick {"number", "id"}   a number of it, as saying it does (409: the TV shows another list now)
     GET  /v1/activity?limit=&before=    the history, newest first     POST /v1/activity/mark {"t", "wrong", "heard"}
+    GET  /v1/activity/details?t=        a command's big parts (plots read, subtitle passages, prompts), on demand
+    POST /v1/activity/right {"t", "words"}   it did right: kept as a test (as the panel's "This was right")
+    POST /v1/activity/wrong {"t", "words", "should", "episode", "moment"}   marked wrong, kept as a test
     GET  /v1/recording?name=            a kept recording (WAV)
     GET  /v1/settings, POST /v1/settings {…}   the panel Settings tab's playback, language and update settings, live
                                         (audio_language: a language or "original"; subtitles: when they show)
@@ -26,12 +31,15 @@ import time
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
+from pydantic import ValidationError
 
 from . import actions as A
 from . import activity
+from . import commands
 from . import quality
 from . import config as config_mod
 from . import stt as stt_mod
+from . import voicetests
 from .agent import LIST_TTL, Shown
 from .decide.router import Decision
 from .languages import name as language_name
@@ -215,10 +223,53 @@ def routes(svc) -> APIRouter:
         except TvUnreachable as e:
             raise HTTPException(503, str(e)) from None
 
+    def apps_list() -> dict:
+        """The apps voice may open that are on the TV (all of them while the TV's haven't been read yet), in the
+        order the TV lists them."""
+        tv = svc.tv_apps
+        installed = tv.installed()
+        order = {a["package"]: i for i, a in enumerate(tv.apps)}
+        icons = {a["package"] for a in tv.apps if a.get("icon")}
+        apps = [a for a in svc.agent.rules.apps.values() if installed is None or a.package in installed]
+        apps.sort(key=lambda a: order.get(a.package, len(order)))
+        return {"apps": [{"key": a.key, "label": a.label, "package": a.package, "icon": a.package in icons}
+                         for a in apps], **tv.state()}
+
     @r.get("/v1/apps")
     async def apps(request: Request):
         svc.check(request, lan=False)
-        return {"apps": [{"key": a.key, "label": a.label} for a in svc.agent.rules.apps.values()]}
+        return apps_list()
+
+    @r.get("/v1/apps/icon")
+    async def app_icon(request: Request):
+        svc.check(request, lan=False)
+        data = svc.tv_apps.icon(request.query_params.get("package", ""))
+        if data is None:
+            raise HTTPException(404, "no icon")
+        return Response(data, media_type="image/png", headers={"Cache-Control": "max-age=86400"})
+
+    @r.post("/v1/apps/refresh")
+    async def apps_refresh(request: Request):
+        """The TV's apps read again now (an app installed or removed)."""
+        svc.check(request, lan=False)
+        await svc.tv_apps.refresh()
+        return apps_list()
+
+    # ---- what you can say ----
+
+    @r.get("/v1/help")
+    async def help_list(request: Request):
+        """commands.py's sections, as the panel's Commands tab and the TV show them, each command with an example
+        sentence; the title stays a placeholder (‹title›), so an example isn't tied to one film."""
+        svc.check(request, lan=False)
+        lang = "es" if request.query_params.get("lang") == "es" else "en"
+        title = "título" if lang == "es" else "title"
+        fills = {**commands.EXAMPLES[lang], title: f"‹{title}›"}
+        return {"lang": lang, "legend": commands.LEGEND[lang],
+                "sections": [{"name": s.name(lang), "commands": [
+                    {"say": c.say(lang), "does": c.does(lang), "type": c.type, "by": c.by,
+                     "example": commands.expand(c.say(lang), lang, fills)[0]} for c in s.commands]}
+                    for s in commands.SECTIONS]}
 
     # ---- lists ----
 
@@ -355,6 +406,65 @@ def routes(svc) -> APIRouter:
         if before is not None:
             rows = [e for e in rows if e["t"] < before]
         return {"entries": rows[:limit], "more": len(rows) > limit, "enabled": svc.cfg.log_transcripts}
+
+    async def entry_at(t) -> dict:
+        try:
+            t = float(t)
+        except (TypeError, ValueError):
+            raise HTTPException(422, "t: the command's time") from None
+        rows = await asyncio.to_thread(activity.read)
+        e = next((e for e in rows if abs(float(e.get("t", 0)) - t) < 0.001), None)
+        if e is None:
+            raise HTTPException(404, "Not in the history")
+        return e
+
+    @r.get("/v1/activity/details")
+    async def activity_details(request: Request):
+        """A command's big parts (what a search read, a model's prompt and answer), kept beside the history: asked for
+        one command at a time, not with the list."""
+        svc.check(request, lan=False)
+        e = await entry_at(request.query_params.get("t"))
+        return {"details": await asyncio.to_thread(activity.details, e) or {}}
+
+    @r.post("/v1/activity/right")
+    async def activity_right(request: Request):
+        """What it did was right: kept as a test (its recording's voice test, else one of your sentences; the episode
+        or moment it found), as the panel's "This was right"."""
+        svc.check(request, lan=False)
+        body = await body_of(request)
+        e = await entry_at(body.get("t"))
+        expect, why = voicetests.expected({**e, "wrong": False}, voicetests.learned(), asked=True)
+        if expect is None:
+            raise HTTPException(422, f"Not kept: {why}")
+        words = str(body.get("words") or e.get("heard", ""))[:300]
+        added = await asyncio.to_thread(voicetests.keep_command, e, expect, words, True)
+        if e.get("wrong"):
+            await asyncio.to_thread(activity.mark, float(e["t"]), False, heard=e.get("heard"))
+        return {"kept": added, "does": voicetests.describe(expect)}
+
+    @r.post("/v1/activity/wrong")
+    async def activity_wrong(request: Request):
+        """It was wrong: marked, and kept as a test of what it should have done ("should", an action as /v1/decide
+        gives it), or of the right episode (S2E5) or moment (m:ss) when it searched for one. Teaching it is
+        /v1/learn, as before."""
+        svc.check(request, lan=False)
+        body = await body_of(request)
+        e = await entry_at(body.get("t"))
+        should = None
+        if body.get("should"):
+            try:
+                should = A.parse(body["should"]).model_dump()
+            except (ValidationError, ValueError):
+                raise HTTPException(422, "should: an action") from None
+        episode = str(body.get("episode") or "").strip()[:20] or None
+        moment = str(body.get("moment") or "").strip()[:12] or None
+        if should is None and not (episode or moment):
+            raise HTTPException(422, "Say what it should have done, or the right episode or moment")
+        expect = voicetests._plain(should or e.get("action") or {}) or None
+        await asyncio.to_thread(activity.mark, float(e["t"]), True, heard=e.get("heard"))
+        words = str(body.get("words") or e.get("heard", ""))[:300]
+        added = await asyncio.to_thread(voicetests.keep_command, e, expect, words, False, episode, moment)
+        return {"kept": added}
 
     @r.post("/v1/activity/mark")
     async def mark(request: Request):
