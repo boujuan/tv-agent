@@ -4,7 +4,7 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
-## server — unreleased
+## server 0.15.0 — 2026-10-25
 
 ### Added
 - `tv-agent backup`: this computer's setup in a dated, private folder (700/600, never uploaded): settings, API keys
@@ -32,7 +32,7 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   player with `original`), and the voice's "original audio" uses that mark too. The player's features are in its
   connect log line, and the start's trace says what it was told about tracks.
 
-## panel — unreleased
+## panel 0.13.0 — 2026-10-25
 
 ### Added
 - Settings › Backup: the last backup's time and size, the folder (open it, change it) and the daily timer (turn it
