@@ -127,12 +127,17 @@ def test_about_shows_the_player_and_the_phones():
     assert "Hosted, this laptop if it fails" in text and "play in TV Agent Player" in text
 
 
-def test_the_commands_tab_marks_what_only_the_llm_decides(panel):
+def test_the_commands_tab_marks_what_only_the_llm_decides(panel, monkeypatch):
+    from tvpanel import commands_tab
     page = panel.commands
     page.filter.setText("plot")
     html = page.view.toHtml()
-    assert "LLM" in html and "the episode of" in html
+    assert "the episode of" in html and ">LLM<" not in html      # the rules decide it since server 0.14.0
+    section = commands_tab.SECTIONS[0]
+    llm_only = section._replace(commands=[section.commands[0]._replace(by="llm")])
+    monkeypatch.setattr(commands_tab, "SECTIONS", [llm_only])
     page.filter.setText("")
+    assert ">LLM<" in page.view.toHtml()
 
 
 def test_settings_backup_shows_the_last_one_and_a_restores_dry_run(panel):
