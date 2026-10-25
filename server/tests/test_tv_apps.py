@@ -130,6 +130,13 @@ def test_a_phone_gets_the_tv_s_apps_their_icons_and_the_help(paths, tmp_path):
     assert r.status_code == 200 and r.content == PNG and r.headers["content-type"] == "image/png"
     assert call(gate, "GET", "/v1/apps/icon?package=../../etc", token).status_code == 404
 
+    # after a restart: the list kept, joined at the start (Service.__init__), before the TV is read again
+    svc.agent.rules = types.SimpleNamespace(apps={"stremio": STREMIO})
+    svc.tv_apps = tv_apps.TvApps(svc, tmp_path / "apps")
+    svc.tv_apps.merge(svc.agent.rules)
+    restarted = call(gate, "GET", "/v1/apps", token).json()
+    assert restarted["count"] == 4 and [a["label"] for a in restarted["apps"]] == ["Netflix", "Stremio", "TV Agent Player"]
+
     es = call(gate, "GET", "/v1/help?lang=es", token).json()
     assert es["lang"] == "es" and es["sections"][0]["name"] == "Películas y series"
     first = es["sections"][0]["commands"][0]
