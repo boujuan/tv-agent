@@ -193,3 +193,21 @@ def test_a_files_index_is_kept_for_its_next_start_and_its_previews(mkv, monkeypa
         await asyncio.sleep(0.1)
         assert len(reads) == 4 and len(TH._layouts) == 1
     asyncio.run(run())
+
+
+def test_the_head_alone_says_where_the_index_and_the_first_cluster_are(mkv, monkeypatch):
+    """A file new to the agent: the link check's read of its first bytes is enough for a start from 0, and for the
+    index of any start (its length guessed); the whole index, once read, replaces it."""
+    whole = asyncio.run(TH.Mkv.read(reader(mkv)))
+    head = TH.Mkv.from_head(mkv[:TH.HEAD], len(mkv))
+    at = whole.cues_at[0]
+    assert head.cues_at == (at, min(TH.INDEX_GUESS, len(mkv) - at)) and head.places == []
+    assert head.ranges(0) == [{"at": at, "bytes": head.cues_at[1]}, {"at": whole.segment + whole.places[0][0],
+                                                                      "bytes": TH.START_AHEAD}]
+    assert head.ranges(9_000) == [{"at": at, "bytes": head.cues_at[1]}]      # where 0:09 is: in the index
+    assert TH.Mkv.from_head(b"\x00" * 1000, 1000) is None
+    monkeypatch.setattr(TH, "_layouts", TH.OrderedDict())
+    TH.remember(("f.mkv", len(mkv)), head)
+    TH.remember(("f.mkv", len(mkv)), whole)
+    TH.remember(("f.mkv", len(mkv)), TH.Mkv.from_head(mkv[:TH.HEAD], len(mkv)))   # doesn't undo it
+    assert TH.layout(("f.mkv", len(mkv))) is whole

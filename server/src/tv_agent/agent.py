@@ -1435,11 +1435,16 @@ class Agent:
         return await asyncio.shield(job)               # a start that moves on doesn't waste it
 
     async def _resolve(self, s: streams.Stream, hops: list[dict]) -> str | None:
+        """streams.resolve, kept; for TV Agent Player its last request reads the file's head too, so even a start
+        whose file is new tells the player where the index (and, from 0, the first cluster) is."""
+        head = [] if self.cfg.player == "tvplayer" and s.filename and s.size else None
         try:
-            found = await streams.resolve(self.http, s, hops)
+            found = await streams.resolve(self.http, s, hops, head)
         finally:
             if self._link_jobs.get(s.url) is asyncio.current_task():
                 self._link_jobs.pop(s.url)
+        if found and head and not thumbs.layout((s.filename, s.size)) and (m := thumbs.Mkv.from_head(head[0], s.size)):
+            thumbs.remember((s.filename, s.size), m)
         if found:
             if len(self._links) > 200:
                 self._links.pop(min(self._links, key=lambda k: self._links[k][0]))

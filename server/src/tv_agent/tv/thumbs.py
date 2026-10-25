@@ -39,6 +39,7 @@ SHADERS = DATA_DIR / "shaders"
 # start, and the index unless it's bigger than INDEX_AT_MOST (the player takes 16 MB in all)
 START_AHEAD = 4 << 20
 INDEX_AT_MOST = 8 << 20
+INDEX_GUESS = 1 << 20       # the index's length when only the header was read (most are 0.1-0.5 MB)
 LAYOUTS_KEPT = 60           # files whose index is kept, by (name, size): read once, ahead of their start when it can be
 
 EBML, SEGMENT, SEEKHEAD, SEEK, SEEK_ID, SEEK_POS = 0x1A45DFA3, 0x18538067, 0x114D9B74, 0x4DBB, 0x53AB, 0x53AC
@@ -128,36 +129,14 @@ class Mkv:
         self.elements: dict[int, bytes] = {}   # Info, Tracks and Chapters as read (intros.py reads the last two)
         self.seeks: dict[int, int] = {}        # the seek table: where each top-level element is
         self.cues_at = (0, 0)                  # the index in the file: where it starts, how long it is
+        self.first_cluster = 0                 # where the first cluster starts in the file, when the head reaches it
 
     @classmethod
     async def read(cls, fetch) -> "Mkv":
         """`fetch(start, length)` reads the file's bytes."""
         m = cls()
         head = await fetch(0, HEAD)
-        try:
-            eid, _, ebml_end = element(head, 0)
-            if eid != EBML:
-                raise ThumbError("not a Matroska file")
-            eid, m.segment, _ = element(head, ebml_end)
-            if eid != SEGMENT:
-                raise ThumbError("not a Matroska file")
-        except (Short, ValueError):
-            raise ThumbError("not a Matroska file") from None
-        found: dict[int, bytes] = {}
-        seeks: dict[int, int] = {}
-        i = m.segment
-        try:
-            while i < len(head):                   # the top level up to the first cluster
-                eid, a, z = element(head, i)
-                if eid == CLUSTER or z < 0 or z > len(head):
-                    break
-                if eid in (INFO, TRACKS, CHAPTERS):
-                    found[eid] = head[i:z]
-                elif eid == SEEKHEAD:
-                    seeks |= m._seeks(head, a, z)
-                i = z
-        except (Short, ValueError):
-            pass
+        ebml_end, found, seeks = m._top(head)
         for eid in (INFO, TRACKS, CUES_ID):    # what wasn't in the head, where the seek table says
             if eid not in found and eid in seeks:
                 found[eid] = await m._whole(fetch, m.segment + seeks[eid], CUES if eid == CUES_ID else 64 << 10)
@@ -175,6 +154,54 @@ class Mkv:
         if not m.times:
             raise ThumbError("no seek index in the file")
         return m
+
+    @classmethod
+    def from_head(cls, head: bytes, size: int) -> "Mkv | None":
+        """Where the index and the first cluster are, from the file's first bytes alone (the link check reads
+        them): enough for `ranges` of a start from 0, and of the index (its length guessed, INDEX_GUESS) for any
+        start, before the index itself is read. None when it isn't a Matroska file or the seek table doesn't say."""
+        m = cls()
+        try:
+            _, _, seeks = m._top(head)
+        except ThumbError:
+            return None
+        if CUES_ID not in seeks:
+            return None
+        at = m.segment + seeks[CUES_ID]
+        m.seeks, m.cues_at = seeks, (at, max(0, min(INDEX_GUESS, size - at)))
+        return m
+
+    def _top(self, head: bytes) -> tuple[int, dict[int, bytes], dict[int, int]]:
+        """The top level of the file's first bytes, up to the first cluster: where the EBML header ends, Info, Tracks
+        and Chapters when they're there, the seek table; self.segment and self.first_cluster set."""
+        try:
+            eid, _, ebml_end = element(head, 0)
+            if eid != EBML:
+                raise ThumbError("not a Matroska file")
+            eid, self.segment, _ = element(head, ebml_end)
+            if eid != SEGMENT:
+                raise ThumbError("not a Matroska file")
+        except (Short, ValueError):
+            raise ThumbError("not a Matroska file") from None
+        found: dict[int, bytes] = {}
+        seeks: dict[int, int] = {}
+        i = self.segment
+        try:
+            while i < len(head):                   # the top level up to the first cluster
+                eid, a, z = element(head, i)
+                if eid == CLUSTER:
+                    self.first_cluster = i
+                    break
+                if z < 0 or z > len(head):
+                    break
+                if eid in (INFO, TRACKS, CHAPTERS):
+                    found[eid] = head[i:z]
+                elif eid == SEEKHEAD:
+                    seeks |= self._seeks(head, a, z)
+                i = z
+        except (Short, ValueError):
+            pass
+        return ebml_end, found, seeks
 
     @staticmethod
     def _seeks(b: bytes, a: int, z: int) -> dict[int, int]:
@@ -267,6 +294,8 @@ class Mkv:
         out = [{"at": self.cues_at[0], "bytes": self.cues_at[1]}] if 0 < self.cues_at[1] <= INDEX_AT_MOST else []
         if self.places:
             out.append({"at": self.segment + self.places[self.cue(ms)][0], "bytes": START_AHEAD})
+        elif self.first_cluster and ms == 0:                # only the head read: a start from the beginning
+            out.append({"at": self.first_cluster, "bytes": START_AHEAD})
         return out
 
     async def keyframe(self, fetch, i: int) -> bytes:
@@ -401,8 +430,9 @@ _layouts: OrderedDict[tuple[str, int], Mkv] = OrderedDict()
 
 
 def remember(file: tuple[str, int] | None, m: Mkv):
-    """A file's index, kept by (filename, size) for its next start (ranges) and previews."""
-    if file and file[0] and file[1]:
+    """A file's index, kept by (filename, size) for its next start (ranges) and previews. One read from the head
+    alone (Mkv.from_head) doesn't replace a whole one."""
+    if file and file[0] and file[1] and not (m.places == [] and (known := _layouts.get(file)) and known.places):
         _layouts[file] = m
         _layouts.move_to_end(file)
         while len(_layouts) > LAYOUTS_KEPT:
@@ -473,7 +503,7 @@ class Thumbs:
 
             async def read():
                 t0 = time.perf_counter()
-                if kept := layout(self._file):
+                if (kept := layout(self._file)) and kept.places:    # not one from the head alone
                     return kept
                 m = await Mkv.read(self._fetch)
                 remember(self._file, m)

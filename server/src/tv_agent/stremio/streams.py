@@ -356,19 +356,22 @@ async def fetch(http: httpx.AsyncClient, addons: list[Addon], kind: str, video_i
     return found
 
 
-async def resolve(http: httpx.AsyncClient, s: Stream, hops: list[dict] | None = None) -> str | None:
+async def resolve(http: httpx.AsyncClient, s: Stream, hops: list[dict] | None = None,
+                  head: list[bytes] | None = None) -> str | None:
     """Where the link leads when it plays, else None. A one-byte range request: the link answers with file bytes,
     not an error page. Redirects are followed by hand, because AIOStreams redirects a link that can't play (not
     cached after all, failed, rate-limited) to a short explanatory video that would otherwise look fine. Debrid
     services label files loosely (Premiumize: application/force-download), so anything but a web page or JSON
     counts. The player is given the final address: each of its range requests (header, index, the resume point)
     then skips the addon's redirect. `hops`: each request's host, answer and time are added to it (no paths: they
-    carry keys)."""
+    carry keys). `head`: the file's first bytes (thumbs.HEAD, ~45 ms more than one) are added to it, where a
+    Matroska file says where its index and first cluster are (thumbs.Mkv.from_head)."""
     url = s.url
+    wanted = f"bytes=0-{thumbs.HEAD - 1}" if head is not None else "bytes=0-0"
     try:
         for _ in range(4):
             t = time.perf_counter()
-            async with http.stream("GET", url, headers={"Range": "bytes=0-0", **s.headers}, timeout=5,
+            async with http.stream("GET", url, headers={"Range": wanted, **s.headers}, timeout=5,
                                    follow_redirects=False) as r:
                 if hops is not None:
                     hops.append({"host": r.url.host, "status": r.status_code, "ms": round(tracing.since(t))})
@@ -379,7 +382,16 @@ async def resolve(http: httpx.AsyncClient, s: Stream, hops: list[dict] | None = 
                                  httpx.URL(url).path.rsplit("/", 1)[-1])
                         return None
                     continue
-                return url if _file_bytes(r) else None
+                if not _file_bytes(r):
+                    return None
+                if head is not None:
+                    got = bytearray()
+                    async for chunk in r.aiter_bytes():     # never more, even from a server that sends it all
+                        got += chunk
+                        if len(got) >= thumbs.HEAD:
+                            break
+                    head.append(bytes(got[:thumbs.HEAD]))
+                return url
     except httpx.HTTPError:
         return None
     return None

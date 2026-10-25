@@ -448,9 +448,10 @@ def link_agent(monkeypatch, resolves: dict[str, str | None], rechecks: bool = Tr
     leads) after 50 ms; streams.recheck answers `rechecks`."""
     a = Agent.__new__(Agent)
     a._links, a._link_jobs, a.http = {}, {}, None
+    a.cfg = types.SimpleNamespace(player="kodi", probe_streams=True)
     calls = []
 
-    async def resolve(http, s, hops=None):
+    async def resolve(http, s, hops=None, head=None):
         calls.append(("resolve", s.url))
         await asyncio.sleep(0.05)
         if hops is not None:
@@ -634,3 +635,31 @@ def test_the_players_own_timing_of_a_start_is_logged_with_its_reads(caplog):
     assert line.endswith("reads 0.00 GB 3→311 ms 2.1 MB, 4.12 GB 360→… ms 0.0 MB")
     stats = a.state.timings.summary()
     assert stats["player:decoder"]["p50"] == 212 and stats["player:first_byte"]["p50"] == 311
+
+
+def test_a_link_check_for_the_player_reads_the_files_head_and_keeps_where_its_index_is(monkeypatch):
+    sent = []
+    head = (b"\x1a\x45\xdf\xa3\x80"                          # EBML, empty
+            b"\x18\x53\x80\x67\x01\xff\xff\xff\xff\xff\xff\xff"  # Segment, unknown size: its data starts at 17
+            b"\x11\x4d\x9b\x74\x8f" b"\x4d\xbb\x8c\x53\xab\x84\x1c\x53\xbb\x6b\x53\xac\x82\x10\x00"  # Cues at 4096
+            b"\x1f\x43\xb6\x75\x01\xff\xff\xff\xff\xff\xff\xff")  # the first Cluster, at 37
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request.headers.get("range"))
+        if request.url.host == "addon.example":
+            return httpx.Response(302, headers={"location": "https://cdn.example/f.mkv"})
+        return httpx.Response(200, headers={"content-type": "video/x-matroska"}, content=head + b"\0" * (600 << 10))
+
+    async def run():
+        a = Agent.__new__(Agent)
+        a._links, a._link_jobs = {}, {}
+        a.cfg = types.SimpleNamespace(player="tvplayer")
+        monkeypatch.setattr(agent_mod.thumbs, "_layouts", agent_mod.thumbs.OrderedDict())
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            a.http = http
+            s = S.Stream("AIOStreams", "https://addon.example/play/1", "n", "", "X.mkv", 0, size=10_000_000)
+            return await a.link(s), agent_mod.thumbs.layout(("X.mkv", 10_000_000))
+    link, m = asyncio.run(run())
+    assert link == "https://cdn.example/f.mkv" and sent == [f"bytes=0-{agent_mod.thumbs.HEAD - 1}"] * 2
+    assert m.ranges(0) == [{"at": 17 + 4096, "bytes": agent_mod.thumbs.INDEX_GUESS},
+                           {"at": 37, "bytes": agent_mod.thumbs.START_AHEAD}]
