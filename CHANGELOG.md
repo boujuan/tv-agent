@@ -4,9 +4,21 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
-## panel — unreleased
+## panel 0.11.0 — 2026-10-25
+
+### Added
+
+- **Quality** tab: each step's success rate and p50/p95 time, who decided and how often rightly, the models' calls
+  and cost, the cost per day, the commonest failures (double-click: an example in Decisions), over today, 7 or 30
+  days or all, from the TV, the phones, typed or the laptop's mic; the nightly check's runs against the baseline,
+  their regressions, fixes and cost, **Run it now**, **Accept as the baseline**; a regression notifies you once.
+- **This was right** and **This was wrong, it should be…** for a command (right-click in Activity, or beside Copy as
+  JSON in Decisions): the words said, what it should have done (taught unless unticked), the right episode or
+  moment; it becomes a voice test, or one of your sentences, and an episode or scene case. They replace "Add to
+  voice tests…", "Teach the right action…" and "Mark as wrong".
 
 ### Changed
+
 - Settings › **Save** writes only what you changed (a binge mode or language said by voice meanwhile stays), and the
   running voice agent takes it live from the next command, as the phones' changes, instead of always restarting:
   player, quality, languages, binge mode, auto skip, the episode check, history, Twitch favourites and updates live;
@@ -33,8 +45,14 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 - Overview › TV: the TV app's button says it builds from this copy's code (releases install from Settings ›
   Updates).
 - "Speech to text" and "decision model" said the same way on every tab.
+- "What can you do?" (the TV's and the panel's list): finding an episode by what happens in it ("play the episode of
+  The Bear where …", decided by the LLM, marked so in the panel), "jump to when …", "yes" for the first of a list,
+  "cancel" also stopping a start on its way, "skip the intro" going 90 s ahead with no intro times, jumps exact in TV
+  Agent Player too (it said Kodi only), and a title it isn't sure of being listed.
+- Replies that pointed at old places now point at the panel's: "Update the TV app to see the list" (Settings ›
+  Updates, not `android/build-and-install.sh`), the history being off (Settings › Other), the LLM's key.
 
-## server — unreleased
+## server 0.13.0 — 2026-10-25
 
 ### Added
 - Intros, recaps and credits found in the files themselves (`intros.py`): "skip the intro" no longer depends on the
@@ -77,26 +95,6 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   `voice-tests/sentences.jsonl` and `finding.jsonl` (never in the repo): `bench_chains.py` and `bench_finding.py` run
   them with the repo's (`--no-mine` without); `--out` keeps a run's results, with what it cost.
 - The episode and scene searches' traces start with what was asked for.
-
-## panel — unreleased
-
-### Added
-- **Quality** tab: each step's success rate and p50/p95 time, who decided and how often rightly, the models' calls
-  and cost, the cost per day, the commonest failures (double-click: an example in Decisions), over today, 7 or 30
-  days or all, from the TV, the phones, typed or the laptop's mic; the nightly check's runs against the baseline,
-  their regressions, fixes and cost, **Run it now**, **Accept as the baseline**; a regression notifies you once.
-- **This was right** and **This was wrong, it should be…** for a command (right-click in Activity, or beside Copy as
-  JSON in Decisions): the words said, what it should have done (taught unless unticked), the right episode or
-  moment; it becomes a voice test, or one of your sentences, and an episode or scene case. They replace "Add to
-  voice tests…", "Teach the right action…" and "Mark as wrong".
-
-### Changed
-- "What can you do?" (the TV's and the panel's list): finding an episode by what happens in it ("play the episode of
-  The Bear where …", decided by the LLM, marked so in the panel), "jump to when …", "yes" for the first of a list,
-  "cancel" also stopping a start on its way, "skip the intro" going 90 s ahead with no intro times, jumps exact in TV
-  Agent Player too (it said Kodi only), and a title it isn't sure of being listed.
-- Replies that pointed at old places now point at the panel's: "Update the TV app to see the list" (Settings ›
-  Updates, not `android/build-and-install.sh`), the history being off (Settings › Other), the LLM's key.
 
 ## server 0.12.0 — 2026-10-24
 
