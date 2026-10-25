@@ -134,18 +134,31 @@ def test_two_of_three_must_share_a_long_clean_stretch():
 # ---- release groups' votes ----
 
 def test_one_group_s_chapters_are_outvoted_by_two_others():
-    """Pluribus S1E3 (measured 2026-10-24): FLUX's three releases put the intro at 7:19, REPACK and NTb at 6:23,
+    """Pluribus S1E3 (measured 2026-10-24): FLUX's three releases put the intro at 7:19, Kitsune and NTb at 6:23,
     where the season's theme is."""
     flux = Segment("intro", 439_222, 464_181, "chapters")
     right = Segment("intro", 383_791, 408_750, "chapters of another copy")
-    best, sure = I.vote(("flux", flux), [("flux", flux), ("flux", flux), ("repack", right), ("ntb", right)])
+    fl = ("flux", ((0, "Studio Logo"), (439_222, "Intro")))
+    v = lambda src, seg, sig=None: (src, sig or (src,), seg)                          # noqa: E731
+    best, sure = I.vote((*fl, flux), [(*fl, flux), (*fl, flux), v("kitsune", right), v("ntb", right)])
     assert best == right and sure
-    assert I.vote(("flux", flux), [("flux", flux)]) == (flux, False)          # one group: not sure
-    assert I.vote(("ihatepeaches", flux), []) == (flux, False)
+    assert I.vote((*fl, flux), [(*fl, flux)]) == (flux, False)          # one group: not sure
+    assert I.vote(v("ihatepeaches", flux), []) == (flux, False)
     assert I.vote(None, []) == (None, False)
     near = Segment("intro", 384_500, 409_000, "chapters")
-    assert I.vote(("a", near), [("b", right)]) == (near, True)               # within 2 s: they agree, mine kept
+    assert I.vote(v("a", near), [v("b", right)]) == (near, True)               # within 2 s: they agree, mine kept
     assert I.group("Pluribus S01E03 Grenade 1080p ATVP WEB-DL DDP5 1 Atmos H 264-FLUX.mkv") == "flux"
+
+
+def test_copies_with_the_same_chapter_list_are_one_source_whatever_their_name():
+    """On the TV (2026-10-25) FLUX's wrong chapters won once: a second copy carried the very same chapter list under
+    another name. The same list, to the millisecond, is one source."""
+    wrong = Segment("credits", 2_489_041, 2_582_000, "chapters")
+    right = Segment("credits", 2_521_916, 2_582_000, "chapters")
+    sig = ((0, "Studio Logo"), (8_008, "Recap"), (2_489_041, "Credits"))
+    best, sure = I.vote(("kitsune", ("k",), right), [("flux", sig, wrong), ("pluribus.s01e03.2160p", sig, wrong)])
+    assert best == right and not sure                    # one against one: this file's, not sure
+    assert I.sources([("a", ("x",), wrong), ("b", ("x",), wrong), ("b", ("y",), wrong), ("c", ("z",), wrong)]) == 2
 
 
 # ---- the finder, on fake files ----
@@ -193,7 +206,8 @@ def test_chapters_two_groups_agree_on_are_sure_and_nothing_is_listened_to(tmp_pa
     C = I.Chapter
     ch = [C(383_791, "Intro"), C(408_750, "Chapter 2"), C(2_521_916, "End Credits")]
     playing = FakeFile("Pluribus S01E03 2160p ATVP WEB-DL DV-NTb.mkv", 8_160_000_000, 2_582_000, ch)
-    other = FakeFile("Pluribus S01E03 REPACK 2160p ATVP WEB-DL-RAWR.mkv", 8_180_000_000, 2_582_040, ch)
+    other = FakeFile("Pluribus S01E03 REPACK 2160p ATVP WEB-DL-RAWR.mkv", 8_180_000_000, 2_582_040,
+                     [C(0, "Chapter 1"), C(383_800, "Intro"), C(408_800, "Chapter 3"), C(2_522_000, "End Credits")])
     flux = FakeFile("Pluribus S01E03 1080p ATVP WEB-DL-FLUX.mkv", 3_480_000_000, 2_582_000,
                     [C(439_222, "Intro"), C(464_181, "Scene 03"), C(2_489_041, "Credits")])
     f, make, copies = finder(tmp_path, {"tt2:1:3": [playing, other, flux]}, monkeypatch)
@@ -205,7 +219,8 @@ def test_chapters_two_groups_agree_on_are_sure_and_nothing_is_listened_to(tmp_pa
     assert f.known("tt2", playing.name, playing.size) == found                 # kept
     # the FLUX copy played: its chapters outvoted, the other groups' times instead
     found = asyncio.run(f.find("tt2", "tt2:1:3", "Pluribus", make(flux), copies, []))
-    assert [(s.kind, s.start_ms, s.sure) for s in found] == [("intro", 383_791, True), ("credits", 2_521_916, True)]
+    assert [(s.kind, s.sure) for s in found] == [("intro", True), ("credits", True)]
+    assert abs(found[0].start_ms - 383_791) <= 100 and abs(found[1].start_ms - 2_521_916) <= 100
     assert "KEY" not in str(f.store.title("tt2"))                              # no link kept
 
 

@@ -627,19 +627,46 @@ def _agree(a: Segment, b: Segment) -> bool:
     return abs(a.start_ms - b.start_ms) <= AGREE_MS and (a.kind == "credits" or abs(a.end_ms - b.end_ms) <= AGREE_MS)
 
 
-def vote(mine: tuple[str, Segment] | None, theirs: list[tuple[str, Segment]]) -> tuple[Segment | None, bool]:
-    """Of this file's chapter marker and the same-cut copies' (group, marker), the one most release groups agree on
-    (this file's on a tie), and whether two groups or more do (sure). One group's chapters can be off: FLUX's
-    Pluribus S1E3 intro is 55 s late and its credits 33 s early in all three of its releases, where two other
-    groups and the sound agree."""
+Vote = tuple[str, tuple, Segment]          # (release group, the copy's whole chapter list, the marker)
+
+
+def signature(chs: list[Chapter]) -> tuple:
+    """A copy's chapter list, as a whole: two copies with the same one took their chapters from one place."""
+    return tuple((c.start_ms, c.name) for c in chs)
+
+
+def sources(votes: list[Vote]) -> int:
+    """How many independent sources these are: votes from one release group, or with the same chapter list (a
+    re-encode keeps its source's), are one."""
+    left, n = list(votes), 0
+    while left:
+        n += 1
+        group_, sig, _ = left.pop()
+        linked = {group_}, {sig}
+        while True:
+            more = [v for v in left if v[0] in linked[0] or v[1] in linked[1]]
+            if not more:
+                break
+            for v in more:
+                left.remove(v)
+                linked[0].add(v[0])
+                linked[1].add(v[1])
+    return n
+
+
+def vote(mine: Vote | None, theirs: list[Vote]) -> tuple[Segment | None, bool]:
+    """Of this file's chapter marker and the same-cut copies', the one most independent sources agree on (this
+    file's on a tie), and whether two or more do (sure). One group's chapters can be off: FLUX's Pluribus S1E3
+    intro is 55 s late and its credits 33 s early in all three of its releases, where two other groups and the sound
+    agree."""
     every = ([mine] if mine else []) + theirs
     if not every:
         return None, False
 
-    def groups(x: Segment) -> int:
-        return len({g for g, y in every if _agree(x, y)})
-    best = max(every, key=lambda gx: (groups(gx[1]), gx is mine))[1]
-    return best, groups(best) >= 2
+    def agreeing(x: Segment) -> int:
+        return sources([v for v in every if _agree(x, v[2])])
+    best = max(every, key=lambda v: (agreeing(v[2]), v is mine))[2]
+    return best, agreeing(best) >= 2
 
 
 class Finder:
@@ -720,12 +747,13 @@ class Finder:
     async def _find(self, imdb, video, show, f: Copy, copies, neighbours, lang, cost: Cost,
                     others: list[Copy]) -> list[Segment]:
         f.head = f.head or await header(f.reader)
-        mine = {s.kind: (group(f.filename), s) for s in from_chapters(f.head.chapters, f.head.duration_ms, show)}
+        mine = {s.kind: (group(f.filename), signature(f.head.chapters), s)
+                for s in from_chapters(f.head.chapters, f.head.duration_ms, show)}
         cost.steps.append(f"chapters: {', '.join(mine) or 'none named'}")
         season = int(video.split(":")[1]) if video.count(":") == 2 else 0
         # Other copies' chapters: the same cut's to compare with this file's, another cut's moved onto it. One copy
         # per release group first; read until two groups agree on everything there is
-        same: dict[str, list[tuple[str, Segment]]] = {k: [] for k in KINDS}
+        same: dict[str, list[Vote]] = {k: [] for k in KINDS}
         moved: dict[str, Segment] = {}
         listed = sorted((x for x in await copies(video) if (x[0], x[1]) != (f.filename, f.size)),
                         key=lambda x: (not CHAPTERED.search(x[0]), not WEB_DL.search(x[0]), -(x[1] or 0)))
@@ -748,9 +776,13 @@ class Finder:
             if (c := await self._open(opener, others, cost, filename)) is None:
                 continue
             theirs = from_chapters(c.head.chapters, c.head.duration_ms, show)
-            if abs(f.head.duration_ms - c.head.duration_ms) <= SAME_CUT_MS:
+            cut = abs(f.head.duration_ms - c.head.duration_ms) <= SAME_CUT_MS
+            cost.steps.append(f"{group(filename)} ({'same cut' if cut else 'another cut'}): "
+                              + (", ".join(f"{t.kind} {t.start_ms / 1000:.1f}" for t in theirs) or "nothing named"))
+            if cut:
                 for t in theirs:
-                    same[t.kind].append((group(filename), _shifted(t, 0, "chapters of another copy")))
+                    same[t.kind].append((group(filename), signature(c.head.chapters),
+                                         _shifted(t, 0, "chapters of another copy")))
             else:
                 lacking = [t for t in theirs if t.kind not in mine and not same[t.kind] and t.kind not in moved]
                 for t in await self._move(c, f, lacking, lang, cost):
