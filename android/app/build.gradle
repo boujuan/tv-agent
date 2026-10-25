@@ -16,8 +16,8 @@ android {
         minSdk 34
         targetSdk 34
         // Released as android-v<versionName> tags (see RELEASING.md); bump versionCode with every release.
-        versionCode 12
-        versionName '0.9.2'
+        versionCode 13
+        versionName '0.9.3'
     }
 
     signingConfigs {

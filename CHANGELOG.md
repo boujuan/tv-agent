@@ -4,7 +4,14 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
-## server — unreleased
+## android 0.9.3 — 2026-10-25
+
+### Added
+- The apps the TV's home screen lists, with their names and icons, written for the voice agent on request
+  (ADB can't read them), so the phones' remote and "open …" follow what's really installed. Only the agent's ADB
+  shell can ask for it. Needs server 0.14.0 to be used.
+
+## server 0.14.0 — 2026-10-25
 
 ### Changed
 - TV Agent Player is the default player (`player = "tvplayer"`); Kodi and Just Player stay a setting away, and
@@ -32,7 +39,7 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 - A subtitle addon whose downloads fail says so in the trace ("offered, but the downloads failed (addon: HTTP
   503)"), instead of "none came in time".
 
-## panel — unreleased
+## panel 0.12.0 — 2026-10-25
 
 ### Changed
 - Quality › the nightly run's details: what went wrong and was right when run again ("unsteady", amber, not
