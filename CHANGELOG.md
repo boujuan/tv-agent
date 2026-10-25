@@ -4,7 +4,7 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
-## server — unreleased
+## server 0.13.1 — 2026-10-25
 
 ### Fixed
 - Intros found in the files, from the first try on the TV: copies with the same chapter list count as one source
