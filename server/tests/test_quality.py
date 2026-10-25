@@ -65,6 +65,7 @@ def test_nightly_compares_with_the_baseline_and_alerts_only_on_a_regression(tmp_
         out.write_text(json.dumps(results[name]))
         return results[name], 1.0
     monkeypatch.setattr(Q, "_bench", bench)
+    monkeypatch.setattr(Q.time, "strftime", lambda f, *a: "2026-10-24-0430" if f == "%Y-%m-%d-%H%M" else "2026-10-24")
     first = Q.nightly("local", ["chains"], tmp_path)
     assert first["regressions"] == 0 and first["benches"]["chains"]["right"] == 1
     assert (tmp_path / "baselines" / "chains.json").exists() and Q.alert(tmp_path) is None
