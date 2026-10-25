@@ -8,6 +8,15 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
+    <!-- The apps the TV's home screen lists, for the agent's app list (AppsReceiver): Android 11+ hides other
+         packages from an app unless it says which it looks for. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="false"
         android:label="TV agent"
@@ -58,6 +67,12 @@
         <!-- Pairing: `tv-agent tv pair` sends the agent's address and token (shell only, like the above). -->
         <receiver
             android:name=".ConfigReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+
+        <!-- The TV's apps with their names and icons for the agent (shell only, like the above). -->
+        <receiver
+            android:name=".AppsReceiver"
             android:exported="true"
             android:permission="android.permission.DUMP" />
     </application>
