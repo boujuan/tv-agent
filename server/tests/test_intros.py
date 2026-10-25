@@ -224,6 +224,23 @@ def test_chapters_two_groups_agree_on_are_sure_and_nothing_is_listened_to(tmp_pa
     assert "KEY" not in str(f.store.title("tt2"))                              # no link kept
 
 
+def test_a_copy_outvoted_on_one_marker_is_not_believed_on_the_others(tmp_path, monkeypatch):
+    """On the TV (2026-10-25): FLUX's Pluribus S1E3 recap is the episode's own opening, and its S1E4 credits come
+    35 s early, where the only other copy marking credits says otherwise. Its intro was outvoted: so are the rest."""
+    C = I.Chapter
+    playing = FakeFile("Pluribus S01E04 2160p ATVP WEB-DL-Kitsune.mkv", 8_200_000_000, 2_716_214, [])
+    ntb = FakeFile("Pluribus S01E04 2160p ATVP WEB-DL-NTb.mkv", 8_160_000_000, 2_716_200,
+                   [C(0, "Chapter 1"), C(612_875, "Intro"), C(635_500, "Chapter 2")])
+    flux = FakeFile("Pluribus S01E04 2160p ATVP WEB-DL-FLUX.mkv", 8_180_000_000, 2_716_200,
+                    [C(0, "Studio Logo"), C(8_008, "Recap"), C(49_383, "Scene 01"), C(670_600, "Intro"),
+                     C(693_000, "Scene 03"), C(2_622_000, "Credits")])
+    neo = FakeFile("Pluribus.S01.E04.Multi.2160p-Neostark.mkv", 1_550_000_000, 2_716_220,
+                   [C(0, "Chapter 1"), C(612_900, "Intro"), C(635_600, "Chapter 3"), C(2_657_600, "End Credits")])
+    f, make, copies = finder(tmp_path, {"tt2:1:4": [playing, ntb, flux, neo]}, monkeypatch)
+    found = asyncio.run(f.find("tt2", "tt2:1:4", "Pluribus", make(playing), copies, []))
+    assert [(s.kind, s.start_ms, s.sure) for s in found] == [("intro", 612_875, True), ("credits", 2_657_600, False)]
+
+
 def test_a_service_that_marks_credits_and_no_intro_means_there_is_none(tmp_path, monkeypatch):
     C = I.Chapter
     dsnp = FakeFile("The Bear S02E03 2160p DSNP WEB-DL-FLUX.mkv", 2_110_000_000, 1_563_100, [C(1_517_433, "Credits")])

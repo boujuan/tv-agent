@@ -787,15 +787,33 @@ class Finder:
                 lacking = [t for t in theirs if t.kind not in mine and not same[t.kind] and t.kind not in moved]
                 for t in await self._move(c, f, lacking, lang, cost):
                     moved[t.kind] = t
+        votes = {k: ([mine[k]] if k in mine else []) + same[k] for k in KINDS}
         found: dict[str, Segment] = {}
         for kind in KINDS:
             best, sure = vote(mine.get(kind), same[kind])
-            if best is None and kind in moved:
-                best, sure = moved[kind], False
             if best is not None:
                 found[kind] = replace(best, sure=sure)
-                cost.steps.append(f"{kind} at {best.start_ms / 1000:.1f} s: "
-                                  + ("release groups agree" if sure else "one group's chapters"))
+        # A copy outvoted on one marker isn't believed alone on another: FLUX's Pluribus S1E3 recap (not one: the
+        # episode's own opening) and its S1E4 credits (35 s early) would otherwise be shown
+        outvoted = {(v[0], v[1]) for k, x in found.items() if x.sure for v in votes[k] if not _agree(x, v[2])}
+        for kind in KINDS:
+            if kind in found and found[kind].sure:
+                continue
+            kept = [v for v in votes[kind] if (v[0], v[1]) not in outvoted]
+            mine_k = mine.get(kind) if mine.get(kind) in kept else None
+            best, sure = vote(mine_k, [v for v in kept if v is not mine_k])
+            if best is None and kind in moved:
+                best, sure = moved[kind], False
+            if best is None:
+                found.pop(kind, None)
+                if votes[kind]:
+                    cost.steps.append(f"{kind}: only copies outvoted on another marker name it")
+            else:
+                found[kind] = replace(best, sure=sure)
+        for kind, x in found.items():
+            cost.steps.append(f"{kind} at {x.start_ms / 1000:.1f} s: "
+                              + ("release groups agree" if x.sure else "one group's chapters" if x.source != "sound"
+                                 else "by sound"))
         # Services mark an intro wherever there's one to skip: their chapters with credits and no intro, none
         services = [c for c in [f, *others] if c.head and CHAPTERED.search(c.filename)
                     and abs(c.head.duration_ms - f.head.duration_ms) <= SAME_CUT_MS]
