@@ -54,7 +54,8 @@ def kodi_tracks(t: dict) -> dict:
     """The player's track lists (PROTOCOL.md, Track) in Kodi's shape (Player.GetProperties), for languages.py. A
     forced track shown with subtitles off doesn't count as subtitles on."""
     audio = [{"index": a["i"], "language": a.get("lang") or "", "name": a.get("label") or "", "codec": a.get("codec"),
-              "channels": a.get("ch"), "isdefault": bool(a.get("default")), "isimpaired": False, "isoriginal": False}
+              "channels": a.get("ch"), "isdefault": bool(a.get("default")), "isimpaired": False,
+              "isoriginal": bool(a.get("original"))}
              for a in t.get("audio") or []]
     subs = [{"index": x["i"], "language": x.get("lang") or "",
              "name": (x.get("label") or "") + (" (external)" if x.get("external") else ""),
@@ -123,7 +124,8 @@ class TvPlayer:
             self.features = {str(f) for f in hello.get("features") or [] if isinstance(f, str)}
             await self._write(writer, {"t": "welcome", "v": PROTOCOL, "agent": self.version})
             self.connected.set()
-            log.info("player %s connected from %s", self.app, peer)
+            log.info("player %s connected from %s (%s)", self.app, peer,
+                     ", ".join(sorted(self.features)) or "no features")
             pinger = asyncio.create_task(self._ping(writer))
             try:
                 while True:
@@ -295,9 +297,11 @@ class TvPlayer:
     async def open(self, url: str, resume_ms: int = 0, *, item: str, title: str = "", headers: dict | None = None,
                    audio: str | None = None, subs: list[str] | None = None, bitrate: int = 0, play: bool = True,
                    http: str | None = None, info: dict | None = None, markers: list[dict] | None = None,
-                   exact: bool = False, prefetch: list[dict] | None = None, file: tuple[str, int] | None = None):
+                   exact: bool = False, prefetch: list[dict] | None = None, file: tuple[str, int] | None = None,
+                   subs_unless: str | None = None):
         """Loads it in place (the screen stays: no relaunch). `audio` and `subs` are the track plan
-        (languages.TrackPlan), applied in the player's own first choice. Each load gets its own id (`item`#run-n,
+        (languages.TrackPlan), applied in the player's own first choice (tracks_for(); `subs_unless`: no subtitles
+        when the audio it picks is in this language). Each load gets its own id (`item`#run-n,
         the one its loading screen had), so an event about the one before, even one this agent opened before a
         restart, can't be taken for this one's. `info` is what the pause screen shows (PROTOCOL.md, `info`);
         `markers` the intro, recap and credits known when it opens (set_markers sends what's found later).
@@ -324,7 +328,20 @@ class TvPlayer:
             fields["exact"] = True
         if prefetch:
             fields["prefetch"] = prefetch
+        if subs_unless:
+            fields["subs_unless"] = subs_unless
         await self.call("load", timeout=6, **fields)
+
+    def tracks_for(self, plan) -> dict:
+        """What a load or preload says about tracks (languages.TrackPlan). A player that takes the rule (feature
+        "subs_unless") gets every subtitle language and the rule, and chooses subtitles by the audio it picks before
+        its first frame; an older one gets the subtitles for the audio planned, corrected after its first `tracks`
+        if it picked another (Agent._player_subs). "original" (feature "original"): the track the file marks
+        original, for an original language not known by name."""
+        audio = plan.audio or ("original" if plan.original and "original" in self.features else None)
+        if plan.unless and "subs_unless" in self.features:
+            return {"audio": audio, "subs": plan.subtitles, "subs_unless": plan.unless}
+        return {"audio": audio, "subs": plan.subs_for(plan.audio)}
 
     @property
     def has_markers(self) -> bool:
@@ -379,8 +396,11 @@ class TvPlayer:
 
     async def preload(self, url: str, start_ms: int = 0, *, item: str, headers: dict | None = None,
                       audio: str | None = None, subs: list[str] | None = None, bitrate: int = 0,
-                      info: dict | None = None, markers: list[dict] | None = None, prefetch: list[dict] | None = None):
+                      info: dict | None = None, markers: list[dict] | None = None, prefetch: list[dict] | None = None,
+                      subs_unless: str | None = None):
         fields = {"url": url, "item": f"{item}#preload", "start_ms": max(0, int(start_ms)), "audio": audio, "subs": subs}
+        if subs_unless:
+            fields["subs_unless"] = subs_unless
         if markers:
             fields["markers"] = markers
         if prefetch:

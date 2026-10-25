@@ -4,6 +4,18 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
+## server — unreleased
+
+### Changed
+- TV Agent Player chooses the subtitles by the audio it picks, before its first frame (a player that says it can:
+  `subs_unless`, PROTOCOL.md): the agent sends all your subtitle languages and the rule "none while the audio is
+  yours". A file that lacked the audio planned no longer starts with the wrong subtitles for a moment (none, when
+  your language was expected), and one that has your language never shows subtitles at its start. Older players get
+  today's subtitles for the audio planned, corrected after their first `tracks`.
+- "Original" audio for a title whose language isn't known asks the player for the track the file marks original (a
+  player with `original`), and the voice's "original audio" uses that mark too. The player's features are in its
+  connect log line, and the start's trace says what it was told about tracks.
+
 ## android 0.9.3 — 2026-10-25
 
 ### Added

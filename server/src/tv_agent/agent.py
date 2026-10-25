@@ -1149,9 +1149,9 @@ class Agent:
                 try:
                     layout = thumbs.layout((chosen.filename, chosen.size))
                     ranges = layout.ranges(resume_ms) if layout else None
+                    tracks = self.tvplayer.tracks_for(plan)
                     await self.tvplayer.open(link, resume_ms, item=video, title=label, exact=jump or exact,
-                                             headers=chosen.headers or None, audio=plan.audio,
-                                             subs=plan.subs_for(plan.audio),
+                                             headers=chosen.headers or None, **tracks,
                                              info=_title_screen(name, meta, video) | _stream_screen(chosen),
                                              markers=self._marker_list(
                                                  self.intros.known(imdb, chosen.filename, chosen.size) or []),
@@ -1165,7 +1165,10 @@ class Agent:
                     asyncio.create_task(self._stop_kodi_when(kodi_open))
                 t_open = time.perf_counter()
                 _step("start", "load", (t_open - t_ready) * 1000, preloaded=True if preloaded else None,
-                      resume=_clock(resume_ms) if resume_ms else None,
+                      resume=_clock(resume_ms) if resume_ms else None, audio=tracks["audio"],
+                      subtitles=(f"by the audio it picks: none for {tracks['subs_unless']}, else "
+                                 f"{', '.join(tracks['subs'] or [])}") if tracks.get("subs_unless")
+                      else ", ".join(tracks["subs"]) if tracks["subs"] else "off",
                       prefetch=f"the index and the start's cluster, {sum(r['bytes'] for r in ranges) / 1e6:.1f} MB"
                       if ranges else None)
                 self.state.now_playing = NowPlaying(imdb, kind, video, name, "tvplayer", chosen.url, runtime,
@@ -1720,8 +1723,8 @@ class Agent:
                     break
             link = await self.link(s) or s.url
             plan = self.track_plan(meta)
-            await self.tvplayer.preload(link, item=video, headers=s.headers or None, audio=plan.audio,
-                                        subs=plan.subs_for(plan.audio),
+            await self.tvplayer.preload(link, item=video, headers=s.headers or None,
+                                        **self.tvplayer.tracks_for(plan),
                                         info=_title_screen(np.name, meta, video) | _stream_screen(s),
                                         markers=self._marker_list(self.intros.known(np.imdb_id, s.filename, s.size)
                                                                   or []),
@@ -1737,7 +1740,8 @@ class Agent:
                            np: NowPlaying | None = None, link: str | None = None):
         """TV Agent Player chose the file's own audio and subtitles by the plan before its first frame. What's left:
         subtitles by the audio it chose, when that isn't the audio planned (they show only for audio that isn't
-        yours: the file lacked the planned language), and subtitles from your addons when the first of your
+        yours: the file lacked the planned language; a player that takes the rule has done it already, this is for
+        older ones), and subtitles from your addons when the first of your
         languages that the file or an addon has isn't in the file, timed to the file (_sync_subtitle)."""
         if plan.subtitles is None:
             return

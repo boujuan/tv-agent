@@ -180,9 +180,10 @@ class FakeTvPlayer:
     """TvPlayer's surface without a connection: records what the agent asks."""
     item = "tt1:1:2#1"
     up = False
+    tracks_for = T.TvPlayer.tracks_for
 
     def __init__(self, pos=(600_000, 2_700_000, 1.0)):
-        self.did, self.pos, self.last = [], pos, {}
+        self.did, self.pos, self.last, self.features = [], pos, {}, set()
 
     def now(self):
         return self.pos
@@ -551,3 +552,42 @@ def test_a_start_whose_files_index_is_known_tells_the_player_what_it_will_read(m
     load = asyncio.run(run())
     assert load[3]["prefetch"] == [{"at": 7_160_000_000, "bytes": 490_000},
                                    {"at": 52 + 9_000_000, "bytes": TH.START_AHEAD}]       # the keyframe at 0:04
+
+
+def test_a_player_that_takes_the_rule_chooses_subtitles_by_the_audio_it_picks():
+    """subs_unless (PROTOCOL.md): the player picks the audio, then shows no subtitles if it's yours, else yours, so
+    nothing is wrong for a moment at the start. An older player gets today's subtitles for the audio planned."""
+    yours = languages.TrackPlan("spa", ["spa", "eng"], "spa")
+    old, new = FakeTvPlayer(), FakeTvPlayer()
+    new.features = {"subs_unless", "original"}
+    assert old.tracks_for(yours) == {"audio": "spa", "subs": None}          # corrected after its first `tracks`
+    assert new.tracks_for(yours) == {"audio": "spa", "subs": ["spa", "eng"], "subs_unless": "spa"}
+    always = languages.TrackPlan("eng", ["spa", "eng"])                      # subtitles always: no rule to send
+    assert new.tracks_for(always) == old.tracks_for(always) == {"audio": "eng", "subs": ["spa", "eng"]}
+    # the original language not known by name: the track the file marks original, with a player that knows it
+    unknown = languages.plan({}, "original", ["spa", "eng"], "spa")
+    assert unknown.original and unknown.audio is None
+    assert new.tracks_for(unknown)["audio"] == "original" and old.tracks_for(unknown)["audio"] is None
+    assert not languages.plan({"country": "Japan"}, "original", ["spa"], "spa").original      # known: by name
+
+
+def test_the_rule_and_the_original_flag_go_over_the_connection(tls):
+    async def run():
+        p, srv, fake = await server(tls)
+        await fake.connect()
+
+        async def one(coro):
+            cmd, _ = await asyncio.gather(fake.answer(), coro)
+            return cmd, None
+        cmd, _ = await one(p.open("https://debrid/f.mkv", item="tt1", audio="original", subs=["spa"],
+                                  subs_unless="spa"))
+        assert cmd["audio"] == "original" and cmd["subs"] == ["spa"] and cmd["subs_unless"] == "spa"
+        cmd, _ = await one(p.open("https://debrid/f.mkv", item="tt1", audio="eng", subs=None))
+        assert "subs_unless" not in cmd                                       # nothing new for today's loads
+        cmd, _ = await one(p.preload("https://debrid/g.mkv", item="tt2", audio="spa", subs=["spa"],
+                                     subs_unless="spa"))
+        assert cmd["t"] == "preload" and cmd["subs_unless"] == "spa"
+        srv.close()
+    asyncio.run(run())
+    got = T.kodi_tracks({"audio": [{"i": 0, "lang": "ja", "original": True}, {"i": 1, "lang": "en"}], "text": []})
+    assert [a["isoriginal"] for a in got["audiostreams"]] == [True, False]

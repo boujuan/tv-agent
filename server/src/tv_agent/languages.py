@@ -57,6 +57,8 @@ class TrackPlan:
     audio: str | None              # language to switch audio to, if the file has it; None: the file's default
     subtitles: list[str] | None    # languages to try in order; None = subtitles off
     unless: str | None = None      # no subtitles while the audio playing is in this language (yours)
+    original: bool = False         # the audio wanted is the title's original, its language not known: the file's
+                                   # track marked original, else its default
 
     def subs_for(self, audio: str | None) -> list[str] | None:
         """The subtitles to show with audio in this language (None: not known)."""
@@ -93,7 +95,8 @@ def plan(meta: dict, audio_language: str, subtitle_languages: list[str], native_
     else:
         audio = first if audio_language == "original" else audio_language
     return TrackPlan(audio, None if subtitles == "off" else list(subtitle_languages),
-                     native_language if subtitles == "foreign" else None)
+                     native_language if subtitles == "foreign" else None,
+                     original=audio is None and (asked == "original" or not asked and audio_language == "original"))
 
 
 def matches(track: dict, lang: str) -> bool:
