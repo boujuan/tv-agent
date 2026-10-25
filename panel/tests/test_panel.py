@@ -1,14 +1,14 @@
 """The panel offscreen: every tab is built and draws; Settings has a control for every setting the agent has (or it's
 in Decisions) and saves live what the running agent takes live, restarting it only for the rest; the laptop
 microphone ends a command like the TV app; About shows TV Agent Player and the phones; the Commands tab marks what
-only the LLM decides."""
+only the LLM decides; Settings › Backup shows the last backup and a restore's dry run."""
 import ast
 from pathlib import Path
 
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from tvpanel import about, common, mic, settings_tab
+from tvpanel import about, backup_card, common, mic, settings_tab
 from tvpanel.app import Panel
 
 SERVER = Path(__file__).resolve().parents[2] / "server/src/tv_agent"
@@ -133,3 +133,23 @@ def test_the_commands_tab_marks_what_only_the_llm_decides(panel):
     html = page.view.toHtml()
     assert "LLM" in html and "the episode of" in html
     page.filter.setText("")
+
+
+def test_settings_backup_shows_the_last_one_and_a_restores_dry_run(panel):
+    card = panel.settings.backup
+    card.show_state(backup_card.state())
+    assert "No backup yet" in card.last.text() and not card.restore_button.isEnabled()
+    learned = common.agent_config.CONFIG_DIR / "learned.json"
+    learned.write_text("[]")
+    made = common.agent_backup.backup()            # into the test home's ~/tv-agent-backups
+    card.show_state(backup_card.state())
+    assert "Last backup" in card.last.text() and card.restore_button.isEnabled()
+    assert str(common.agent_backup.DEFAULT_DIR) in card.folder.text() and "Not automatic" in card.auto.text()
+    assert not card.warning.isVisible()
+    learned.write_text('[{"text": "lights"}]')
+    dialog = backup_card.RestoreDialog(card, card.found)
+    dialog.show_plan(common.agent_backup.plan(made["name"], dialog.chosen()))
+    assert dialog.list.count() == 1 and "config/learned.json" in dialog.list.item(0).text()
+    assert "taught commands" in dialog.list.item(0).text() and "1 files" in dialog.summary.text()
+    assert dialog.go.isEnabled()
+    dialog.reject()

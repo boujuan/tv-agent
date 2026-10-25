@@ -5,8 +5,9 @@
     tv-agent do '{"type":"open_app","app":"kodi"}' [--dry-run]   run one action
     tv-agent doctor                                             check the TV, models, secrets
     tv-agent eval [-v]                                          score the rules on eval/utterances.jsonl
-    tv-agent setup token|stremio|kodi|services|nightly          one-time setup steps
+    tv-agent setup token|stremio|kodi|services|nightly|backups  one-time setup steps
     tv-agent quality nightly [--only voice,chains,finding]      the nightly check now (quality.py)
+    tv-agent backup [list|verify|restore <backup>]              back up this computer's setup, or restore it (backup.py)
     tv-agent tv host|shell|install|pair                         the TV: find it, run a command, set up its app
     tv-agent secret agent_token                                 print one secret
 """
@@ -354,6 +355,116 @@ def _nightly(only: list[str]) -> int:
     return 1 if run["regressions"] else 0
 
 
+def _mb(n: int) -> str:
+    return f"{n / 1e9:.1f} GB" if n >= 1e9 else f"{n / 1e6:.1f} MB" if n >= 1e5 else f"{n / 1e3:.0f} KB" if n >= 1e3 \
+        else f"{n} B"
+
+
+def _when(t: float) -> str:
+    return time.strftime("%d %b %Y %H:%M", time.localtime(t))
+
+
+def _backup(args) -> int:
+    """`tv-agent backup …`: one now (skipped when nothing changed), the list, a check, a restore."""
+    from . import backup as B
+
+    def out(data) -> int:
+        print(json.dumps(data, ensure_ascii=False, default=str))
+        return 0
+
+    folder = Path(args.to).expanduser() if args.to else None
+    try:
+        if args.what is None:
+            res = B.backup("daily" if args.daily else "manual", args.force, folder)
+            if args.json:
+                return out(res)
+            if res["skipped"]:
+                last = res["last"]
+                print(f"Nothing changed since the last backup ({_when(last['t'])}, {last['name']}): none made "
+                      "(--force makes one anyway)")
+                return 0
+            left = ", ".join(f"{x['path'].split('/', 1)[1]} {_mb(x['size'])}"
+                             for x in sorted(res["left_out"], key=lambda x: -x["size"]))
+            print(f"Backed up to {res['path']}: {res['files']} files, {_mb(res['size'])} "
+                  f"({_mb(res['new'])} new, the rest linked to the last backup's copies)")
+            print(f"Left out: {left} (why: its manifest.json)")
+            if res["removed"]:
+                print(f"Removed as older than what's kept: {', '.join(res['removed'])}")
+            print(f"{len(B.backups(Path(res['folder'])))} backups in {res['folder']}, {_mb(res['usage'])} on disk")
+            for c in res["covered"]:
+                print(f"Warning: {c} covers {res['folder']}: it could copy these keys off this computer")
+            return 0
+        if args.what == "list":
+            found = B.backups(folder)
+            if args.json:
+                return out(found)
+            for b in found:
+                print(f"{b['name']:24} {_when(b['t'])}  {b['reason'] or '':14} {_mb(b['size']):>9} "
+                      f"({_mb(b['new'])} new)  {b['files']} files")
+            where = folder or B.settings()["dir"]
+            print(f"{len(found)} backups in {where}, {_mb(B.usage(folder))} on disk" if found else
+                  f"No backups in {where} yet: tv-agent backup")
+            return 0
+        if args.what == "verify":
+            names = [args.name] if args.name else [b["name"] for b in B.backups(folder)]
+            bad_any = False
+            for name in names:
+                path = B.find(name, folder)
+                bad = B.verify(path)
+                bad_any |= bool(bad)
+                print(f"{'ok ' if not bad else 'BAD'} {path.name}: " +
+                      (f"{len(B._manifest(path)['files'])} files as they were written" if not bad else
+                       "; ".join(bad[:5]) + (f" (and {len(bad) - 5} more)" if len(bad) > 5 else "")))
+            return 1 if bad_any else 0
+        if not args.name:
+            print("usage: tv-agent backup restore <backup>|latest [--only config,data,adb,gradle] [--dry-run]",
+                  file=sys.stderr)
+            return 2
+        only = [x.strip() for x in args.only.split(",") if x.strip()] if args.only else None
+        plan = B.plan(args.name, only, folder=folder)
+        if args.dry_run and args.json:
+            return out(plan)
+        if not args.json:
+            v = plan["versions"]
+            print(f"Backup {plan['backup']} ({_when(plan['t'])}; agent {v.get('agent')}"
+                  + (f" at {v['commit']}" if v.get("commit") else "") + ")")
+            if not plan["changes"]:
+                print(f"Nothing to restore: its {plan['same']} files are as they are here")
+                return 0
+            print(f"Would write {len(plan['changes'])} files ({plan['same']} are as they are here):")
+            for c in plan["changes"]:
+                print(f"  {c['change']:8} {c['path']:52} {c['what'][:34]:34} {_mb(c['size']):>9}")
+            if plan["kept"]:
+                print(f"Left as they are (made since, not in the backup): {len(plan['kept'])} files")
+            if args.dry_run:
+                return 0
+        if not args.yes:
+            if not sys.stdin.isatty():
+                print("Add --yes to restore (or --dry-run to only see what it would do)", file=sys.stderr)
+                return 2
+            ask = input(f"Restore these {len(plan['changes'])} files? What's here is backed up first, and the voice "
+                        "agent restarts (only while nothing plays). [y/N] ")
+            if ask.strip().lower() not in ("y", "yes"):
+                print("Nothing restored")
+                return 1
+        res = B.restore(args.name, only, folder)
+        if args.json:
+            return out(res)
+        if not res["restored"]:
+            print("Nothing to restore: it's all as in the backup")
+            return 0
+        print(f"Restored {len(res['restored'])} files from {res['backup']}, each checked against the backup; "
+              f"what was here before is in {res['safety']}. Voice agent: {res['agent']}. "
+              "Restart the panel if it's open, for its preferences.")
+        return 0
+    except B.BackupError as e:
+        if args.json:
+            print(json.dumps({"error": str(e)}, ensure_ascii=False))
+        else:
+            print(f"Backup: {e}", file=sys.stderr)
+        return 1
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="tv-agent", description="Voice decision agent for the living-room TV")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -371,13 +482,27 @@ def main(argv=None):
     sy.add_argument("text")
     sy.add_argument("--dry-run", action="store_true")
     s = sub.add_parser("setup", help="one-time setup steps")
-    s.add_argument("what", choices=["token", "stremio", "kodi", "services", "nightly", "stt", "liquid", "openrouter"])
+    s.add_argument("what", choices=["token", "stremio", "kodi", "services", "nightly", "backups", "stt", "liquid",
+                                    "openrouter"])
     s.add_argument("name", nargs="?", help="stt: the speech model to download (if needed) and use")
     s.add_argument("--rotate", action="store_true", help="token: replace it (then run `tv-agent tv pair`)")
-    s.add_argument("--enable", action="store_true", help="services: also enable and start them")
+    s.add_argument("--enable", action="store_true", help="services, nightly, backups: also enable and start them")
+    s.add_argument("--to", help="backups: the folder they go to (kept in backup.json)")
     q = sub.add_parser("quality", help="the nightly check: voice tests, sentences, episode and scene searches")
     q.add_argument("what", choices=["nightly"])
     q.add_argument("--only", default="", help="some of: voice, chains, finding")
+    b = sub.add_parser("backup", help="back up this computer's setup (settings, keys, pairings, taught commands, "
+                                      "voice tests), list or check the backups, restore one")
+    b.add_argument("what", nargs="?", choices=["list", "verify", "restore"])
+    b.add_argument("name", nargs="?", help="verify, restore: a backup's name (`latest` for the newest) or folder")
+    b.add_argument("--force", action="store_true", help="a backup even when nothing changed since the last one")
+    b.add_argument("--daily", action="store_true", help=argparse.SUPPRESS)       # the timer's (its reason)
+    b.add_argument("--to", help="this folder instead of backup.json's (tv-agent setup backups --to sets that)")
+    b.add_argument("--only", help="restore: only these parts, comma-separated: config, data, adb, gradle, or paths "
+                                  "in the backup (data/voice-tests, config/learned.json)")
+    b.add_argument("--dry-run", action="store_true", help="restore: only list what it would change")
+    b.add_argument("--yes", action="store_true", help="restore: without asking")
+    b.add_argument("--json", action="store_true", help="answers as JSON (the panel's)")
     tv = sub.add_parser("tv", help="the TV over ADB: find it, run a command, install and pair its app")
     tv.add_argument("what", choices=["host", "shell", "install", "pair"])
     tv.add_argument("args", nargs=argparse.REMAINDER,
@@ -430,6 +555,23 @@ def main(argv=None):
         for path in write_nightly(getattr(args, "enable", False)):
             print(f"wrote {path}")
         return 0
+    if args.cmd == "setup" and args.what == "backups":
+        from . import backup as B
+        from .install import write_backups
+        if args.to:
+            B.save_settings(dir=Path(args.to).expanduser().absolute())
+        s = B.settings()
+        for path in write_backups(args.enable):
+            print(f"wrote {path}")
+        print(f"Backups go to {s['dir']}, kept: the newest of each of the last {s['keep_daily']} days and "
+              f"{s['keep_weekly']} weeks. " + (f"Every day at {B.DAILY_AT}, skipped when nothing changed."
+                                               if args.enable else
+                                               "Daily: systemctl --user enable --now tv-agent-backup.timer"))
+        for c in B.covered(s["dir"]):
+            print(f"Warning: {c} covers {s['dir']}: it could copy these keys off this computer")
+        return 0
+    if args.cmd == "backup":
+        return _backup(args)
     if args.cmd == "quality":
         return _nightly([x for x in args.only.split(",") if x])
     if args.cmd == "setup" and args.what == "stt":

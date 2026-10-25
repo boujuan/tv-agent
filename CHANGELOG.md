@@ -6,6 +6,19 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 
 ## server — unreleased
 
+### Added
+- `tv-agent backup`: this computer's setup in a dated, private folder (700/600, never uploaded): settings, API keys
+  and tokens, pairings, taught commands, the voice tests, the nightly check's baselines, the history, the Android
+  signing key and its password, the ADB key. The models and caches are left out. A manifest lists the versions of
+  every part, each file's SHA-256, and what's left out and why. Unchanged files are hard links to the last backup's,
+  none is made when nothing changed, and the last 7 days and 4 weeks are kept. It warns when a sync client, a git
+  repository or a network mount covers the folder.
+- `tv-agent backup restore <backup>` (`--dry-run`, `--only` parts or paths): the backup's checksums are checked,
+  what's here is backed up first, the voice agent is stopped and started again (not while something plays), and
+  each file is checked once written. `tv-agent backup list` and `verify` too.
+- `tv-agent setup backups [--to DIR] [--enable]`: the folder (`backup.json`) and a daily timer
+  (`tv-agent-backup.timer`, 05:15).
+
 ### Changed
 - TV Agent Player chooses the subtitles by the audio it picks, before its first frame (a player that says it can:
   `subs_unless`, PROTOCOL.md): the agent sends all your subtitle languages and the rule "none while the audio is
@@ -15,6 +28,13 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
 - "Original" audio for a title whose language isn't known asks the player for the track the file marks original (a
   player with `original`), and the voice's "original audio" uses that mark too. The player's features are in its
   connect log line, and the start's trace says what it was told about tracks.
+
+## panel — unreleased
+
+### Added
+- Settings › Backup: the last backup's time and size, the folder (open it, change it) and the daily timer (turn it
+  on), Back up now, and Restore… with the backup's parts to choose, the list of files it would write, and a
+  confirmation. A warning when a sync client or a git repository covers the folder.
 
 ## android 0.9.3 — 2026-10-25
 

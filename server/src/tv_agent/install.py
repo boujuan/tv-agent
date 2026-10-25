@@ -2,6 +2,7 @@
 
     tv-agent setup services [--enable]   write ~/.config/systemd/user/{llama-d1,tv-agent}.service for this install
     tv-agent setup nightly [--enable]    write the nightly check's service and timer (tv-agent-nightly.timer)
+    tv-agent setup backups [--enable]    write the daily backup's service and timer (tv-agent-backup.timer)
     tv-agent tv install <apk>            install the TV app (grant the microphone, allow it to start) or TV Agent
                                          Player (allow it to start, compile it ahead of time), and pair it
     tv-agent tv pair                     tell the TV app, and TV Agent Player if it's installed, where this agent is
@@ -21,6 +22,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from . import clients
+from .backup import DAILY_AT
 from .config import CONFIG_DIR, Config, lan_address, new_token, read_secret, save_secret
 from .tv.adb import Adb
 from .tv.tvplayer import PACKAGE as PLAYER
@@ -67,8 +69,7 @@ NIGHTLY_AT = "04:30"        # when the TV is off: the nightly check sends nothin
 def write_nightly(enable: bool) -> list[Path]:
     """The nightly check (quality.py): a oneshot service and the timer that starts it every night (missed nights run
     at the next start-up)."""
-    units = {
-        "tv-agent-nightly.service": f"""[Unit]
+    return _write_timer("tv-agent-nightly", f"""[Unit]
 Description=tv-agent's nightly check: voice tests, sentences, episode and scene searches against their baselines
 After=network-online.target
 
@@ -76,8 +77,7 @@ After=network-online.target
 Type=oneshot
 ExecStart={tv_agent_command()} quality nightly
 Nice=10
-""",
-        "tv-agent-nightly.timer": f"""[Unit]
+""", f"""[Unit]
 Description=tv-agent's nightly check, every night at {NIGHTLY_AT}
 
 [Timer]
@@ -87,16 +87,41 @@ RandomizedDelaySec=10min
 
 [Install]
 WantedBy=timers.target
-""",
-    }
+""", enable)
+
+
+def write_backups(enable: bool) -> list[Path]:
+    """The daily backup (backup.py): a oneshot service and its timer (a missed day runs at the next start-up)."""
+    return _write_timer("tv-agent-backup", f"""[Unit]
+Description=tv-agent's daily backup: settings, keys, pairings, taught commands and voice tests (none when nothing changed)
+
+[Service]
+Type=oneshot
+ExecStart={tv_agent_command()} backup --daily
+Nice=10
+IOSchedulingClass=idle
+""", f"""[Unit]
+Description=tv-agent's backup, every day at {DAILY_AT}
+
+[Timer]
+OnCalendar=*-*-* {DAILY_AT}:00
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
+""", enable)
+
+
+def _write_timer(name: str, service: str, timer: str, enable: bool) -> list[Path]:
     UNIT_DIR.mkdir(parents=True, exist_ok=True)
     written = []
-    for name, text in units.items():
-        (UNIT_DIR / name).write_text(text)
-        written.append(UNIT_DIR / name)
+    for path, text in ((UNIT_DIR / f"{name}.service", service), (UNIT_DIR / f"{name}.timer", timer)):
+        path.write_text(text)
+        written.append(path)
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
     if enable:
-        subprocess.run(["systemctl", "--user", "enable", "--now", "tv-agent-nightly.timer"], check=True)
+        subprocess.run(["systemctl", "--user", "enable", "--now", f"{name}.timer"], check=True)
     return written
 
 

@@ -446,6 +446,7 @@ the daemon refuses to start otherwise). For services across logouts: `loginctl e
 | Stop it for a while | `systemctl --user stop tv-agent llama-d1` (the mic button then says "Agent offline") |
 | Fix a command it got wrong | Say "that's wrong" right after; then in the panel's Activity tab right-click it, "This was wrong, it should be…": it's taught and becomes a test (or `tv-agent review` for the list, with an LLM's guess) |
 | See how well it does, step by step | The panel's Quality tab ([quality](#quality-and-the-nightly-check)); `tv-agent quality nightly` runs the night's check now |
+| Back up my setup, or restore it | `tv-agent backup`; `tv-agent backup restore latest --dry-run`, then without `--dry-run` ([backup](#backup)); the panel's Settings › Backup |
 
 ## Voice tests
 
@@ -511,6 +512,39 @@ way. The runs stay in
 use: $0.10 and 3 minutes for 207 voice tests, 29 sentences and 24 searches). The folder is yours alone (mode 700). A
 regression leaves `quality/alert.json`: the panel notifies you, and a paired phone
 asking `GET /v1/quality` sees it, until it's seen.
+
+## Backup
+
+`tv-agent backup` keeps this computer's setup in a dated folder: settings, API keys and tokens, the phones' and TV
+apps' pairings and the TLS key they pin, taught commands and rules, the voice tests, the nightly check's baselines,
+the history, the Android signing key and its password (the `TV_AGENT_*` lines of `~/.gradle/gradle.properties`), and
+the ADB key the TV trusts. It leaves out what's downloaded or made again: the models, the preview shaders, Just
+Player's APK, and `now-playing.json` (it holds a stream link and only matters for 6 hours). Each backup has a
+`manifest.json`: the versions (the agent and its commit, the panel, the TV app, TV Agent Player and the phones, as
+the agent last saw them), every file's size and SHA-256, and what's left out and why.
+
+```bash
+tv-agent setup backups --to ~/Backups/tv-agent --enable   # where they go (backup.json), and every day at 05:15
+tv-agent backup                       # one now; none when nothing changed since the last (--force: anyway)
+tv-agent backup list                  # what's kept and the space it takes
+tv-agent backup verify                # each backup's files against their checksums
+tv-agent backup restore latest --dry-run              # what it would write: new or changed files
+tv-agent backup restore 2026-10-25-174501 --only config,data/voice-tests
+```
+
+- **Private**: the folder is 700 and its files 600 from their first byte. It holds keys and tokens, so it's never
+  uploaded; `tv-agent backup` warns when a sync client's folder (Syncthing, Dropbox, Nextcloud…), a git
+  repository that doesn't ignore it, or a network mount covers the folder. For a copy elsewhere, copy the folder
+  yourself to a disk you keep private.
+- **Space**: a file the newest backup has unchanged is a hard link to its copy, so each backup is whole on its own
+  and the voice tests take their space once. Kept: the newest of each of the last 7 days that have one and of each
+  of the last 4 weeks (`keep_daily`, `keep_weekly` in `backup.json`), and the last 3 made before a restore.
+- **Restore** checks the backup against its checksums, backs up what's here first (`safety-…`), stops the voice
+  agent (refused while something plays or is paused in a player), writes the backup's files where they came from,
+  checks each one, and starts the agent again. Parts: `config` (`~/.config/tv-agent`), `data`
+  (`~/.local/share/tv-agent`), `adb` (`~/.android`), `gradle` (the signing key's password), or any path in the
+  backup. Files made since the backup are left as they are. The panel's Settings › Backup does the same with a
+  list of the changes and a confirmation.
 
 ## HTTP API
 
@@ -620,11 +654,14 @@ offered) are in `~/.local/share/tv-agent/traces/<t>.json.gz` (mode 600), named b
 - **Just Player** gets the debrid link on its `am start` command line (over ADB), and `ffprobe` gets it as an
   argument on this computer.
 - **ADB** must stay on for this (USB debugging, port 5555).
+- **Backups** ([backup](#backup)) hold every secret above, the ADB key and the Android signing key with its password:
+  folder 700, files 600, kept on this computer only.
 
 ## Undo
 
 ```bash
 systemctl --user disable --now tv-agent llama-d1 && rm ~/.config/systemd/user/{tv-agent,llama-d1}.service
+systemctl --user disable --now tv-agent-backup.timer tv-agent-nightly.timer   # and their units, if set up
 tv-agent logout                                              # invalidates the Stremio auth key
 tv-agent tv shell pm uninstall com.boujuan.tvagent
 tv-agent tv shell pm uninstall com.boujuan.tvagent.player                 # TV Agent Player, if installed
@@ -657,6 +694,7 @@ rm -rf ~/.config/tv-agent ~/.local/share/tv-agent ~/.local/opt/llama.cpp ~/.loca
 | `systemd/` | User services for a packaged install (`tv-agent setup services` writes them for a checkout) |
 | `src/tv_agent/voicetests.py` | Voice tests: labels for kept recordings, seeded from the history; comparing runs; a command kept as tests |
 | `src/tv_agent/quality.py` | The Quality numbers from the history's traces; the nightly check against its baselines |
+| `src/tv_agent/backup.py` | Backups of this computer's setup: dated, hard-linked, checked; rotation; the dry run and the restore |
 | `scripts/` | `fetch-models.sh`; `bench_voice.py` (your voice tests), `bench_fallbacks.py` (decision paths and models on `eval/`), `bench_chains.py` (chained commands), `bench_finding.py` (episodes and scenes from a description, timed), `bench_starts.py` (starts up to the link, timed, nothing on the TV), Phase 0 benchmarks |
 | `eval/` | `utterances.jsonl` (107 labelled sentences, the panel's tests), `commands.jsonl` (654, made by `build_commands.py`: every action, titles made of command words, numbers in every form, fillers, mishearings, non-commands), `chains.jsonl` (chained commands, ones that aren't, ones refused), `finding.jsonl` (episodes and scenes described, with the right answers), `starts.jsonl` (films and episodes to start, for `bench_starts.py`) |
 | `tests/` | Offline unit tests |

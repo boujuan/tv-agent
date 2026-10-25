@@ -1,6 +1,7 @@
 """Settings tab: the agent's settings (config.toml; the window's Save writes them, live in the running agent where it
 takes them, else it restarts) and this panel's own behaviour (tray, notifications, start at login; applied at once).
-Also export/import of everything, and whether the chosen player is on the TV."""
+Also export/import of everything, backups of this computer's setup (Backup), and whether the chosen player is on the
+TV."""
 import json
 import os
 import subprocess
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog
                                QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
                                QMessageBox, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
+from .backup_card import BackupCard
 from .common import (AMBER, GREEN, PLAYER_NAMES, RED, TV_AGENT, Say, agent_config, api, card, dim, load_cfg,
                      set_autostart)
 from .phones import Phones
@@ -252,6 +254,8 @@ class Settings(QScrollArea):
         outer.addWidget(self.updates)
         self.phones = Phones(panel)                 # its own API calls, applied at once (not the window's Save)
         outer.addWidget(self.phones)
+        self.backup = BackupCard(panel)             # backups of this computer's setup: tv-agent backup, at once too
+        outer.addWidget(self.backup)
 
         self.show_advanced = QCheckBox("Show advanced settings (addresses, ports, phones, Kodi login, pairing)")
         outer.addWidget(self.show_advanced)

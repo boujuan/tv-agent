@@ -20,6 +20,7 @@ try:                                                   # the installed tv-agent 
 except ImportError:
     sys.path.insert(0, str(REPO / "server" / "src"))
 from tv_agent import activity as agent_activity  # noqa: E402,F401  (stdlib only)
+from tv_agent import backup as agent_backup  # noqa: E402,F401  (stdlib only)
 from tv_agent import config as agent_config  # noqa: E402  (stdlib only; the daemon's own checks)
 from tv_agent import stt as agent_stt  # noqa: E402,F401  (stdlib only until a model is loaded)
 from tv_agent import voicetests as agent_voicetests  # noqa: E402,F401  (stdlib only)

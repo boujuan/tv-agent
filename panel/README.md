@@ -107,6 +107,10 @@ offscreen with the same Python, on a temporary home (nothing real is read, writt
   **Phones:** the phones paired with the agent ([TV Agent phone app](https://github.com/boujuan/tv-agent-phone)),
   their app version (and whether a newer one is out), when each was last seen and from where, rename and revoke (at once); **Pair a phone…** shows a QR code and a
   one-time code (5 minutes) with the certificate fingerprint the app shows when the code is typed in.
+  **Backup:** the last backup of this computer's setup (`tv-agent backup`: settings, keys, pairings, taught commands,
+  voice tests), its size and the space they take, the folder (open, change) and the daily timer (turn it on),
+  **Back up now**, and **Restore…**: a backup, the parts to restore, the files it would write, then a confirmation
+  (what's here is backed up first; the voice agent restarts, not while something plays).
 
 ## Files
 
@@ -119,6 +123,7 @@ offscreen with the same Python, on a temporary home (nothing real is read, writt
 | `tvpanel/tv_card.py`, `speech_tab.py`, `about.py` | Overview's TV card; Decisions › Speech to text; About |
 | `tvpanel/timeline.py` | A recorded command's whole trace in Decisions (stdlib only: tested with the server's tests) |
 | `tvpanel/phones.py` | Settings › Phones: paired phones, pairing with a QR code |
+| `tvpanel/backup_card.py` | Settings › Backup: the last backup, Back up now, Restore… with the dry run |
 | `tvpanel/updates.py` | Settings › Updates: GitHub releases, updating the TV app and this checkout |
 | `tvpanel/mic.py` | The computer's microphone (`pw-record`, end-of-speech detection) |
 | `tvpanel/common.py` | systemd, the agent's API, small widgets, preferences |
