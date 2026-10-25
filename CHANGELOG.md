@@ -4,6 +4,14 @@ One section per component release, newest first; each `## <component> <version>`
 GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions:
 [SemVer](https://semver.org/).
 
+## server — unreleased
+
+### Fixed
+- Intros found in the files, from the first try on the TV: copies with the same chapter list count as one source
+  whatever their release name (FLUX's wrong Pluribus S1E3 credits, 33 s early, and recap had won as two), and a copy
+  outvoted on one marker isn't believed alone on another (its recap was the episode's own opening; its S1E4 credits,
+  35 s early, won a tie). Each copy read is in the search's log line.
+
 ## panel 0.11.0 — 2026-10-25
 
 ### Added
