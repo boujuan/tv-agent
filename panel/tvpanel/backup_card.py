@@ -264,6 +264,8 @@ class RestoreDialog(QDialog):
                f"{res.get('safety')}. Voice agent: {res.get('agent')}.")
         if "config/panel.conf" in restored:
             msg += " Restart the panel for its restored preferences."
+        if agent_backup.PLAYER_SETTINGS in restored:
+            msg += " TV Agent Player gets its settings the next time it opens."
         self.card.note.setText(msg)
         self.card.refresh()
         settings = getattr(self.card.panel, "settings", None)

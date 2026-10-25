@@ -186,6 +186,22 @@ def test_the_dry_run_lists_what_would_change_and_parts_can_be_chosen(home, tmp_p
     assert (home / ".config/tv-agent/learned.json").read_text() == "[]"      # a dry run writes nothing
 
 
+def test_tv_agent_players_settings_go_back_to_it_after_a_restore(home, tmp_path):
+    data = home / ".local/share/tv-agent"
+    (data / "tvplayer-settings.json").write_text('{"values": {"sub_size": 150}}')
+    (data / "tvplayer-settings.restored.json").write_text('{"values": {"sub_size": 50}}')    # an older restore's
+    folder = tmp_path / "backups"
+    res = B.backup(folder=folder)
+    man = json.loads((Path(res["path"]) / "manifest.json").read_text())
+    assert B.PLAYER_SETTINGS in {f["path"] for f in man["files"]}
+    assert "data/tvplayer-settings.restored.json" in {x["path"] for x in man["left_out"]}
+    other = tmp_path / "other"
+    done = B.restore_files(res["name"], home=other, folder=folder)
+    assert B.PLAYER_SETTINGS in done["restored"]
+    assert (other / ".local/share/tv-agent/tvplayer-settings.restored.json").read_text() == \
+        '{"values": {"sub_size": 150}}'                      # for the player's next connection (tv/tvplayer.py)
+
+
 def test_a_damaged_backup_is_not_restored(home, tmp_path):
     folder = tmp_path / "backups"
     res = B.backup(folder=folder)

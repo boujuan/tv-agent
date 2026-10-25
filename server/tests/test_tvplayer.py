@@ -39,13 +39,14 @@ class FakePlayer:
     def __init__(self, port: int, pin: str):
         self.port, self.pin, self.got = port, pin, []
 
-    async def connect(self, token=TOKEN, version=T.PROTOCOL) -> dict:
+    async def connect(self, token=TOKEN, version=T.PROTOCOL, features=()) -> dict:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ctx.check_hostname, ctx.verify_mode = False, ssl.CERT_NONE         # the pin below is the check
         self.reader, self.writer = await asyncio.open_connection("127.0.0.1", self.port, ssl=ctx)
         der = self.writer.get_extra_info("ssl_object").getpeercert(binary_form=True)
         assert hashlib.sha256(der).hexdigest() == self.pin
-        await self.send({"t": "hello", "v": version, "token": token, "app": "0.1.0", "build": 1, "sdk": 34})
+        await self.send({"t": "hello", "v": version, "token": token, "app": "0.1.0", "build": 1, "sdk": 34,
+                         "features": list(features)})
         return await self.read()
 
     async def send(self, msg: dict):
@@ -84,6 +85,39 @@ def test_only_the_paired_player_from_the_tv_gets_in(tls):
         p2, srv2, other = await server(tls, allowed={"192.168.1.40"})       # not from the TV's address
         assert await other.connect() == {} and not p2.up
         srv2.close()
+    asyncio.run(run())
+
+
+def test_the_players_settings_are_kept_and_a_restores_sent_back(tls, tmp_path, monkeypatch):
+    monkeypatch.setattr(T, "SETTINGS", tmp_path / "tvplayer-settings.json")
+    monkeypatch.setattr(T, "RESTORED", tmp_path / "tvplayer-settings.restored.json")
+    now = {"sub_size": 100, "sub_place": 8, "jump_back": 10, "badges": 1}
+
+    async def run():
+        p, srv, fake = await server(tls)
+        await fake.connect(features=["settings"])
+        await fake.send({"t": "settings", "values": now})
+        await asyncio.sleep(0.05)
+        kept = json.loads(T.SETTINGS.read_text())
+        assert kept == {"player": "0.1.0", "values": now}
+        stamp = T.SETTINGS.stat().st_mtime_ns
+        await fake.send({"t": "settings", "values": dict(now)})          # the same again: not written
+        await asyncio.sleep(0.05)
+        assert T.SETTINGS.stat().st_mtime_ns == stamp
+        # A restore left the backup's: sent when a player that has settings connects, then kept as it answers
+        restored = {"sub_size": 150, "sub_place": 12, "jump_back": 30, "badges": 0}
+        T.RESTORED.write_text(json.dumps({"player": "0.1.0", "values": restored}))
+        old = FakePlayer(fake.port, fake.pin)
+        await old.connect()                                               # no `settings`: nothing sent, kept
+        await asyncio.sleep(0.05)
+        assert T.RESTORED.exists()
+        fake2 = FakePlayer(fake.port, fake.pin)
+        await fake2.connect(features=["settings"])
+        cmd = await fake2.answer(values=restored)
+        assert cmd["t"] == "settings" and cmd["values"] == restored
+        await asyncio.sleep(0.05)
+        assert not T.RESTORED.exists() and json.loads(T.SETTINGS.read_text())["values"] == restored
+        srv.close()
     asyncio.run(run())
 
 

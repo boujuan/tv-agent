@@ -18,6 +18,9 @@ GitHub Release notes. Format: [Keep a Changelog](https://keepachangelog.com/en/1
   each file is checked once written. `tv-agent backup list` and `verify` too.
 - `tv-agent setup backups [--to DIR] [--enable]`: the folder (`backup.json`) and a daily timer
   (`tv-agent-backup.timer`, 05:15).
+- TV Agent Player's settings (a player with `settings`, 0.9.1: subtitle look, jump times, held speed, badges) kept
+  as it reports them (`tvplayer-settings.json`), so backups have them; a restore sends them back the next time the
+  player connects.
 
 ### Changed
 - TV Agent Player chooses the subtitles by the audio it picks, before its first frame (a player that says it can:

@@ -517,8 +517,9 @@ asking `GET /v1/quality` sees it, until it's seen.
 
 `tv-agent backup` keeps this computer's setup in a dated folder: settings, API keys and tokens, the phones' and TV
 apps' pairings and the TLS key they pin, taught commands and rules, the voice tests, the nightly check's baselines,
-the history, the Android signing key and its password (the `TV_AGENT_*` lines of `~/.gradle/gradle.properties`), and
-the ADB key the TV trusts. It leaves out what's downloaded or made again: the models, the preview shaders, Just
+the history, TV Agent Player's settings (subtitle look, jump times…: a player with `settings` says them when it
+connects and when one changes), the Android signing key and its password (the `TV_AGENT_*` lines of
+`~/.gradle/gradle.properties`), and the ADB key the TV trusts. It leaves out what's downloaded or made again: the models, the preview shaders, Just
 Player's APK, and `now-playing.json` (it holds a stream link and only matters for 6 hours). Each backup has a
 `manifest.json`: the versions (the agent and its commit, the panel, the TV app, TV Agent Player and the phones, as
 the agent last saw them), every file's size and SHA-256, and what's left out and why.
@@ -543,8 +544,8 @@ tv-agent backup restore 2026-10-25-174501 --only config,data/voice-tests
   agent (refused while something plays or is paused in a player), writes the backup's files where they came from,
   checks each one, and starts the agent again. Parts: `config` (`~/.config/tv-agent`), `data`
   (`~/.local/share/tv-agent`), `adb` (`~/.android`), `gradle` (the signing key's password), or any path in the
-  backup. Files made since the backup are left as they are. The panel's Settings › Backup does the same with a
-  list of the changes and a confirmation.
+  backup. Files made since the backup are left as they are; TV Agent Player gets its restored settings the next
+  time it opens. The panel's Settings › Backup does the same with a list of the changes and a confirmation.
 
 ## HTTP API
 

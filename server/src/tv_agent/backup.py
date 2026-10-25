@@ -52,7 +52,9 @@ LEFT_OUT = {
     "data/models": "the speech and decision models: downloaded again (tv-agent setup stt, scripts/fetch-models.sh)",
     "data/shaders": "made again by the preview pictures the first time they're needed",
     "data/apk-justplayer": "Just Player's APK: downloaded again when it's installed",
+    "data/tvplayer-settings.restored.json": "a restore's TV Agent Player settings, waiting for the player to connect",
 }
+PLAYER_SETTINGS = "data/tvplayer-settings.json"         # TV Agent Player's, as it last said them (tv/tvplayer.py)
 TEMPORARY = re.compile(r".*\.tmp|\..*\.restoring|(tv-agent|kodi)-.*\.apk")   # half-written, downloads in progress
 WHAT = {   # what a part is, for the dry run and the panel (the longest match of a path's start)
     "config/config.toml": "settings", "config/secrets.toml": "API keys and tokens",
@@ -645,6 +647,8 @@ def restore_files(name: str, only: list[str] | None = None, home: Path | None = 
         if _digest(c["path"], dest) != f["sha256"]:
             raise BackupError(f"{c['path']} isn't as in the backup after writing it")
         written.append(c["path"])
+    if PLAYER_SETTINGS in written:     # the player gets them the next time it connects (tv/tvplayer.py's RESTORED)
+        shutil.copyfile(where(PLAYER_SETTINGS, at), at["data"] / "tvplayer-settings.restored.json")
     return {**p, "restored": written}
 
 

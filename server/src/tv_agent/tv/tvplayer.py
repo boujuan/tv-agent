@@ -13,6 +13,10 @@ pictures while ←/→ is held, which this computer makes from the file (thumbs.
 
 Its methods have kodi.py's surface (a player id first, Kodi-shaped track lists), so the agent drives either the
 same way; PID is this player's id where Kodi's is a number.
+
+A player with `settings` says what's set on it (subtitle look, jump times…) when it connects and when one changes:
+kept in SETTINGS, so backups have them. A restore (backup.py) leaves the backup's in RESTORED, sent to the player the
+next time it connects.
 """
 import asyncio
 import base64
@@ -20,11 +24,12 @@ import hmac
 import itertools
 import json
 import logging
+import os
 import secrets
 import time
 from collections.abc import Callable
 
-from ..config import Config, lan_address, tailscale_address
+from ..config import DATA_DIR, Config, lan_address, tailscale_address
 from .adb import Adb
 from .thumbs import ThumbError, Thumbs
 
@@ -37,6 +42,8 @@ PROTOCOL = 1
 MAX_LINE = 4 << 20
 PING_EVERY = 10.0           # the player treats 30 s of silence as a dead connection
 SILENCE = 30.0
+SETTINGS = DATA_DIR / "tvplayer-settings.json"              # the player's settings, as it last said
+RESTORED = DATA_DIR / "tvplayer-settings.restored.json"     # a restore's, for its next connection (backup.py)
 
 
 class PlayerError(RuntimeError):
@@ -126,6 +133,8 @@ class TvPlayer:
             self.connected.set()
             log.info("player %s connected from %s (%s)", self.app, peer,
                      ", ".join(sorted(self.features)) or "no features")
+            if "settings" in self.features and RESTORED.exists():
+                asyncio.create_task(self._send_restored())
             pinger = asyncio.create_task(self._ping(writer))
             try:
                 while True:
@@ -176,6 +185,9 @@ class TvPlayer:
         if t == "thumb_req":
             asyncio.create_task(self._thumb(msg))
             return
+        if t == "settings":
+            self._keep_settings(msg.get("values"))
+            return
         if self.item is None and self._adopt and str(msg.get("item") or "").startswith(self._adopt):
             self.item, self._adopt = msg["item"], None
         if "item" not in msg or msg.get("item") == self.item:
@@ -190,6 +202,42 @@ class TvPlayer:
                 listener(msg)
             except Exception:
                 log.exception("player event listener")
+
+    def _keep_settings(self, values):
+        """The player's settings into SETTINGS, when they're not what it has already."""
+        if not isinstance(values, dict):
+            return
+        values = {str(k): v for k, v in values.items() if isinstance(v, int) and not isinstance(v, bool)}
+        try:
+            if json.loads(SETTINGS.read_text()).get("values") == values:
+                return
+        except (OSError, ValueError, AttributeError):
+            pass
+        try:
+            SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+            tmp = SETTINGS.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"player": self.app, "values": values}, indent=1, sort_keys=True) + "\n")
+            os.replace(tmp, SETTINGS)
+        except OSError as e:
+            log.info("player settings not kept: %s", e)
+
+    async def _send_restored(self):
+        """A restore's settings to the player that just connected; kept for its next connection if it doesn't take
+        them."""
+        try:
+            values = json.loads(RESTORED.read_text())["values"]
+            assert isinstance(values, dict)
+        except (OSError, ValueError, KeyError, TypeError, AssertionError):
+            RESTORED.unlink(missing_ok=True)
+            return
+        try:
+            answer = await self.call("settings", values=values)
+        except (PlayerError, asyncio.TimeoutError, OSError) as e:
+            log.info("player settings from a restore: not taken yet (%s)", e)
+            return
+        RESTORED.unlink(missing_ok=True)
+        self._keep_settings(answer.get("values"))
+        log.info("player settings from a restore: sent")
 
     @property
     def up(self) -> bool:

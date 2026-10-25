@@ -455,7 +455,9 @@ def _backup(args) -> int:
             return 0
         print(f"Restored {len(res['restored'])} files from {res['backup']}, each checked against the backup; "
               f"what was here before is in {res['safety']}. Voice agent: {res['agent']}. "
-              "Restart the panel if it's open, for its preferences.")
+              "Restart the panel if it's open, for its preferences."
+              + (" TV Agent Player gets its settings the next time it opens."
+                 if B.PLAYER_SETTINGS in res["restored"] else ""))
         return 0
     except B.BackupError as e:
         if args.json:
